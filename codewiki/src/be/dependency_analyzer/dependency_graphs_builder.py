@@ -69,19 +69,32 @@ class DependencyGraphBuilder:
         # Get leaf nodes
         leaf_nodes = get_leaf_nodes(graph, components)
 
-        # check if leaf_nodes are in components, only keep the ones that are in components
-        # and type is one of the following: class, interface, struct (or function for C-based projects)
-        
-        # Determine if we should include functions based on available component types
-        available_types = set()
-        for comp in components.values():
-            available_types.add(comp.component_type)
-        
-        # Valid types for leaf nodes - include functions for C-based codebases
-        valid_types = {"class", "interface", "struct"}
-        # If no classes/interfaces/structs are found, include functions
-        if not available_types.intersection(valid_types):
-            valid_types.add("function")
+        # Keep leaf nodes whose component type represents a meaningful code unit.
+        # Primary types: class-like structures from all supported languages.
+        # Secondary types (function/macro/table): only when no primary types exist
+        # in the repo (e.g. pure-C, pure-Bash, pure-CMake, pure-TOML repos).
+        PRIMARY_TYPES = {
+            "class",           # Python, Java, C#, PHP, JavaScript, TypeScript
+            "abstract class",  # PHP, Java
+            "interface",       # Java, C#, TypeScript, Go, PHP
+            "struct",          # C, C++, Go, Rust
+            "enum",            # Rust, PHP, Java, C#, TypeScript
+            "trait",           # Rust, PHP
+            "type",            # Go (type aliases / named types)
+        }
+        SECONDARY_TYPES = {
+            "function",        # Python, C, C++, Bash, CMake, Go
+            "macro",           # CMake, Rust
+            "table",           # TOML top-level tables
+            "table_array",     # TOML arrays of tables
+        }
+
+        available_types = {comp.component_type for comp in components.values()}
+
+        valid_types = PRIMARY_TYPES.copy()
+        # Fall back to secondary types only when no primary types exist at all
+        if not available_types & PRIMARY_TYPES:
+            valid_types |= SECONDARY_TYPES
         
         keep_leaf_nodes = []
         for leaf_node in leaf_nodes:
