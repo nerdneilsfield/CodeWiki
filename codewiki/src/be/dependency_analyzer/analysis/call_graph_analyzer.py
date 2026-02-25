@@ -83,15 +83,23 @@ class CallGraphAnalyzer:
         def traverse(tree):
             if tree["type"] == "file":
                 ext = tree.get("extension", "").lower()
-                if ext in CODE_EXTENSIONS:
-                    name = tree["name"].lower()
+                file_name = tree.get("name", "")
+                # Detect by extension, with special-case for CMakeLists.txt
+                if file_name == "CMakeLists.txt":
+                    language = "cmake"
+                elif ext in CODE_EXTENSIONS:
+                    language = CODE_EXTENSIONS[ext]
+                else:
+                    language = None
+                if language:
+                    name = file_name.lower()
                     if not any(skip in name for skip in []):
                         code_files.append(
                             {
                                 "path": tree["path"],
                                 "name": tree["name"],
                                 "extension": ext,
-                                "language": CODE_EXTENSIONS[ext],
+                                "language": language,
                             }
                         )
             elif tree["type"] == "directory" and tree.get("children"):
@@ -134,6 +142,16 @@ class CallGraphAnalyzer:
                 self._analyze_cpp_file(file_path, content, repo_dir)
             elif language == "php":
                 self._analyze_php_file(file_path, content, repo_dir)
+            elif language == "rust":
+                self._analyze_rust_file(file_path, content, repo_dir)
+            elif language == "go":
+                self._analyze_go_file(file_path, content, repo_dir)
+            elif language == "cmake":
+                self._analyze_cmake_file(file_path, content, repo_dir)
+            elif language == "bash":
+                self._analyze_bash_file(file_path, content, repo_dir)
+            elif language == "toml":
+                self._analyze_toml_file(file_path, content, repo_dir)
             # else:
             #     logger.warning(
             #         f"Unsupported language for call graph analysis: {language} for file {file_path}"
@@ -323,6 +341,88 @@ class CallGraphAnalyzer:
             self.call_relationships.extend(relationships)
         except Exception as e:
             logger.error(f"Failed to analyze PHP file {file_path}: {e}", exc_info=True)
+
+    def _analyze_rust_file(self, file_path: str, content: str, repo_dir: str):
+        """
+        Analyze Rust file using tree-sitter based analyzer.
+
+        Args:
+            file_path: Relative path to the Rust file
+            content: File content string
+            repo_dir: Repository base directory
+        """
+        from codewiki.src.be.dependency_analyzer.analyzers.rust import analyze_rust_file
+
+        try:
+            functions, relationships = analyze_rust_file(file_path, content, repo_path=repo_dir)
+
+            for func in functions:
+                func_id = func.id if func.id else f"{file_path}:{func.name}"
+                self.functions[func_id] = func
+
+            self.call_relationships.extend(relationships)
+        except Exception as e:
+            logger.error(f"Failed to analyze Rust file {file_path}: {e}", exc_info=True)
+
+    def _analyze_go_file(self, file_path: str, content: str, repo_dir: str):
+        """Analyze Go file using tree-sitter based analyzer."""
+        from codewiki.src.be.dependency_analyzer.analyzers.go import analyze_go_file
+
+        try:
+            functions, relationships = analyze_go_file(file_path, content, repo_path=repo_dir)
+
+            for func in functions:
+                func_id = func.id if func.id else f"{file_path}:{func.name}"
+                self.functions[func_id] = func
+
+            self.call_relationships.extend(relationships)
+        except Exception as e:
+            logger.error(f"Failed to analyze Go file {file_path}: {e}", exc_info=True)
+
+    def _analyze_cmake_file(self, file_path: str, content: str, repo_dir: str):
+        """Analyze CMake file using tree-sitter based analyzer."""
+        from codewiki.src.be.dependency_analyzer.analyzers.cmake import analyze_cmake_file
+
+        try:
+            functions, relationships = analyze_cmake_file(file_path, content, repo_path=repo_dir)
+
+            for func in functions:
+                func_id = func.id if func.id else f"{file_path}:{func.name}"
+                self.functions[func_id] = func
+
+            self.call_relationships.extend(relationships)
+        except Exception as e:
+            logger.error(f"Failed to analyze CMake file {file_path}: {e}", exc_info=True)
+
+    def _analyze_bash_file(self, file_path: str, content: str, repo_dir: str):
+        """Analyze Bash/Shell file using tree-sitter based analyzer."""
+        from codewiki.src.be.dependency_analyzer.analyzers.bash import analyze_bash_file
+
+        try:
+            functions, relationships = analyze_bash_file(file_path, content, repo_path=repo_dir)
+
+            for func in functions:
+                func_id = func.id if func.id else f"{file_path}:{func.name}"
+                self.functions[func_id] = func
+
+            self.call_relationships.extend(relationships)
+        except Exception as e:
+            logger.error(f"Failed to analyze Bash file {file_path}: {e}", exc_info=True)
+
+    def _analyze_toml_file(self, file_path: str, content: str, repo_dir: str):
+        """Analyze TOML file — extracts top-level sections as structural nodes."""
+        from codewiki.src.be.dependency_analyzer.analyzers.toml import analyze_toml_file
+
+        try:
+            functions, relationships = analyze_toml_file(file_path, content, repo_path=repo_dir)
+
+            for func in functions:
+                func_id = func.id if func.id else f"{file_path}:{func.name}"
+                self.functions[func_id] = func
+
+            self.call_relationships.extend(relationships)
+        except Exception as e:
+            logger.error(f"Failed to analyze TOML file {file_path}: {e}", exc_info=True)
 
     def _resolve_call_relationships(self):
         """

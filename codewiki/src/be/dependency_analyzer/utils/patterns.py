@@ -199,6 +199,14 @@ CODE_EXTENSIONS = {
     ".kt": "kotlin",
     ".scala": "scala",
     ".cs": "csharp",
+    # CMake (.cmake files; CMakeLists.txt is detected by filename in extract_code_files)
+    ".cmake": "cmake",
+    # Shell
+    ".sh": "bash",
+    ".bash": "bash",
+    ".zsh": "bash",
+    # Config formats (analyzed for structure, not call graphs)
+    ".toml": "toml",
 }
 
 # Entry point file patterns for all supported languages
