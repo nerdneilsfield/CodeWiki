@@ -250,27 +250,37 @@ EXTENSION_TO_LANGUAGE = {
     ".py": "python",
     ".md": "markdown",
     ".sh": "bash",
+    ".bash": "bash",
+    ".zsh": "bash",
     ".json": "json",
     ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
     ".java": "java",
     ".js": "javascript",
-    ".ts": "typescript",
-    ".cpp": "cpp",
-    ".c": "c",
-    ".h": "c",
-    ".hpp": "cpp",
-    ".tsx": "typescript",
-    ".cc": "cpp",
-    ".hpp": "cpp",
-    ".cxx": "cpp",
-    ".jsx": "javascript",
     ".mjs": "javascript",
     ".cjs": "javascript",
     ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".c": "c",
+    ".h": "c",
+    ".hpp": "cpp",
+    ".hxx": "cpp",
     ".cs": "csharp",
     ".php": "php",
     ".phtml": "php",
-    ".inc": "php"
+    ".inc": "php",
+    ".rs": "rust",
+    ".go": "go",
+    ".cmake": "cmake",
+    ".kt": "kotlin",
+    ".swift": "swift",
+    ".rb": "ruby",
+    ".scala": "scala",
 }
 
 
@@ -326,7 +336,9 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
         for component_id in component_ids_in_file:
             core_component_codes += f"- {component_id}\n"
         
-        core_component_codes += f"\n## File Content:\n```{EXTENSION_TO_LANGUAGE['.'+path.split('.')[-1]]}\n"
+        ext = '.' + path.split('.')[-1] if '.' in path else ''
+        lang = EXTENSION_TO_LANGUAGE.get(ext, ext.lstrip('.') or 'text')
+        core_component_codes += f"\n## File Content:\n```{lang}\n"
         
         # Read content of the file using the first component's file path
         try:
