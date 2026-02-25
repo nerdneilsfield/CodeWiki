@@ -249,9 +249,9 @@ class WebRoutes:
             from .visualise_docs import markdown_to_html, get_file_title
             from .templates import DOCS_VIEW_TEMPLATE
             
-            html_content = markdown_to_html(content)
+            html_content = markdown_to_html(content, base_url=f"/static-docs/{job_id}/")
             title = get_file_title(file_path)
-            
+
             context = {
                 "repo_name": repo_url.split("/")[-1],
                 "title": title,

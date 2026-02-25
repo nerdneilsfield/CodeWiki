@@ -65,22 +65,40 @@ def load_module_tree(docs_folder: Path) -> Optional[Dict]:
         return None
 
 
-def _fix_markdown_link_spaces(content: str) -> str:
-    """Percent-encode spaces in markdown link URLs so markdown-it can parse them."""
+def _fix_markdown_links(content: str, base_url: str = None) -> str:
+    """
+    Pre-process markdown link URLs:
+    - Percent-encode spaces so markdown-it can parse them.
+    - When *base_url* is given, rewrite relative .md links (e.g. ``./auth.md``,
+      ``auth.md``) to absolute URLs (e.g. ``/static-docs/{job_id}/auth.md``).
+      External links and anchor-only links are left untouched.
+    """
     import re
-    # Match [text](url) where url is not angle-bracket-wrapped
-    def _encode_url(m):
+
+    def _fix_url(m):
         text, url = m.group(1), m.group(2)
+        # Percent-encode spaces
         if ' ' in url:
             url = url.replace(' ', '%20')
+        # Rewrite relative .md links to absolute URLs
+        if (
+            base_url
+            and url.endswith('.md')
+            and not url.startswith('http')
+            and not url.startswith('/')
+            and not url.startswith('#')
+        ):
+            clean = re.sub(r'^\.{1,2}/', '', url)
+            url = base_url + clean
         return f'[{text}]({url})'
-    return re.sub(r'\[([^\]]*)\]\(([^)]*)\)', _encode_url, content)
+
+    return re.sub(r'\[([^\]]*)\]\(([^)]*)\)', _fix_url, content)
 
 
-def markdown_to_html(content: str) -> str:
+def markdown_to_html(content: str, base_url: str = None) -> str:
     """Convert markdown content to HTML, with special handling for mermaid diagrams."""
-    # Pre-process: fix links whose URLs contain spaces
-    content = _fix_markdown_link_spaces(content)
+    # Pre-process: fix link URLs (spaces + optional absolute-URL rewriting)
+    content = _fix_markdown_links(content, base_url)
 
     # First, convert markdown to HTML
     html = md.render(content)
