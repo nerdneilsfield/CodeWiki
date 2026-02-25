@@ -151,8 +151,16 @@ def cluster_modules(
     """
     potential_core_components, potential_core_components_with_code = format_potential_core_components(leaf_nodes, components)
 
-    if count_tokens(potential_core_components_with_code) <= config.max_token_per_module:
-        logger.debug(f"Skipping clustering for {current_module_name} because the potential core components are too few: {count_tokens(potential_core_components_with_code)} tokens")
+    token_count = count_tokens(potential_core_components_with_code)
+    logger.info(
+        f"Clustering check: {len(leaf_nodes)} leaf node(s), "
+        f"{token_count} tokens (threshold: {config.max_token_per_module})"
+    )
+    if token_count <= config.max_token_per_module:
+        logger.info(
+            f"Skipping clustering — repository fits in a single context window "
+            f"({token_count} ≤ {config.max_token_per_module} tokens)"
+        )
         return {}
 
     prompt = format_cluster_prompt(potential_core_components, current_module_tree, current_module_name)

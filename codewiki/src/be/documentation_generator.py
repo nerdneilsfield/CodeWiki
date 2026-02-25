@@ -179,10 +179,10 @@ class DocumentationGenerator:
 
         module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
         first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
-        module_tree = file_manager.load_json(module_tree_path)
-        first_module_tree = file_manager.load_json(first_module_tree_path)
+        module_tree = file_manager.load_json(module_tree_path) or {}
+        first_module_tree = file_manager.load_json(first_module_tree_path) or {}
 
-        if len(module_tree) == 0:
+        if not module_tree:
             # Small repo that fits in a single context — no parallelism needed
             logger.info("Processing whole repo because repo can fit in the context window")
             repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
@@ -312,18 +312,17 @@ class DocumentationGenerator:
             first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
 
-            # Check if module tree exists
-            if os.path.exists(first_module_tree_path):
+            # Load cached module tree; re-cluster if missing or empty (stale from a small-repo run)
+            cached_tree = file_manager.load_json(first_module_tree_path) if os.path.exists(first_module_tree_path) else None
+            if cached_tree:
                 logger.debug(f"Module tree found at {first_module_tree_path}")
-                module_tree = file_manager.load_json(first_module_tree_path)
-                # Heal any file-path strings that a previous clustering LLM may have
-                # stored instead of proper component IDs.
-                module_tree = heal_module_tree_components(module_tree, components)
+                module_tree = heal_module_tree_components(cached_tree, components)
                 file_manager.save_json(module_tree, first_module_tree_path)
             else:
-                logger.debug(f"Module tree not found at {module_tree_path}, clustering modules")
+                logger.debug(f"Module tree not found or empty at {first_module_tree_path}, clustering modules")
                 module_tree = cluster_modules(leaf_nodes, components, self.config)
-                file_manager.save_json(module_tree, first_module_tree_path)
+                if module_tree:
+                    file_manager.save_json(module_tree, first_module_tree_path)
 
             file_manager.save_json(module_tree, module_tree_path)
 

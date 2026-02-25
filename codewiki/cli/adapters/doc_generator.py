@@ -216,17 +216,28 @@ class CLIDocumentationGenerator:
         module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
         
         try:
-            if os.path.exists(first_module_tree_path):
-                module_tree = file_manager.load_json(first_module_tree_path)
+            cached = file_manager.load_json(first_module_tree_path) if os.path.exists(first_module_tree_path) else None
+            if cached:
+                # Non-empty cache: skip LLM clustering
+                if self.verbose:
+                    self.progress_tracker.update_stage(0.5, "Loading cached module tree...")
+                module_tree = cached
             else:
+                # No cache (or empty cache from a previous failed/small run): re-cluster
+                if self.verbose:
+                    self.progress_tracker.update_stage(0.5, "Clustering modules with LLM...")
                 module_tree = cluster_modules(leaf_nodes, components, backend_config)
-                file_manager.save_json(module_tree, first_module_tree_path)
-            
+                if module_tree:
+                    file_manager.save_json(module_tree, first_module_tree_path)
+
             file_manager.save_json(module_tree, module_tree_path)
             self.job.module_count = len(module_tree)
-            
+
             if self.verbose:
-                self.progress_tracker.update_stage(1.0, f"Created {len(module_tree)} modules")
+                if module_tree:
+                    self.progress_tracker.update_stage(1.0, f"Created {len(module_tree)} top-level modules")
+                else:
+                    self.progress_tracker.update_stage(1.0, "Repository fits in a single context window — no clustering needed")
         except Exception as e:
             raise APIError(f"Module clustering failed: {e}")
         
