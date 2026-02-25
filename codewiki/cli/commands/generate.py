@@ -133,6 +133,12 @@ def parse_patterns(patterns_str: str) -> List[str]:
     help="Maximum depth for hierarchical decomposition (overrides config)",
 )
 @click.option(
+    "--max-concurrent",
+    type=int,
+    default=None,
+    help="Maximum number of modules to process in parallel (overrides config, default: 3)",
+)
+@click.option(
     "--language",
     type=str,
     default=None,
@@ -156,6 +162,7 @@ def generate_command(
     max_token_per_module: Optional[int],
     max_token_per_leaf_module: Optional[int],
     max_depth: Optional[int],
+    max_concurrent: Optional[int],
     language: Optional[str],
 ):
     """
@@ -344,6 +351,8 @@ def generate_command(
             logger.debug(f"Max token/module: {effective_max_token_per_module}")
             logger.debug(f"Max token/leaf module: {effective_max_token_per_leaf}")
             logger.debug(f"Max depth: {effective_max_depth}")
+            effective_max_concurrent = max_concurrent if max_concurrent is not None else config.max_concurrent
+            logger.debug(f"Max concurrent: {effective_max_concurrent}")
         
         # Get agent instructions (merge runtime with persistent)
         agent_instructions_dict = None
@@ -377,6 +386,8 @@ def generate_command(
                 'max_token_per_leaf_module': max_token_per_leaf_module if max_token_per_leaf_module is not None else config.max_token_per_leaf_module,
                 # Max depth setting (runtime override takes precedence)
                 'max_depth': max_depth if max_depth is not None else config.max_depth,
+                # Concurrency
+                'max_concurrent': max_concurrent if max_concurrent is not None else config.max_concurrent,
                 # Output language (runtime override takes precedence)
                 'output_language': language.strip().lower() if language else config.output_language,
             },

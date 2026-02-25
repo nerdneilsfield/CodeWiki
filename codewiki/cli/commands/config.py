@@ -84,6 +84,11 @@ def config_group():
     help="Maximum depth for hierarchical decomposition (default: 2)"
 )
 @click.option(
+    "--max-concurrent",
+    type=int,
+    help="Maximum number of modules processed concurrently (default: 3)"
+)
+@click.option(
     "--language",
     type=str,
     default=None,
@@ -99,6 +104,7 @@ def config_set(
     max_token_per_module: Optional[int],
     max_token_per_leaf_module: Optional[int],
     max_depth: Optional[int],
+    max_concurrent: Optional[int],
     language: Optional[str]
 ):
     """
@@ -134,7 +140,7 @@ def config_set(
     """
     try:
         # Check if at least one option is provided
-        if not any([api_key, base_url, main_model, cluster_model, fallback_model, max_tokens, max_token_per_module, max_token_per_leaf_module, max_depth, language]):
+        if not any([api_key, base_url, main_model, cluster_model, fallback_model, max_tokens, max_token_per_module, max_token_per_leaf_module, max_depth, max_concurrent, language]):
             click.echo("No options provided. Use --help for usage information.")
             sys.exit(EXIT_CONFIG_ERROR)
         
@@ -176,6 +182,11 @@ def config_set(
                 raise ConfigurationError("max_depth must be a positive integer")
             validated_data['max_depth'] = max_depth
 
+        if max_concurrent is not None:
+            if max_concurrent < 1:
+                raise ConfigurationError("max_concurrent must be a positive integer")
+            validated_data['max_concurrent'] = max_concurrent
+
         if language is not None:
             validated_data['output_language'] = language.strip().lower()
 
@@ -193,6 +204,7 @@ def config_set(
             max_token_per_module=validated_data.get('max_token_per_module'),
             max_token_per_leaf_module=validated_data.get('max_token_per_leaf_module'),
             max_depth=validated_data.get('max_depth'),
+            max_concurrent=validated_data.get('max_concurrent'),
             output_language=validated_data.get('output_language'),
         )
         
@@ -245,6 +257,9 @@ def config_set(
         
         if max_depth:
             click.secho(f"✓ Max depth: {max_depth}", fg="green")
+
+        if max_concurrent:
+            click.secho(f"✓ Max concurrent: {max_concurrent}", fg="green")
 
         if language:
             click.secho(f"✓ Output language: {language}", fg="green")
@@ -309,6 +324,7 @@ def config_show(output_json: bool):
                 "max_token_per_module": config.max_token_per_module if config else 36369,
                 "max_token_per_leaf_module": config.max_token_per_leaf_module if config else 16000,
                 "max_depth": config.max_depth if config else 2,
+                "max_concurrent": config.max_concurrent if config else 3,
                 "agent_instructions": config.agent_instructions.to_dict() if config and config.agent_instructions else {},
                 "config_file": str(manager.config_file_path)
             }
@@ -353,6 +369,7 @@ def config_show(output_json: bool):
             click.secho("Decomposition Settings", fg="cyan", bold=True)
             if config:
                 click.echo(f"  Max Depth:               {config.max_depth}")
+                click.echo(f"  Max Concurrent:          {config.max_concurrent}")
             
             click.echo()
             click.secho("Agent Instructions", fg="cyan", bold=True)

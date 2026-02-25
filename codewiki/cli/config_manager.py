@@ -95,6 +95,7 @@ class ConfigManager:
         max_token_per_module: Optional[int] = None,
         max_token_per_leaf_module: Optional[int] = None,
         max_depth: Optional[int] = None,
+        max_concurrent: Optional[int] = None,
         output_language: Optional[str] = None,
     ):
         """
@@ -152,6 +153,8 @@ class ConfigManager:
             self._config.max_token_per_leaf_module = max_token_per_leaf_module
         if max_depth is not None:
             self._config.max_depth = max_depth
+        if max_concurrent is not None:
+            self._config.max_concurrent = max_concurrent
         if output_language is not None:
             self._config.output_language = output_language
         
