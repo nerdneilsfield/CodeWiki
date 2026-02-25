@@ -5,19 +5,31 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.models.openai import OpenAIModelSettings
 from pydantic_ai.models.fallback import FallbackModel
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
+import httpx
 
 from codewiki.src.config import Config
+
+# Long-running LLM calls can take well over the default 5 s httpx timeout.
+_LLM_TIMEOUT = httpx.Timeout(180.0)
+
+
+def _make_provider(config: Config) -> OpenAIProvider:
+    """Create an OpenAIProvider with a 180 s timeout."""
+    return OpenAIProvider(
+        openai_client=AsyncOpenAI(
+            base_url=config.llm_base_url,
+            api_key=config.llm_api_key,
+            timeout=_LLM_TIMEOUT,
+        )
+    )
 
 
 def create_main_model(config: Config) -> OpenAIModel:
     """Create the main LLM model from configuration."""
     return OpenAIModel(
         model_name=config.main_model,
-        provider=OpenAIProvider(
-            base_url=config.llm_base_url,
-            api_key=config.llm_api_key
-        ),
+        provider=_make_provider(config),
         settings=OpenAIModelSettings(
             temperature=0.0,
             max_tokens=config.max_tokens
@@ -29,10 +41,7 @@ def create_fallback_model(config: Config) -> OpenAIModel:
     """Create the fallback LLM model from configuration."""
     return OpenAIModel(
         model_name=config.fallback_model,
-        provider=OpenAIProvider(
-            base_url=config.llm_base_url,
-            api_key=config.llm_api_key
-        ),
+        provider=_make_provider(config),
         settings=OpenAIModelSettings(
             temperature=0.0,
             max_tokens=config.max_tokens
@@ -51,7 +60,8 @@ def create_openai_client(config: Config) -> OpenAI:
     """Create OpenAI client from configuration."""
     return OpenAI(
         base_url=config.llm_base_url,
-        api_key=config.llm_api_key
+        api_key=config.llm_api_key,
+        timeout=_LLM_TIMEOUT,
     )
 
 

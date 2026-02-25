@@ -385,14 +385,16 @@ class StaticHTMLGenerator:
             )
 
             out_path = docs_dir / html_name
-            out_path.write_text(page, encoding="utf-8")
+            # Strip lone surrogates that can appear in LLM-generated content
+            # (e.g. invalid Unicode from source code snippets).
+            out_path.write_bytes(page.encode("utf-8", errors="replace"))
             written.append(html_name)
             logger.info(f"  ✓ {html_name}")
 
             # overview.md → also write index.html
             if stem == "overview":
                 index_path = docs_dir / "index.html"
-                index_path.write_text(page, encoding="utf-8")
+                index_path.write_bytes(page.encode("utf-8", errors="replace"))
                 written.append("index.html")
                 logger.info(f"  ✓ index.html (copy of overview.html)")
 
