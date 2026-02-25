@@ -126,6 +126,12 @@ def parse_patterns(patterns_str: str) -> List[str]:
     default=None,
     help="Maximum depth for hierarchical decomposition (overrides config)",
 )
+@click.option(
+    "--language",
+    type=str,
+    default=None,
+    help="Language for generated documentation (e.g. en, zh, ja). Overrides config.",
+)
 @click.pass_context
 def generate_command(
     ctx,
@@ -142,7 +148,8 @@ def generate_command(
     max_tokens: Optional[int],
     max_token_per_module: Optional[int],
     max_token_per_leaf_module: Optional[int],
-    max_depth: Optional[int]
+    max_depth: Optional[int],
+    language: Optional[str],
 ):
     """
     Generate comprehensive documentation for a code repository.
@@ -359,6 +366,8 @@ def generate_command(
                 'max_token_per_leaf_module': max_token_per_leaf_module if max_token_per_leaf_module is not None else config.max_token_per_leaf_module,
                 # Max depth setting (runtime override takes precedence)
                 'max_depth': max_depth if max_depth is not None else config.max_depth,
+                # Output language (runtime override takes precedence)
+                'output_language': language.strip().lower() if language else config.output_language,
             },
             verbose=verbose,
             generate_html=github_pages

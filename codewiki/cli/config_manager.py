@@ -82,7 +82,7 @@ class ConfigManager:
             raise ConfigurationError(f"Failed to load configuration: {e}")
     
     def save(
-        self, 
+        self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         main_model: Optional[str] = None,
@@ -92,7 +92,8 @@ class ConfigManager:
         max_tokens: Optional[int] = None,
         max_token_per_module: Optional[int] = None,
         max_token_per_leaf_module: Optional[int] = None,
-        max_depth: Optional[int] = None
+        max_depth: Optional[int] = None,
+        output_language: Optional[str] = None,
     ):
         """
         Save configuration to file and keyring.
@@ -149,6 +150,8 @@ class ConfigManager:
             self._config.max_token_per_leaf_module = max_token_per_leaf_module
         if max_depth is not None:
             self._config.max_depth = max_depth
+        if output_language is not None:
+            self._config.output_language = output_language
         
         # Validate configuration (only if base fields are set)
         if self._config.base_url and self._config.main_model and self._config.cluster_model:

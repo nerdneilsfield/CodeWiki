@@ -339,37 +339,98 @@ def format_cluster_prompt(potential_core_components: str, module_tree: dict[str,
         return CLUSTER_MODULE_PROMPT.format(potential_core_components=potential_core_components, module_tree=formatted_module_tree, module_name=module_name)
 
 
-def format_system_prompt(module_name: str, custom_instructions: str = None) -> str:
+LANGUAGE_NAMES = {
+    "en": "English",
+    "zh": "Chinese (Simplified)",
+    "zh-tw": "Chinese (Traditional)",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "fr": "French",
+    "de": "German",
+    "es": "Spanish",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "ar": "Arabic",
+}
+
+
+def _build_language_section(output_language: str) -> str:
+    """Return a language instruction section, or empty string for English."""
+    if not output_language or output_language.lower() == "en":
+        return ""
+    lang_name = LANGUAGE_NAMES.get(output_language.lower(), output_language)
+    return (
+        f"\n\n<OUTPUT_LANGUAGE>\n"
+        f"Write ALL documentation content in {lang_name}. "
+        f"Keep code snippets, file names, identifiers, and technical keywords in their original language.\n"
+        f"</OUTPUT_LANGUAGE>"
+    )
+
+
+def format_system_prompt(module_name: str, custom_instructions: str = None, output_language: str = "en") -> str:
     """
     Format the system prompt with module name and optional custom instructions.
-    
+
     Args:
         module_name: Name of the module to document
         custom_instructions: Optional custom instructions to append
-        
+        output_language: Language code for generated documentation (e.g. "en", "zh")
+
     Returns:
         Formatted system prompt string
     """
     custom_section = ""
     if custom_instructions:
         custom_section = f"\n\n<CUSTOM_INSTRUCTIONS>\n{custom_instructions}\n</CUSTOM_INSTRUCTIONS>"
-    
+    custom_section += _build_language_section(output_language)
+
     return SYSTEM_PROMPT.format(module_name=module_name, custom_instructions=custom_section).strip()
 
 
-def format_leaf_system_prompt(module_name: str, custom_instructions: str = None) -> str:
+def format_leaf_system_prompt(module_name: str, custom_instructions: str = None, output_language: str = "en") -> str:
     """
     Format the leaf system prompt with module name and optional custom instructions.
-    
+
     Args:
         module_name: Name of the module to document
         custom_instructions: Optional custom instructions to append
-        
+        output_language: Language code for generated documentation (e.g. "en", "zh")
+
     Returns:
         Formatted leaf system prompt string
     """
     custom_section = ""
     if custom_instructions:
         custom_section = f"\n\n<CUSTOM_INSTRUCTIONS>\n{custom_instructions}\n</CUSTOM_INSTRUCTIONS>"
-    
+    custom_section += _build_language_section(output_language)
+
     return LEAF_SYSTEM_PROMPT.format(module_name=module_name, custom_instructions=custom_section).strip()
+
+
+def format_overview_prompt(name: str, repo_structure: str, is_repo: bool = True, output_language: str = "en") -> str:
+    """
+    Format the overview prompt for repo or module with optional language instruction.
+
+    Args:
+        name: Repository or module name
+        repo_structure: JSON-formatted structure string
+        is_repo: True for repo-level overview, False for module-level
+        output_language: Language code for generated documentation
+
+    Returns:
+        Formatted prompt string
+    """
+    lang_instruction = ""
+    if output_language and output_language.lower() != "en":
+        lang_name = LANGUAGE_NAMES.get(output_language.lower(), output_language)
+        lang_instruction = f"\nIMPORTANT: Write the overview content in {lang_name}. Keep code, file names, and identifiers in their original language.\n"
+
+    if is_repo:
+        prompt = REPO_OVERVIEW_PROMPT.format(repo_name=name, repo_structure=repo_structure)
+    else:
+        prompt = MODULE_OVERVIEW_PROMPT.format(module_name=name, repo_structure=repo_structure)
+
+    if lang_instruction:
+        prompt = prompt + lang_instruction
+
+    return prompt

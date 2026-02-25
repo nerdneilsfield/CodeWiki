@@ -61,6 +61,8 @@ class Config:
     max_tokens: int = DEFAULT_MAX_TOKENS
     max_token_per_module: int = DEFAULT_MAX_TOKEN_PER_MODULE
     max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE
+    # Output language for generated documentation (e.g. "en", "zh", "ja")
+    output_language: str = "en"
     # Agent instructions for customization
     agent_instructions: Optional[Dict[str, Any]] = None
     
@@ -159,6 +161,7 @@ class Config:
         max_token_per_module: int = DEFAULT_MAX_TOKEN_PER_MODULE,
         max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE,
         max_depth: int = MAX_DEPTH,
+        output_language: str = "en",
         agent_instructions: Optional[Dict[str, Any]] = None
     ) -> 'Config':
         """
@@ -198,5 +201,6 @@ class Config:
             max_tokens=max_tokens,
             max_token_per_module=max_token_per_module,
             max_token_per_leaf_module=max_token_per_leaf_module,
+            output_language=output_language,
             agent_instructions=agent_instructions
         )

@@ -128,6 +128,7 @@ class Configuration:
     max_token_per_module: int = 36369
     max_token_per_leaf_module: int = 16000
     max_depth: int = 2
+    output_language: str = "en"
     agent_instructions: AgentInstructions = field(default_factory=AgentInstructions)
     
     def validate(self):
@@ -153,6 +154,7 @@ class Configuration:
             'max_token_per_module': self.max_token_per_module,
             'max_token_per_leaf_module': self.max_token_per_leaf_module,
             'max_depth': self.max_depth,
+            'output_language': self.output_language,
         }
         if self.agent_instructions and not self.agent_instructions.is_empty():
             result['agent_instructions'] = self.agent_instructions.to_dict()
@@ -183,6 +185,7 @@ class Configuration:
             max_token_per_module=data.get('max_token_per_module', 36369),
             max_token_per_leaf_module=data.get('max_token_per_leaf_module', 16000),
             max_depth=data.get('max_depth', 2),
+            output_language=data.get('output_language', 'en'),
             agent_instructions=agent_instructions,
         )
     
@@ -237,6 +240,7 @@ class Configuration:
             max_token_per_module=self.max_token_per_module,
             max_token_per_leaf_module=self.max_token_per_leaf_module,
             max_depth=self.max_depth,
+            output_language=self.output_language,
             agent_instructions=final_instructions.to_dict() if final_instructions else None
         )
 

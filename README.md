@@ -34,7 +34,7 @@
 
 ```bash
 # Install from source
-pip install git+https://github.com/FSoft-AI4Code/CodeWiki.git
+pip install git+https://github.com/nerdneilsfield/CodeWiki.git
 
 # Verify installation
 codewiki --version
@@ -202,6 +202,36 @@ codewiki config agent --clear
 | `--doc-type` | Documentation style | Standalone option | `api`, `architecture`, `user-guide`, `developer` |
 | `--instructions` | Custom agent instructions | Standalone option | Free-form text |
 
+### Multilingual Documentation
+
+CodeWiki can generate documentation in languages other than English. Use the `--language` flag or set a persistent default via `codewiki config set`.
+
+**Supported language codes** (any IETF/BCP 47 code is accepted; common ones below):
+
+| Code | Language |
+|------|----------|
+| `en` | English (default) |
+| `zh` | Chinese (Simplified) |
+| `zh-tw` | Chinese (Traditional) |
+| `ja` | Japanese |
+| `ko` | Korean |
+| `fr` | French |
+| `de` | German |
+| `es` | Spanish |
+
+```bash
+# Generate documentation in Chinese for this run only
+codewiki generate --language zh
+
+# Set Chinese as the persistent default
+codewiki config set --language zh
+
+# Override the persistent default back to English
+codewiki generate --language en
+```
+
+> **Note:** Code snippets, file names, and identifiers always remain in their original language; only the descriptive prose is translated.
+
 ### Token Settings
 
 CodeWiki allows you to configure maximum token limits for LLM calls. This is useful for:
@@ -232,6 +262,7 @@ codewiki generate --max-tokens 16384 --max-token-per-module 40000 --max-depth 3
 | `--max-token-per-module` | Input tokens threshold for module clustering | 36369 |
 | `--max-token-per-leaf-module` | Input tokens threshold for leaf modules | 16000 |
 | `--max-depth` | Maximum depth for hierarchical decomposition | 2 |
+| `--language` | Language code for generated documentation | `en` |
 
 ### Configuration Storage
 

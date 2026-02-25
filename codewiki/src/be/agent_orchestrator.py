@@ -45,6 +45,7 @@ from codewiki.src.be.prompt_template import (
     format_user_prompt,
     format_system_prompt,
     format_leaf_system_prompt,
+    format_overview_prompt,
 )
 from codewiki.src.be.utils import is_complex_module
 from codewiki.src.config import (
@@ -63,6 +64,7 @@ class AgentOrchestrator:
         self.config = config
         self.fallback_models = create_fallback_models(config)
         self.custom_instructions = config.get_prompt_addition() if config else None
+        self.output_language = config.output_language if config else "en"
     
     def create_agent(self, module_name: str, components: Dict[str, Any], 
                     core_component_ids: List[str]) -> Agent:
@@ -78,7 +80,7 @@ class AgentOrchestrator:
                     str_replace_editor_tool, 
                     generate_sub_module_documentation_tool
                 ],
-                system_prompt=format_system_prompt(module_name, self.custom_instructions),
+                system_prompt=format_system_prompt(module_name, self.custom_instructions, self.output_language),
             )
         else:
             return Agent(
@@ -86,7 +88,7 @@ class AgentOrchestrator:
                 name=module_name,
                 deps_type=CodeWikiDeps,
                 tools=[read_code_components_tool, str_replace_editor_tool],
-                system_prompt=format_leaf_system_prompt(module_name, self.custom_instructions),
+                system_prompt=format_leaf_system_prompt(module_name, self.custom_instructions, self.output_language),
             )
     
     async def process_module(self, module_name: str, components: Dict[str, Node], 
