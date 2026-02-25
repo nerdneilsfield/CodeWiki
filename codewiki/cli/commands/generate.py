@@ -58,6 +58,12 @@ def parse_patterns(patterns_str: str) -> List[str]:
     help="Generate index.html for GitHub Pages deployment",
 )
 @click.option(
+    "--static",
+    "generate_static",
+    is_flag=True,
+    help="Pre-render all markdown files to standalone HTML pages (no runtime JS rendering)",
+)
+@click.option(
     "--no-cache",
     is_flag=True,
     help="Force full regeneration, ignoring cache",
@@ -138,6 +144,7 @@ def generate_command(
     output: str,
     create_branch: bool,
     github_pages: bool,
+    generate_static: bool,
     no_cache: bool,
     include: Optional[str],
     exclude: Optional[str],
@@ -194,6 +201,10 @@ def generate_command(
     \b
     # Override max depth for hierarchical decomposition
     $ codewiki generate --max-depth 3
+
+    \b
+    # Generate pre-rendered static HTML pages (no runtime JS markdown rendering)
+    $ codewiki generate --static
     """
     logger = create_logger(verbose=verbose)
     start_time = time.time()
@@ -370,7 +381,8 @@ def generate_command(
                 'output_language': language.strip().lower() if language else config.output_language,
             },
             verbose=verbose,
-            generate_html=github_pages
+            generate_html=github_pages,
+            generate_static=generate_static,
         )
         
         # Run generation

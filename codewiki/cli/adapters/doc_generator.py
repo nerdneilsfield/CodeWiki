@@ -37,7 +37,8 @@ class CLIDocumentationGenerator:
         output_dir: Path,
         config: Dict[str, Any],
         verbose: bool = False,
-        generate_html: bool = False
+        generate_html: bool = False,
+        generate_static: bool = False,
     ):
         """
         Initialize the CLI documentation generator.
@@ -54,6 +55,7 @@ class CLIDocumentationGenerator:
         self.config = config
         self.verbose = verbose
         self.generate_html = generate_html
+        self.generate_static = generate_static
         self.progress_tracker = ProgressTracker(total_stages=5, verbose=verbose)
         self.job = DocumentationJob()
         
@@ -148,10 +150,12 @@ class CLIDocumentationGenerator:
             # Run backend documentation generation
             asyncio.run(self._run_backend_generation(backend_config))
             
-            # Stage 4: HTML Generation (optional)
+            # Stage 4: HTML Generation (optional — pick one or both)
             if self.generate_html:
                 self._run_html_generation()
-            
+            if self.generate_static:
+                self._run_static_generation()
+
             # Stage 5: Finalization (metadata already created by backend)
             self._finalize_job()
             
@@ -283,6 +287,27 @@ class CLIDocumentationGenerator:
         
         self.progress_tracker.complete_stage()
     
+    def _run_static_generation(self):
+        """Pre-render every .md file to a standalone .html page."""
+        self.progress_tracker.start_stage(4, "Static HTML Generation")
+
+        from codewiki.cli.static_generator import StaticHTMLGenerator
+
+        if self.verbose:
+            self.progress_tracker.update_stage(0.1, "Pre-rendering markdown files...")
+
+        generator = StaticHTMLGenerator()
+        written = generator.generate(self.output_dir)
+
+        for fname in written:
+            if fname not in self.job.files_generated:
+                self.job.files_generated.append(fname)
+
+        if self.verbose:
+            self.progress_tracker.update_stage(1.0, f"Generated {len(written)} HTML files")
+
+        self.progress_tracker.complete_stage()
+
     def _finalize_job(self):
         """Finalize the job (metadata already created by backend)."""
         # Just verify metadata exists

@@ -1,0 +1,399 @@
+"""
+Static HTML generator.
+
+Converts a docs directory (containing .md files + module_tree.json) into
+a fully pre-rendered static website — one .html file per .md file, with
+an inline sidebar, all internal links rewritten to .html, and no runtime
+markdown rendering.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import logging
+from pathlib import Path
+from string import Template
+from typing import Dict, Any, Optional
+
+from codewiki.src.utils import file_manager
+
+logger = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CSS (shared between all pages — inlined so each page is self-contained)
+# Uses the same design language as DOCS_VIEW_TEMPLATE in templates.py
+# ──────────────────────────────────────────────────────────────────────────────
+
+_CSS = """
+:root{
+  --bg:#fff;--bg2:#f8fafc;--bg3:#f1f5f9;--bg-code:#f1f5f9;--bg-pre:#f8fafc;
+  --text:#1e293b;--text2:#475569;--text3:#64748b;
+  --primary:#2563eb;--primary-h:#1d4ed8;--primary-lt:#eff6ff;
+  --border:#e2e8f0;--shadow:rgba(0,0,0,.05);
+  --sb-w:272px;--tb-h:56px;--r:6px;--tr:.18s ease;
+}
+[data-theme=dark]{
+  --bg:#0f172a;--bg2:#1e293b;--bg3:#253047;--bg-code:#1e293b;--bg-pre:#162032;
+  --text:#e2e8f0;--text2:#cbd5e1;--text3:#94a3b8;
+  --primary:#60a5fa;--primary-h:#93c5fd;--primary-lt:#1e3a5f;
+  --border:#334155;--shadow:rgba(0,0,0,.3);
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;font-size:15px;transition:background var(--tr),color var(--tr);}
+a{color:var(--primary);text-decoration:none;}
+a:hover{text-decoration:underline;}
+.tb{position:fixed;top:0;left:0;right:0;height:var(--tb-h);background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;z-index:200;box-shadow:0 1px 4px var(--shadow);}
+.tb-logo{font-size:15px;font-weight:700;color:var(--primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;}
+.tb-logo:hover{opacity:.85;text-decoration:none;}
+.ib{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--text);cursor:pointer;font-size:14px;transition:var(--tr);flex-shrink:0;-webkit-appearance:none;appearance:none;}
+.ib:hover{background:var(--bg3);border-color:var(--primary);}
+.ov{display:none;position:fixed;inset:0;top:var(--tb-h);background:rgba(0,0,0,.45);z-index:150;}
+.ov.on{display:block;}
+.sb{position:fixed;top:var(--tb-h);left:0;width:var(--sb-w);height:calc(100vh - var(--tb-h));background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;z-index:160;transition:transform var(--tr);padding:14px 10px 60px;}
+.sb.off{transform:translateX(calc(-1 * var(--sb-w)));}
+.layout{display:flex;padding-top:var(--tb-h);transition:padding-left var(--tr);}
+.layout.sbon{padding-left:var(--sb-w);}
+.main{flex:1;min-width:0;display:flex;justify-content:center;}
+.cw{width:100%;max-width:1200px;padding:44px 48px;display:flex;gap:44px;align-items:flex-start;}
+article{flex:1;min-width:0;max-width:860px;}
+.toc{width:220px;flex-shrink:0;position:sticky;top:calc(var(--tb-h) + 20px);max-height:calc(100vh - var(--tb-h) - 40px);overflow-y:auto;display:none;}
+@media(min-width:1280px){.toc{display:block;}}
+.toc-h{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.toc ul{list-style:none;}
+.toc li a{font-size:12.5px;color:var(--text3);display:block;padding:3px 0 3px 12px;border-left:2px solid transparent;transition:var(--tr);text-decoration:none;}
+.toc li a:hover{color:var(--primary);}
+.toc li.on a{color:var(--primary);border-left-color:var(--primary);}
+.toc li.h3 a{padding-left:24px;font-size:12px;}
+.nav-meta{font-size:11px;color:var(--text3);line-height:1.6;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);margin-bottom:12px;}
+.nav-meta b{color:var(--text2);}
+.nav-row{display:flex;align-items:center;}
+a.nv{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;padding:6px 10px;border-radius:var(--r);color:var(--text2);font-size:13.5px;transition:var(--tr);text-decoration:none;}
+a.nv:hover{background:var(--bg3);color:var(--primary);}
+a.nv.on{background:var(--primary-lt);color:var(--primary);font-weight:600;}
+.nvcaret{width:24px;height:28px;display:flex;align-items:center;justify-content:center;border:none;background:none;color:var(--text3);cursor:pointer;font-size:12px;border-radius:4px;transition:transform var(--tr);flex-shrink:0;}
+.nvcaret:hover{color:var(--primary);}
+.nvcaret.open{transform:rotate(90deg);}
+.nvsub{overflow:hidden;}
+article h1{font-size:1.9rem;font-weight:700;border-bottom:2px solid var(--border);padding-bottom:.4rem;margin-bottom:1.2rem;line-height:1.3;}
+article h2{font-size:1.45rem;font-weight:600;margin-top:2.2rem;margin-bottom:.7rem;border-bottom:1px solid var(--border);padding-bottom:.2rem;}
+article h3{font-size:1.15rem;font-weight:600;margin-top:1.8rem;margin-bottom:.5rem;}
+article h4{font-size:1rem;font-weight:600;margin-top:1.4rem;margin-bottom:.4rem;}
+article p{margin-bottom:1rem;color:var(--text2);}
+article ul,article ol{margin-bottom:1rem;padding-left:1.6rem;}
+article li{margin-bottom:.3rem;color:var(--text2);}
+article a{color:var(--primary);}
+article a:hover{text-decoration:underline;}
+article code{font-family:'JetBrains Mono',Consolas,monospace;font-size:.82em;background:var(--bg-code);padding:.15em .4em;border-radius:4px;color:var(--text);}
+article pre{background:var(--bg-pre);border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;overflow-x:auto;margin-bottom:1.2rem;}
+article pre code{background:none;padding:0;font-size:.87em;}
+article blockquote{border-left:4px solid var(--primary);padding:.5rem 1rem;margin-bottom:1rem;color:var(--text3);background:var(--primary-lt);border-radius:0 var(--r) var(--r) 0;}
+article table{width:100%;border-collapse:collapse;margin-bottom:1rem;}
+article th,article td{border:1px solid var(--border);padding:.6rem .8rem;text-align:left;}
+article th{background:var(--bg2);font-weight:600;}
+article img{max-width:100%;border-radius:var(--r);}
+.mermaid{margin:1rem 0;}
+#btt{position:fixed;bottom:24px;right:24px;width:40px;height:40px;background:var(--primary);color:#fff;border:none;border-radius:50%;font-size:16px;cursor:pointer;display:none;align-items:center;justify-content:center;box-shadow:0 4px 12px var(--shadow);z-index:100;transition:var(--tr);}
+#btt:hover{background:var(--primary-h);transform:translateY(-2px);}
+#btt.on{display:flex;}
+@media(max-width:767px){.cw{padding:24px 18px;gap:0;}}
+@media(min-width:768px){.sb{transform:none;}.sb.off{transform:translateX(calc(-1 * var(--sb-w)));}}
+""".strip()
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Page template (uses string.Template — $var substitution, no brace escaping)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_PAGE_TEMPLATE = Template("""\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${title}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.9.0/dist/mermaid.min.js"></script>
+<script>(function(){var t=localStorage.getItem('cw-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script>
+<style>
+${css}
+</style>
+</head>
+<body>
+<header class="tb">
+  <button class="ib" id="sb-toggle" title="Toggle sidebar">&#9776;</button>
+  <a href="index.html" class="tb-logo">&#128218; ${repo_name}</a>
+  <button class="ib" id="theme-btn" title="Toggle theme">&#127769;</button>
+</header>
+<div class="ov" id="ov"></div>
+<div class="layout" id="layout">
+  <nav class="sb" id="sb">
+${meta_html}
+${nav_html}
+  </nav>
+  <main class="main">
+    <div class="cw">
+      <article id="mc">
+${content}
+      </article>
+      <div class="toc" id="toc">
+        <div class="toc-h">On this page</div>
+        <ul id="toc-ul"></ul>
+      </div>
+    </div>
+  </main>
+</div>
+<button id="btt" title="Back to top">&#8679;</button>
+<script>
+// Theme
+var html=document.documentElement,themeBtn=document.getElementById('theme-btn');
+function curTheme(){return html.getAttribute('data-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');}
+function setTheme(t){html.setAttribute('data-theme',t);localStorage.setItem('cw-theme',t);themeBtn.textContent=t==='dark'?'\u2600\ufe0f':'\ud83c\udf19';}
+setTheme(curTheme());
+themeBtn.addEventListener('click',function(){setTheme(curTheme()==='dark'?'light':'dark');});
+// Sidebar
+var sb=document.getElementById('sb'),layout=document.getElementById('layout'),ov=document.getElementById('ov');
+function isMob(){return window.innerWidth<768;}
+function sbShow(){sb.classList.remove('off');layout.classList.add('sbon');if(isMob())ov.classList.add('on');}
+function sbHide(){sb.classList.add('off');layout.classList.remove('sbon');ov.classList.remove('on');}
+if(isMob()){sbHide();}else{if(localStorage.getItem('cw-sb')==='off')sbHide();else sbShow();}
+document.getElementById('sb-toggle').addEventListener('click',function(){
+  if(sb.classList.contains('off')){sbShow();if(!isMob())localStorage.setItem('cw-sb','on');}
+  else{sbHide();if(!isMob())localStorage.setItem('cw-sb','off');}
+});
+ov.addEventListener('click',sbHide);
+window.addEventListener('resize',function(){if(!isMob()){ov.classList.remove('on');if(localStorage.getItem('cw-sb')!=='off')sbShow();}else sbHide();});
+// Nav collapse
+document.querySelectorAll('.nvcaret').forEach(function(c){
+  var key=c.getAttribute('data-nav'),sub=document.querySelector('[data-nav-sub="'+key+'"]');
+  if(!sub)return;
+  if(!sub.querySelector('.nv.on')){sub.style.display='none';}else{c.classList.add('open');}
+  c.addEventListener('click',function(){var h=sub.style.display==='none';sub.style.display=h?'':'none';c.classList.toggle('open',h);});
+});
+// TOC
+(function(){
+  var mc=document.getElementById('mc'),ul=document.getElementById('toc-ul'),toc=document.getElementById('toc');
+  if(!mc||!ul)return;
+  var hs=mc.querySelectorAll('h2,h3');
+  if(hs.length<2){if(toc)toc.style.display='none';return;}
+  hs.forEach(function(h,i){
+    if(!h.id)h.id='h-'+i;
+    var li=document.createElement('li');li.className=h.tagName==='H3'?'h3':'';
+    var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;
+    li.appendChild(a);ul.appendChild(li);
+  });
+  var obs=new IntersectionObserver(function(entries){
+    entries.forEach(function(e){var a=ul.querySelector('a[href="#'+e.target.id+'"]');if(a)a.closest('li').classList.toggle('on',e.isIntersecting);});
+  },{rootMargin:'-15% 0% -75% 0%'});
+  hs.forEach(function(h){obs.observe(h);});
+})();
+// Back to top
+var btt=document.getElementById('btt');
+window.addEventListener('scroll',function(){btt.classList.toggle('on',window.scrollY>300);});
+btt.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});
+// Mermaid
+mermaid.initialize({startOnLoad:true,theme:'default',themeVariables:{primaryColor:'#2563eb',lineColor:'#64748b'},flowchart:{htmlLabels:true,curve:'basis'}});
+document.addEventListener('DOMContentLoaded',function(){mermaid.init(undefined,document.querySelectorAll('.mermaid'));});
+</script>
+</body>
+</html>
+""")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _build_nav_html(module_tree: Dict[str, Any], current_html: str, depth: int = 0) -> str:
+    """Recursively build sidebar nav HTML from the module tree."""
+    lines: list[str] = []
+    indent = "  " * (depth + 1)
+
+    for key, data in module_tree.items():
+        href = f"{key}.html"
+        active = ' on' if current_html == href else ''
+        pl = depth * 12
+        nav_key = f"{key}-d{depth}".replace('.', '-').replace('/', '-').replace(' ', '-')
+        children = data.get("children") or {}
+
+        lines.append(f'{indent}<div>')
+        lines.append(f'{indent}  <div class="nav-row" style="padding-left:{pl}px;">')
+        lines.append(
+            f'{indent}    <a href="{href}" class="nv{active}">'
+            f'{key.replace("_", " ").title()}</a>'
+        )
+        if children:
+            lines.append(
+                f'{indent}    <button class="nvcaret" data-nav="{nav_key}" aria-label="Toggle">›</button>'
+            )
+        lines.append(f'{indent}  </div>')
+
+        if children:
+            lines.append(f'{indent}  <div class="nvsub" data-nav-sub="{nav_key}">')
+            lines.append(_build_nav_html(children, current_html, depth + 1))
+            lines.append(f'{indent}  </div>')
+
+        lines.append(f'{indent}</div>')
+
+    return "\n".join(lines)
+
+
+def _build_meta_html(metadata: Optional[Dict[str, Any]]) -> str:
+    if not metadata:
+        return ""
+    gi = metadata.get("generation_info", {})
+    st = metadata.get("statistics", {})
+    parts = []
+    if gi.get("main_model"):
+        parts.append(f"<b>Model:</b> {gi['main_model']}")
+    if gi.get("timestamp"):
+        parts.append(f"<b>Generated:</b> {gi['timestamp'][:16]}")
+    if gi.get("commit_id"):
+        parts.append(f"<b>Commit:</b> {gi['commit_id'][:8]}")
+    if st.get("total_components"):
+        parts.append(f"<b>Components:</b> {st['total_components']}")
+    if not parts:
+        return ""
+    return (
+        '  <div class="nav-meta">\n'
+        + "\n".join(f"    {p}<br>" for p in parts)
+        + "\n  </div>"
+    )
+
+
+def _rewrite_md_to_html_links(html: str) -> str:
+    """Replace href="something.md" with href="something.html" in rendered HTML."""
+    def _replace(m: re.Match) -> str:
+        href = m.group(1)
+        if href.endswith(".md") and not href.startswith("http") and not href.startswith("#"):
+            href = re.sub(r"\.md$", ".html", href)
+        return f'href="{href}"'
+    return re.sub(r'href="([^"]*)"', _replace, html)
+
+
+def _markdown_to_static_html(content: str) -> str:
+    """Convert markdown to HTML for static output (no base_url rewriting needed)."""
+    from codewiki.src.fe.visualise_docs import _fix_markdown_links, md
+
+    # Fix spaces only (no base_url — links will be rewritten to .html afterwards)
+    content = _fix_markdown_links(content)
+    html = md.render(content)
+
+    # Handle mermaid fences
+    import html as html_module
+    mermaid_re = re.compile(r'<pre><code class="language-mermaid">(.*?)</code></pre>', re.DOTALL)
+    def _mermaid(m: re.Match) -> str:
+        code = html_module.unescape(m.group(1))
+        return f'<div class="mermaid">{code}</div>'
+    html = mermaid_re.sub(_mermaid, html)
+
+    # Rewrite .md links to .html
+    html = _rewrite_md_to_html_links(html)
+    return html
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Main generator
+# ──────────────────────────────────────────────────────────────────────────────
+
+class StaticHTMLGenerator:
+    """
+    Generates a fully pre-rendered static website from a docs directory.
+
+    For every ``<module>.md`` file found in *docs_dir* a corresponding
+    ``<module>.html`` is written.  ``overview.md`` additionally produces
+    ``index.html`` (the GitHub Pages root page).
+    """
+
+    def generate(self, docs_dir: Path) -> list[str]:
+        """
+        Generate static HTML files in *docs_dir*.
+
+        Returns a list of filenames that were written.
+        """
+        docs_dir = docs_dir.resolve()
+
+        # Load shared data
+        module_tree: Dict[str, Any] = {}
+        mt_path = docs_dir / "module_tree.json"
+        if mt_path.exists():
+            try:
+                module_tree = file_manager.load_json(mt_path)
+            except Exception as e:
+                logger.warning(f"Could not load module_tree.json: {e}")
+
+        metadata: Optional[Dict[str, Any]] = None
+        meta_path = docs_dir / "metadata.json"
+        if meta_path.exists():
+            try:
+                metadata = file_manager.load_json(meta_path)
+            except Exception as e:
+                logger.warning(f"Could not load metadata.json: {e}")
+
+        repo_name = docs_dir.parent.name or "Docs"
+        meta_html = _build_meta_html(metadata)
+
+        # Collect all .md files
+        md_files = sorted(docs_dir.glob("*.md"))
+        if not md_files:
+            logger.warning(f"No .md files found in {docs_dir}")
+            return []
+
+        written: list[str] = []
+
+        for md_path in md_files:
+            stem = md_path.stem          # e.g. "overview", "auth"
+            html_name = f"{stem}.html"   # e.g. "overview.html"
+
+            # Render markdown → HTML
+            try:
+                md_content = file_manager.load_text(md_path)
+            except Exception as e:
+                logger.warning(f"Skipping {md_path.name}: {e}")
+                continue
+
+            content_html = _markdown_to_static_html(md_content)
+
+            # Extract title from first H1 or fall back to stem
+            title_match = re.search(r"<h1[^>]*>(.*?)</h1>", content_html, re.IGNORECASE | re.DOTALL)
+            title = (
+                re.sub(r"<[^>]+>", "", title_match.group(1)).strip()
+                if title_match
+                else stem.replace("_", " ").title()
+            )
+
+            # Build sidebar for this page
+            nav_html = ""
+            if module_tree:
+                ov_active = ' on' if html_name in ("overview.html", "index.html") else ''
+                nav_html = (
+                    f'  <div class="nav-row">\n'
+                    f'    <a href="index.html" class="nv{ov_active}">Overview</a>\n'
+                    f'  </div>\n'
+                )
+                nav_html += _build_nav_html(module_tree, html_name)
+
+            page = _PAGE_TEMPLATE.substitute(
+                title=title,
+                css=_CSS,
+                repo_name=repo_name,
+                meta_html=meta_html,
+                nav_html=nav_html,
+                content=content_html,
+            )
+
+            out_path = docs_dir / html_name
+            out_path.write_text(page, encoding="utf-8")
+            written.append(html_name)
+            logger.info(f"  ✓ {html_name}")
+
+            # overview.md → also write index.html
+            if stem == "overview":
+                index_path = docs_dir / "index.html"
+                index_path.write_text(page, encoding="utf-8")
+                written.append("index.html")
+                logger.info(f"  ✓ index.html (copy of overview.html)")
+
+        return written
