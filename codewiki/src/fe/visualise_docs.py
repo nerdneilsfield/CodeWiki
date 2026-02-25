@@ -47,8 +47,8 @@ def initialize_globals():
             # The FastAPI endpoints will need to check if DOCS_FOLDER is None
             pass
 
-# Markdown parser
-md = MarkdownIt()
+# Markdown parser — enable table and strikethrough plugins
+md = MarkdownIt().enable("table").enable("strikethrough")
 
 
 def load_module_tree(docs_folder: Path) -> Optional[Dict]:
