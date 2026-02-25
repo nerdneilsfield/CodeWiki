@@ -253,7 +253,7 @@ WEB_INTERFACE_TEMPLATE = """
                 {% for job in recent_jobs %}
                 <div class="job-item">
                     <div class="job-header">
-                        <div class="job-url">{{ job.repo_url }}</div>
+                        <a href="{{ job.repo_url }}" target="_blank" rel="noopener" class="job-url">🔗 {{ job.repo_url }}</a>
                         <div class="job-status status-{{ job.status }}">{{ job.status }}</div>
                     </div>
                     <div class="job-progress">{{ job.progress }}</div>
@@ -263,6 +263,7 @@ WEB_INTERFACE_TEMPLATE = """
                     </div>
                     {% endif %}
                     <div class="job-actions">
+                        <a href="https://deepwiki.com/{{ job.repo_url | replace('https://github.com/', '') }}" target="_blank" rel="noopener" class="btn btn-small">🌐 DeepWiki</a>
                         <a href="/docs/{{ job.job_id }}" class="btn btn-small">View Documentation</a>
                     </div>
                 </div>
@@ -324,357 +325,203 @@ DOCS_VIEW_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }}</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@11.9.0/dist/mermaid.min.js"></script>
-    <style>
-        :root {
-            --primary-color: #2563eb;
-            --secondary-color: #f1f5f9;
-            --text-color: #334155;
-            --border-color: #e2e8f0;
-            --hover-color: #f8fafc;
-        }
-        
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.6;
-            color: var(--text-color);
-            background-color: #ffffff;
-        }
-        
-        .container {
-            display: flex;
-            min-height: 100vh;
-        }
-        
-        .sidebar {
-            width: 300px;
-            background-color: var(--secondary-color);
-            border-right: 1px solid var(--border-color);
-            padding: 20px;
-            overflow-y: auto;
-            position: fixed;
-            height: 100vh;
-        }
-        
-        .content {
-            flex: 1;
-            margin-left: 300px;
-            padding: 40px 60px;
-            max-width: calc(100% - 300px);
-        }
-        
-        .logo {
-            font-size: 24px;
-            font-weight: bold;
-            color: var(--primary-color);
-            margin-bottom: 30px;
-            text-decoration: none;
-        }
-        
-        .nav-section {
-            margin-bottom: 25px;
-        }
-        
-        .nav-section h3 {
-            font-size: 14px;
-            font-weight: 600;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 10px;
-        }
-        
-        .nav-item {
-            display: block;
-            padding: 8px 12px;
-            color: var(--text-color);
-            text-decoration: none;
-            border-radius: 6px;
-            font-size: 14px;
-            transition: all 0.2s ease;
-            margin-bottom: 2px;
-        }
-        
-        .nav-item:hover {
-            background-color: var(--hover-color);
-            color: var(--primary-color);
-        }
-        
-        .nav-item.active {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        
-        .nav-subsection {
-            margin-left: 15px;
-            margin-top: 8px;
-        }
-        
-        .nav-subsection .nav-item {
-            font-size: 13px;
-            color: #64748b;
-        }
-        
-        .nav-section-header {
-            font-size: 14px;
-            font-weight: 600;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 10px;
-            padding: 8px 12px;
-        }
-        
-        /* Nested subsection indentation - scalable for any depth */
-        .nav-subsection .nav-subsection {
-            margin-left: 20px;
-        }
-        
-        .nav-subsection .nav-subsection .nav-item {
-            font-size: 12px;
-        }
-        
-        /* Additional nesting levels */
-        .nav-subsection .nav-subsection .nav-subsection {
-            margin-left: 15px;
-        }
-        
-        .nav-subsection .nav-subsection .nav-subsection .nav-item {
-            font-size: 11px;
-        }
-        
-        .markdown-content {
-            max-width: none;
-        }
-        
-        .markdown-content h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: #1e293b;
-            margin-bottom: 1rem;
-            border-bottom: 2px solid var(--border-color);
-            padding-bottom: 0.5rem;
-        }
-        
-        .markdown-content h2 {
-            font-size: 2rem;
-            font-weight: 600;
-            color: #334155;
-            margin-top: 2rem;
-            margin-bottom: 1rem;
-        }
-        
-        .markdown-content h3 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #475569;
-            margin-top: 1.5rem;
-            margin-bottom: 0.75rem;
-        }
-        
-        .markdown-content p {
-            margin-bottom: 1rem;
-            color: #475569;
-        }
-        
-        .markdown-content ul, .markdown-content ol {
-            margin-bottom: 1rem;
-            padding-left: 1.5rem;
-        }
-        
-        .markdown-content li {
-            margin-bottom: 0.5rem;
-            color: #475569;
-        }
-        
-        .markdown-content code {
-            background-color: #f1f5f9;
-            padding: 0.25rem 0.5rem;
-            border-radius: 0.25rem;
-            font-family: 'Fira Code', 'Consolas', monospace;
-            font-size: 0.875rem;
-        }
-        
-        .markdown-content pre {
-            background-color: #f8fafc;
-            border: 1px solid var(--border-color);
-            border-radius: 0.5rem;
-            padding: 1rem;
-            overflow-x: auto;
-            margin-bottom: 1rem;
-        }
-        
-        .markdown-content pre code {
-            background-color: transparent;
-            padding: 0;
-        }
-        
-        .markdown-content blockquote {
-            border-left: 4px solid var(--primary-color);
-            padding-left: 1rem;
-            margin-bottom: 1rem;
-            font-style: italic;
-            color: #64748b;
-        }
-        
-        .markdown-content table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 1rem;
-        }
-        
-        .markdown-content th, .markdown-content td {
-            border: 1px solid var(--border-color);
-            padding: 0.75rem;
-            text-align: left;
-        }
-        
-        .markdown-content th {
-            background-color: var(--secondary-color);
-            font-weight: 600;
-        }
-        
-        .markdown-content a {
-            color: var(--primary-color);
-            text-decoration: underline;
-        }
-        
-        .markdown-content a:hover {
-            text-decoration: none;
-        }
-        
-        @media (max-width: 768px) {
-            .sidebar {
-                width: 100%;
-                position: relative;
-                height: auto;
-            }
-            
-            .content {
-                margin-left: 0;
-                padding: 20px;
-                max-width: 100%;
-            }
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }} — {{ repo_name }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.9.0/dist/mermaid.min.js"></script>
+<script>(function(){var t=localStorage.getItem('cw-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script>
+<style>
+:root{
+  --bg:#fff;--bg2:#f8fafc;--bg3:#f1f5f9;--bg-code:#f1f5f9;--bg-pre:#f8fafc;
+  --text:#1e293b;--text2:#475569;--text3:#64748b;
+  --primary:#2563eb;--primary-h:#1d4ed8;--primary-lt:#eff6ff;
+  --border:#e2e8f0;--shadow:rgba(0,0,0,.05);
+  --sb-w:272px;--tb-h:56px;--r:6px;--tr:.18s ease;
+}
+[data-theme=dark]{
+  --bg:#0f172a;--bg2:#1e293b;--bg3:#253047;--bg-code:#1e293b;--bg-pre:#162032;
+  --text:#e2e8f0;--text2:#cbd5e1;--text3:#94a3b8;
+  --primary:#60a5fa;--primary-h:#93c5fd;--primary-lt:#1e3a5f;
+  --border:#334155;--shadow:rgba(0,0,0,.3);
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;font-size:15px;transition:background var(--tr),color var(--tr);}
+a{color:var(--primary);text-decoration:none;}
+a:hover{text-decoration:underline;}
+/* topbar */
+.tb{position:fixed;top:0;left:0;right:0;height:var(--tb-h);background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;z-index:200;box-shadow:0 1px 4px var(--shadow);}
+.tb-logo{font-size:15px;font-weight:700;color:var(--primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;}
+.tb-logo:hover{opacity:.85;text-decoration:none;}
+.ib{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--text);cursor:pointer;font-size:14px;transition:var(--tr);flex-shrink:0;-webkit-appearance:none;appearance:none;}
+.ib:hover{background:var(--bg3);border-color:var(--primary);}
+/* overlay */
+.ov{display:none;position:fixed;inset:0;top:var(--tb-h);background:rgba(0,0,0,.45);z-index:150;}
+.ov.on{display:block;}
+/* sidebar */
+.sb{position:fixed;top:var(--tb-h);left:0;width:var(--sb-w);height:calc(100vh - var(--tb-h));background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;z-index:160;transition:transform var(--tr);padding:14px 10px 60px;}
+.sb.off{transform:translateX(calc(-1 * var(--sb-w)));}
+/* layout */
+.layout{display:flex;padding-top:var(--tb-h);transition:padding-left var(--tr);}
+.layout.sbon{padding-left:var(--sb-w);}
+/* main */
+.main{flex:1;min-width:0;display:flex;justify-content:center;}
+.cw{width:100%;max-width:1200px;padding:44px 48px;display:flex;gap:44px;align-items:flex-start;}
+article{flex:1;min-width:0;max-width:860px;}
+/* toc */
+.toc{width:220px;flex-shrink:0;position:sticky;top:calc(var(--tb-h) + 20px);max-height:calc(100vh - var(--tb-h) - 40px);overflow-y:auto;display:none;}
+@media(min-width:1280px){.toc{display:block;}}
+.toc-h{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.toc ul{list-style:none;}
+.toc li a{font-size:12.5px;color:var(--text3);display:block;padding:3px 0 3px 12px;border-left:2px solid transparent;transition:var(--tr);text-decoration:none;}
+.toc li a:hover{color:var(--primary);}
+.toc li.on a{color:var(--primary);border-left-color:var(--primary);}
+.toc li.h3 a{padding-left:24px;font-size:12px;}
+/* nav */
+.nav-meta{font-size:11px;color:var(--text3);line-height:1.6;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);margin-bottom:12px;}
+.nav-meta b{color:var(--text2);}
+.nav-row{display:flex;align-items:center;}
+a.nv{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;padding:6px 10px;border-radius:var(--r);color:var(--text2);font-size:13.5px;transition:var(--tr);text-decoration:none;}
+a.nv:hover{background:var(--bg3);color:var(--primary);}
+a.nv.on{background:var(--primary-lt);color:var(--primary);font-weight:600;}
+.nvcaret{width:24px;height:28px;display:flex;align-items:center;justify-content:center;border:none;background:none;color:var(--text3);cursor:pointer;font-size:12px;border-radius:4px;transition:transform var(--tr);flex-shrink:0;}
+.nvcaret:hover{color:var(--primary);}
+.nvcaret.open{transform:rotate(90deg);}
+.nvsub{overflow:hidden;}
+/* markdown */
+article h1{font-size:1.9rem;font-weight:700;border-bottom:2px solid var(--border);padding-bottom:.4rem;margin-bottom:1.2rem;line-height:1.3;}
+article h2{font-size:1.45rem;font-weight:600;margin-top:2.2rem;margin-bottom:.7rem;border-bottom:1px solid var(--border);padding-bottom:.2rem;}
+article h3{font-size:1.15rem;font-weight:600;margin-top:1.8rem;margin-bottom:.5rem;}
+article h4{font-size:1rem;font-weight:600;margin-top:1.4rem;margin-bottom:.4rem;}
+article p{margin-bottom:1rem;color:var(--text2);}
+article ul,article ol{margin-bottom:1rem;padding-left:1.6rem;}
+article li{margin-bottom:.3rem;color:var(--text2);}
+article a{color:var(--primary);}
+article a:hover{text-decoration:underline;}
+article code{font-family:'JetBrains Mono',Consolas,monospace;font-size:.82em;background:var(--bg-code);padding:.15em .4em;border-radius:4px;color:var(--text);}
+article pre{background:var(--bg-pre);border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;overflow-x:auto;margin-bottom:1.2rem;}
+article pre code{background:none;padding:0;font-size:.87em;}
+article blockquote{border-left:4px solid var(--primary);padding:.5rem 1rem;margin-bottom:1rem;color:var(--text3);background:var(--primary-lt);border-radius:0 var(--r) var(--r) 0;}
+article table{width:100%;border-collapse:collapse;margin-bottom:1rem;}
+article th,article td{border:1px solid var(--border);padding:.6rem .8rem;text-align:left;}
+article th{background:var(--bg2);font-weight:600;}
+article img{max-width:100%;border-radius:var(--r);}
+.mermaid{margin:1rem 0;}
+/* back to top */
+#btt{position:fixed;bottom:24px;right:24px;width:40px;height:40px;background:var(--primary);color:#fff;border:none;border-radius:50%;font-size:16px;cursor:pointer;display:none;align-items:center;justify-content:center;box-shadow:0 4px 12px var(--shadow);z-index:100;transition:var(--tr);}
+#btt:hover{background:var(--primary-h);transform:translateY(-2px);}
+#btt.on{display:flex;}
+/* responsive */
+@media(max-width:767px){.cw{padding:24px 18px;gap:0;}}
+@media(min-width:768px){.sb{transform:none;}.sb.off{transform:translateX(calc(-1 * var(--sb-w)));}}
+</style>
 </head>
 <body>
-    <div class="container">
-        <nav class="sidebar">
-            <a href="/static-docs/{{ job_id }}/overview.md" class="logo">📚 {{ repo_name }}</a>
-            
-            {% if metadata and metadata.generation_info %}
-            <div style="margin: 20px 0; padding: 15px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
-                <h4 style="margin: 0 0 10px 0; font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Generation Info</h4>
-                <div style="font-size: 11px; color: #475569; line-height: 1.4;">
-                    <div style="margin-bottom: 4px;"><strong>Model:</strong> {{ metadata.generation_info.main_model }}</div>
-                    <div style="margin-bottom: 4px;"><strong>Generated:</strong> {{ metadata.generation_info.timestamp[:16] }}</div>
-                    {% if metadata.generation_info.commit_id %}
-                    <div style="margin-bottom: 4px;"><strong>Commit:</strong> {{ metadata.generation_info.commit_id[:8] }}</div>
-                    {% endif %}
-                    {% if metadata.statistics %}
-                    <div><strong>Components:</strong> {{ metadata.statistics.total_components }}</div>
-                    {% endif %}
-                </div>
-            </div>
-            {% endif %}
-            
-            {% if navigation %}
-            <div class="nav-section">
-                <a href="/static-docs/{{ job_id }}/overview.md" class="nav-item {% if current_page == 'overview.md' %}active{% endif %}">
-                    Overview
-                </a>
-            </div>
-            
-            {% macro render_nav_item(key, data, depth=0) %}
-                {% set indent_class = 'nav-subsection' if depth > 0 else '' %}
-                {% set indent_style = 'margin-left: ' + (depth * 15)|string + 'px;' if depth > 0 else '' %}
-                <div class="{{ indent_class }}" {% if indent_style %}style="{{ indent_style }}"{% endif %}>
-                    {% if data.components %}
-                        <a href="/static-docs/{{ job_id }}/{{ key }}.md" class="nav-item {% if current_page == key + '.md' %}active{% endif %}">
-                            {{ key.replace('_', ' ').title() }}
-                        </a>
-                    {% else %}
-                        <div class="nav-section-header" {% if depth > 0 %}style="font-size: {{ 14 - (depth * 1) }}px; text-transform: none;"{% endif %}>
-                            {{ key.replace('_', ' ').title() }}
-                        </div>
-                    {% endif %}
-                    
-                    {% if data.children %}
-                        {% for child_key, child_data in data.children.items() %}
-                            {{ render_nav_item(child_key, child_data, depth + 1) }}
-                        {% endfor %}
-                    {% endif %}
-                </div>
-            {% endmacro %}
-            
-            {% for section_key, section_data in navigation.items() %}
-            <div class="nav-section">
-                {{ render_nav_item(section_key, section_data) }}
-            </div>
-            {% endfor %}
-            {% endif %}
-        </nav>
-        
-        <main class="content">
-            <div class="markdown-content">
-                {{ content | safe }}
-            </div>
-        </main>
+<header class="tb">
+  <button class="ib" id="sb-toggle" title="Toggle sidebar">☰</button>
+  <a href="/static-docs/{{ job_id }}/overview.md" class="tb-logo">📚 {{ repo_name }}</a>
+  <a href="/" class="ib" title="CodeWiki Home">🏠</a>
+  <button class="ib" id="theme-btn" title="Toggle theme">🌙</button>
+</header>
+<div class="ov" id="ov"></div>
+<div class="layout" id="layout">
+  <nav class="sb" id="sb">
+    {% if metadata and metadata.generation_info %}
+    <div class="nav-meta">
+      {% if metadata.generation_info.main_model %}<b>Model:</b> {{ metadata.generation_info.main_model }}<br>{% endif %}
+      {% if metadata.generation_info.timestamp %}<b>Generated:</b> {{ metadata.generation_info.timestamp[:16] }}<br>{% endif %}
+      {% if metadata.generation_info.commit_id %}<b>Commit:</b> {{ metadata.generation_info.commit_id[:8] }}<br>{% endif %}
+      {% if metadata.statistics and metadata.statistics.total_components %}<b>Components:</b> {{ metadata.statistics.total_components }}{% endif %}
     </div>
-    
-    <script>
-        // Initialize mermaid with configuration
-        mermaid.initialize({
-            startOnLoad: true,
-            theme: 'default',
-            themeVariables: {
-                primaryColor: '#2563eb',
-                primaryTextColor: '#334155',
-                primaryBorderColor: '#e2e8f0',
-                lineColor: '#64748b',
-                sectionBkgColor: '#f8fafc',
-                altSectionBkgColor: '#f1f5f9',
-                gridColor: '#e2e8f0',
-                secondaryColor: '#f1f5f9',
-                tertiaryColor: '#f8fafc'
-            },
-            flowchart: {
-                htmlLabels: true,
-                curve: 'basis'
-            },
-            sequence: {
-                diagramMarginX: 50,
-                diagramMarginY: 10,
-                actorMargin: 50,
-                width: 150,
-                height: 65,
-                boxMargin: 10,
-                boxTextMargin: 5,
-                noteMargin: 10,
-                messageMargin: 35,
-                mirrorActors: true,
-                bottomMarginAdj: 1,
-                useMaxWidth: true,
-                rightAngles: false,
-                showSequenceNumbers: false
-            }
-        });
-        
-        // Re-render mermaid diagrams after page load
-        document.addEventListener('DOMContentLoaded', function() {
-            mermaid.init(undefined, document.querySelectorAll('.mermaid'));
-        });
-    </script>
+    {% endif %}
+    {% if navigation %}
+    <div class="nav-row">
+      <a href="/static-docs/{{ job_id }}/overview.md" class="nv {% if current_page == 'overview.md' %}on{% endif %}">Overview</a>
+    </div>
+    {% macro render_nav_item(key, data, depth=0) %}
+      {% set has_ch = data.children and data.children|length > 0 %}
+      {% set nk = (key ~ '-d' ~ depth) | replace('/', '-') | replace('.', '-') | replace(' ', '-') %}
+      <div>
+        <div class="nav-row" style="padding-left:{{ depth * 12 }}px;">
+          <a href="/static-docs/{{ job_id }}/{{ key }}.md"
+             class="nv {% if current_page == key + '.md' %}on{% endif %}">{{ key.replace('_', ' ').title() }}</a>
+          {% if has_ch %}<button class="nvcaret" data-nav="{{ nk }}" aria-label="Toggle">›</button>{% endif %}
+        </div>
+        {% if has_ch %}
+        <div class="nvsub" data-nav-sub="{{ nk }}">
+          {% for ck, cd in data.children.items() %}{{ render_nav_item(ck, cd, depth + 1) }}{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    {% endmacro %}
+    {% for sk, sd in navigation.items() %}{{ render_nav_item(sk, sd) }}{% endfor %}
+    {% endif %}
+  </nav>
+  <main class="main">
+    <div class="cw">
+      <article id="mc">{{ content | safe }}</article>
+      <div class="toc" id="toc">
+        <div class="toc-h">On this page</div>
+        <ul id="toc-ul"></ul>
+      </div>
+    </div>
+  </main>
+</div>
+<button id="btt" title="Back to top">↑</button>
+<script>
+// Theme
+var html=document.documentElement,themeBtn=document.getElementById('theme-btn');
+function curTheme(){return html.getAttribute('data-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');}
+function setTheme(t){html.setAttribute('data-theme',t);localStorage.setItem('cw-theme',t);themeBtn.textContent=t==='dark'?'☀️':'🌙';}
+setTheme(curTheme());
+themeBtn.addEventListener('click',function(){setTheme(curTheme()==='dark'?'light':'dark');});
+// Sidebar
+var sb=document.getElementById('sb'),layout=document.getElementById('layout'),ov=document.getElementById('ov');
+function isMob(){return window.innerWidth<768;}
+function sbShow(){sb.classList.remove('off');layout.classList.add('sbon');if(isMob())ov.classList.add('on');}
+function sbHide(){sb.classList.add('off');layout.classList.remove('sbon');ov.classList.remove('on');}
+if(isMob()){sbHide();}else{if(localStorage.getItem('cw-sb')==='off')sbHide();else sbShow();}
+document.getElementById('sb-toggle').addEventListener('click',function(){
+  if(sb.classList.contains('off')){sbShow();if(!isMob())localStorage.setItem('cw-sb','on');}
+  else{sbHide();if(!isMob())localStorage.setItem('cw-sb','off');}
+});
+ov.addEventListener('click',sbHide);
+window.addEventListener('resize',function(){if(!isMob()){ov.classList.remove('on');if(localStorage.getItem('cw-sb')!=='off')sbShow();}else sbHide();});
+// Nav collapse
+document.querySelectorAll('.nvcaret').forEach(function(c){
+  var key=c.getAttribute('data-nav'),sub=document.querySelector('[data-nav-sub="'+key+'"]');
+  if(!sub)return;
+  if(!sub.querySelector('.nv.on')){sub.style.display='none';}else{c.classList.add('open');}
+  c.addEventListener('click',function(){var h=sub.style.display==='none';sub.style.display=h?'':'none';c.classList.toggle('open',h);});
+});
+// TOC
+(function(){
+  var mc=document.getElementById('mc'),ul=document.getElementById('toc-ul'),toc=document.getElementById('toc');
+  if(!mc||!ul)return;
+  var hs=mc.querySelectorAll('h2,h3');
+  if(hs.length<2){if(toc)toc.style.display='none';return;}
+  hs.forEach(function(h,i){
+    if(!h.id)h.id='h-'+i;
+    var li=document.createElement('li');li.className=h.tagName==='H3'?'h3':'';
+    var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;
+    li.appendChild(a);ul.appendChild(li);
+  });
+  var obs=new IntersectionObserver(function(entries){
+    entries.forEach(function(e){var a=ul.querySelector('a[href="#'+e.target.id+'"]');if(a)a.closest('li').classList.toggle('on',e.isIntersecting);});
+  },{rootMargin:'-15% 0% -75% 0%'});
+  hs.forEach(function(h){obs.observe(h);});
+})();
+// Back to top
+var btt=document.getElementById('btt');
+window.addEventListener('scroll',function(){btt.classList.toggle('on',window.scrollY>300);});
+btt.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});
+// Mermaid
+mermaid.initialize({startOnLoad:true,theme:'default',themeVariables:{primaryColor:'#2563eb',lineColor:'#64748b'},flowchart:{htmlLabels:true,curve:'basis'}});
+document.addEventListener('DOMContentLoaded',function(){mermaid.init(undefined,document.querySelectorAll('.mermaid'));});
+</script>
 </body>
 </html>
 """
