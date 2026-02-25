@@ -206,16 +206,13 @@ class DocumentationGenerator:
         module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
         module_tree = file_manager.load_json(module_tree_path)
 
-        # check if overview docs already exists
-        overview_docs_path = os.path.join(working_dir, OVERVIEW_FILENAME)
-        if os.path.exists(overview_docs_path):
-            logger.info(f"✓ Overview docs already exists at {overview_docs_path}")
-            return module_tree
-
-        # check if parent docs already exists and has content
-        parent_docs_path = os.path.join(working_dir, f"{module_name if len(module_path) >= 1 else OVERVIEW_FILENAME.replace('.md', '')}.md")
-        if os.path.exists(parent_docs_path) and os.path.getsize(parent_docs_path) > 100:
-            logger.info(f"✓ Parent docs already exists at {parent_docs_path}")
+        # skip if this module's doc already exists and has real content
+        if len(module_path) == 0:
+            output_path = os.path.join(working_dir, OVERVIEW_FILENAME)
+        else:
+            output_path = os.path.join(working_dir, f"{module_name}.md")
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 100:
+            logger.info(f"✓ Docs already exists at {output_path}")
             return module_tree
 
         # Create repo structure with 1-depth children docs and target indicator

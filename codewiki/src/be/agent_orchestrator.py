@@ -51,7 +51,6 @@ from codewiki.src.be.utils import is_complex_module
 from codewiki.src.config import (
     Config,
     MODULE_TREE_FILENAME,
-    OVERVIEW_FILENAME,
 )
 from codewiki.src.utils import file_manager
 from codewiki.src.be.dependency_analyzer.models.core import Node
@@ -118,13 +117,7 @@ class AgentOrchestrator:
             custom_instructions=self.custom_instructions
         )
 
-        # check if overview docs already exists
-        overview_docs_path = os.path.join(working_dir, OVERVIEW_FILENAME)
-        if os.path.exists(overview_docs_path):
-            logger.info(f"✓ Overview docs already exists at {overview_docs_path}")
-            return module_tree
-
-        # check if module docs already exists and has content
+        # skip if this module's doc already exists and has real content
         docs_path = os.path.join(working_dir, f"{module_name}.md")
         if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
             logger.info(f"✓ Module docs already exists at {docs_path}")
