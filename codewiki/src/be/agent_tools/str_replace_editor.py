@@ -541,6 +541,10 @@ class EditTool:
         old_str = old_str.expandtabs()
         new_str = new_str.expandtabs() if new_str is not None else ""
 
+        if not old_str:
+            self.logs.append("No replacement was performed, old_str cannot be empty.")
+            return
+
         # Check if old_str is unique in the file
         occurrences = file_content.count(old_str)
         if occurrences == 0:

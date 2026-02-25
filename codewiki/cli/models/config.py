@@ -149,6 +149,7 @@ class Configuration:
             'base_url': self.base_url,
             'main_model': self.main_model,
             'cluster_model': self.cluster_model,
+            'fallback_model': self.fallback_model,
             'default_output': self.default_output,
             'max_tokens': self.max_tokens,
             'max_token_per_module': self.max_token_per_module,
