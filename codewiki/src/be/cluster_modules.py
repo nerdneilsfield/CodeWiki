@@ -1,14 +1,22 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
+import difflib
 import logging
 import traceback
-logger = logging.getLogger(__name__)
 
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.utils import count_tokens
 from codewiki.src.config import Config
 from codewiki.src.be.prompt_template import format_cluster_prompt
+
+logger = logging.getLogger(__name__)
+
+
+def _fuzzy_match_component(name: str, components: Dict) -> Optional[str]:
+    """Try to find a close match for a component name that wasn't found exactly."""
+    matches = difflib.get_close_matches(name, components.keys(), n=1, cutoff=0.85)
+    return matches[0] if matches else None
 
 
 def format_potential_core_components(leaf_nodes: List[str], components: Dict[str, Node]) -> tuple[str, str]:
@@ -21,7 +29,12 @@ def format_potential_core_components(leaf_nodes: List[str], components: Dict[str
         if leaf_node in components:
             valid_leaf_nodes.append(leaf_node)
         else:
-            logger.warning(f"Skipping invalid leaf node '{leaf_node}' - not found in components")
+            match = _fuzzy_match_component(leaf_node, components)
+            if match:
+                logger.debug(f"Fuzzy-corrected leaf node '{leaf_node}' → '{match}'")
+                valid_leaf_nodes.append(match)
+            else:
+                logger.warning(f"Skipping invalid leaf node '{leaf_node}' - not found in components")
     
     #group leaf nodes by file
     leaf_nodes_by_file = defaultdict(list)
@@ -103,7 +116,12 @@ def cluster_modules(
             if node in components:
                 valid_sub_leaf_nodes.append(node)
             else:
-                logger.warning(f"Skipping invalid sub leaf node '{node}' in module '{module_name}' - not found in components")
+                match = _fuzzy_match_component(node, components)
+                if match:
+                    logger.debug(f"Fuzzy-corrected sub leaf node '{node}' → '{match}' in module '{module_name}'")
+                    valid_sub_leaf_nodes.append(match)
+                else:
+                    logger.warning(f"Skipping invalid sub leaf node '{node}' in module '{module_name}' - not found in components")
         
         current_module_path.append(module_name)
         module_info["children"] = {}
