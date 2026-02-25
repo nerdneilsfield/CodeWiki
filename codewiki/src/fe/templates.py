@@ -423,8 +423,8 @@ article img{max-width:100%;border-radius:var(--r);}
 <header class="tb">
   <button class="ib" id="sb-toggle" title="Toggle sidebar">☰</button>
   <a href="/static-docs/{{ job_id }}/overview.md" class="tb-logo">📚 {{ repo_name }}</a>
-  <a href="/" class="ib" title="CodeWiki Home">🏠</a>
-  <button class="ib" id="theme-btn" title="Toggle theme">🌙</button>
+  <a href="/" class="ib" title="CodeWiki Home">&#127968;</a>
+  <button class="ib" id="theme-btn" title="Toggle theme">&#127769;</button>
 </header>
 <div class="ov" id="ov"></div>
 <div class="layout" id="layout">
@@ -434,7 +434,15 @@ article img{max-width:100%;border-radius:var(--r);}
       {% if metadata.generation_info.main_model %}<b>Model:</b> {{ metadata.generation_info.main_model }}<br>{% endif %}
       {% if metadata.generation_info.timestamp %}<b>Generated:</b> {{ metadata.generation_info.timestamp[:16] }}<br>{% endif %}
       {% if metadata.generation_info.commit_id %}<b>Commit:</b> {{ metadata.generation_info.commit_id[:8] }}<br>{% endif %}
-      {% if metadata.statistics and metadata.statistics.total_components %}<b>Components:</b> {{ metadata.statistics.total_components }}{% endif %}
+      {% if metadata.statistics and metadata.statistics.total_components %}<b>Components:</b> {{ metadata.statistics.total_components }}<br>{% endif %}
+      {% if metadata.generation_info.repo_url %}
+      <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">
+        <a href="{{ metadata.generation_info.repo_url }}" target="_blank" rel="noopener">&#128279; Repository</a>
+        {% if 'github.com' in metadata.generation_info.repo_url %}
+        <a href="https://deepwiki.com/{{ metadata.generation_info.repo_url.split('github.com/')[-1] }}" target="_blank" rel="noopener">&#127760; DeepWiki</a>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
     {% endif %}
     {% if navigation %}
@@ -475,7 +483,7 @@ article img{max-width:100%;border-radius:var(--r);}
 // Theme
 var html=document.documentElement,themeBtn=document.getElementById('theme-btn');
 function curTheme(){return html.getAttribute('data-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');}
-function setTheme(t){html.setAttribute('data-theme',t);localStorage.setItem('cw-theme',t);themeBtn.textContent=t==='dark'?'☀️':'🌙';}
+function setTheme(t){html.setAttribute('data-theme',t);localStorage.setItem('cw-theme',t);themeBtn.innerHTML=t==='dark'?'&#9728;&#65039;':'&#127769;';}
 setTheme(curTheme());
 themeBtn.addEventListener('click',function(){setTheme(curTheme()==='dark'?'light':'dark');});
 // Sidebar
@@ -490,11 +498,11 @@ document.getElementById('sb-toggle').addEventListener('click',function(){
 });
 ov.addEventListener('click',sbHide);
 window.addEventListener('resize',function(){if(!isMob()){ov.classList.remove('on');if(localStorage.getItem('cw-sb')!=='off')sbShow();}else sbHide();});
-// Nav collapse
+// Nav collapse — hierarchy visible by default; caret toggles manual collapse
 document.querySelectorAll('.nvcaret').forEach(function(c){
   var key=c.getAttribute('data-nav'),sub=document.querySelector('[data-nav-sub="'+key+'"]');
   if(!sub)return;
-  if(!sub.querySelector('.nv.on')){sub.style.display='none';}else{c.classList.add('open');}
+  c.classList.add('open');
   c.addEventListener('click',function(){var h=sub.style.display==='none';sub.style.display=h?'':'none';c.classList.toggle('open',h);});
 });
 // TOC

@@ -150,7 +150,7 @@ ${content}
 // Theme
 var html=document.documentElement,themeBtn=document.getElementById('theme-btn');
 function curTheme(){return html.getAttribute('data-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');}
-function setTheme(t){html.setAttribute('data-theme',t);localStorage.setItem('cw-theme',t);themeBtn.textContent=t==='dark'?'\u2600\ufe0f':'\ud83c\udf19';}
+function setTheme(t){html.setAttribute('data-theme',t);localStorage.setItem('cw-theme',t);themeBtn.innerHTML=t==='dark'?'&#9728;&#65039;':'&#127769;';}
 setTheme(curTheme());
 themeBtn.addEventListener('click',function(){setTheme(curTheme()==='dark'?'light':'dark');});
 // Sidebar
@@ -165,11 +165,11 @@ document.getElementById('sb-toggle').addEventListener('click',function(){
 });
 ov.addEventListener('click',sbHide);
 window.addEventListener('resize',function(){if(!isMob()){ov.classList.remove('on');if(localStorage.getItem('cw-sb')!=='off')sbShow();}else sbHide();});
-// Nav collapse
+// Nav collapse — hierarchy visible by default; caret toggles manual collapse
 document.querySelectorAll('.nvcaret').forEach(function(c){
   var key=c.getAttribute('data-nav'),sub=document.querySelector('[data-nav-sub="'+key+'"]');
   if(!sub)return;
-  if(!sub.querySelector('.nv.on')){sub.style.display='none';}else{c.classList.add('open');}
+  c.classList.add('open');
   c.addEventListener('click',function(){var h=sub.style.display==='none';sub.style.display=h?'':'none';c.classList.toggle('open',h);});
 });
 // TOC
@@ -271,13 +271,33 @@ def _build_meta_html(metadata: Optional[Dict[str, Any]]) -> str:
         parts.append(f"<b>Commit:</b> {gi['commit_id'][:8]}")
     if st.get("total_components"):
         parts.append(f"<b>Components:</b> {st['total_components']}")
-    if not parts:
+
+    # External links: repo URL + DeepWiki
+    link_parts = []
+    repo_url = gi.get("repo_url")
+    if repo_url:
+        link_parts.append(
+            f'<a href="{repo_url}" target="_blank" rel="noopener">'
+            f'&#128279; Repository</a>'
+        )
+        if 'github.com' in repo_url:
+            slug = repo_url.split('github.com/')[-1]
+            link_parts.append(
+                f'<a href="https://deepwiki.com/{slug}" target="_blank" rel="noopener">'
+                f'&#127760; DeepWiki</a>'
+            )
+
+    if not parts and not link_parts:
         return ""
-    return (
-        '  <div class="nav-meta">\n'
-        + "\n".join(f"    {p}<br>" for p in parts)
-        + "\n  </div>"
-    )
+
+    body = "\n".join(f"    {p}<br>" for p in parts)
+    if link_parts:
+        body += (
+            '\n    <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">'
+            + "".join(link_parts)
+            + "</div>"
+        )
+    return '  <div class="nav-meta">\n' + body + "\n  </div>"
 
 
 def _rewrite_md_to_html_links(html: str) -> str:

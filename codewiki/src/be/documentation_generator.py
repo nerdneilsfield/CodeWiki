@@ -37,16 +37,37 @@ class DocumentationGenerator:
         self.graph_builder = DependencyGraphBuilder(config)
         self.agent_orchestrator = AgentOrchestrator(config)
 
+    @staticmethod
+    def _detect_repo_url(repo_path: str) -> Optional[str]:
+        """Try to detect the GitHub/remote URL from git config."""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['git', 'remote', 'get-url', 'origin'],
+                cwd=repo_path, capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                url = result.stdout.strip()
+                if url.startswith('git@github.com:'):
+                    url = url.replace('git@github.com:', 'https://github.com/')
+                url = url.rstrip('/').removesuffix('.git')
+                return url
+        except Exception:
+            pass
+        return None
+
     def create_documentation_metadata(self, working_dir: str, components: Dict[str, Any], num_leaf_nodes: int):
         """Create a metadata file with documentation generation information."""
         from datetime import datetime
 
+        repo_url = self._detect_repo_url(self.config.repo_path)
         metadata = {
             "generation_info": {
                 "timestamp": datetime.now().isoformat(),
                 "main_model": self.config.main_model,
                 "generator_version": "1.0.1",
                 "repo_path": self.config.repo_path,
+                "repo_url": repo_url,
                 "commit_id": self.commit_id
             },
             "statistics": {
