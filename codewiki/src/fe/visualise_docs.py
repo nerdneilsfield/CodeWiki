@@ -34,7 +34,7 @@ MODULE_TREE = None
 def initialize_globals():
     """Initialize global variables from environment or command line args if not already set."""
     global DOCS_FOLDER, MODULE_TREE
-    
+
     if DOCS_FOLDER is None:
         # Try to get from environment variable or use a default
         import os
@@ -160,11 +160,11 @@ async def index():
             "title": title,
             "content": html_content,
             "navigation": MODULE_TREE,
-            "current_page": "overview.md"
+            "current_page": "overview.md",
         }
-        
+
         return HTMLResponse(content=render_template(DOCS_VIEW_TEMPLATE, context))
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading overview.md: {e}")
 
@@ -205,9 +205,9 @@ async def serve_doc(filename: str):
             "title": title,
             "content": html_content,
             "navigation": MODULE_TREE,
-            "current_page": filename
+            "current_page": filename,
         }
-        
+
         return HTMLResponse(content=render_template(DOCS_VIEW_TEMPLATE, context))
         
     except Exception as e:
@@ -246,7 +246,7 @@ def main():
         action="store_true",
         help="Run the server in debug mode"
     )
-    
+
     args = parser.parse_args()
     
     # Validate docs folder
@@ -268,7 +268,7 @@ def main():
     global DOCS_FOLDER, MODULE_TREE
     DOCS_FOLDER = str(docs_folder.resolve())
     MODULE_TREE = load_module_tree(docs_folder)
-    
+
     # Set environment variable so uvicorn reload can pick it up
     import os
     os.environ['DOCS_FOLDER'] = DOCS_FOLDER

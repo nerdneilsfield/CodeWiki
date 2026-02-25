@@ -423,7 +423,7 @@ article img{max-width:100%;border-radius:var(--r);}
 <header class="tb">
   <button class="ib" id="sb-toggle" title="Toggle sidebar">☰</button>
   <a href="/static-docs/{{ job_id }}/overview.md" class="tb-logo">📚 {{ repo_name }}</a>
-  <a href="/" class="ib" title="CodeWiki Home">&#127968;</a>
+  <a href="/" id="site-home-btn" class="ib" title="Back to main site">&#127968;</a>
   <button class="ib" id="theme-btn" title="Toggle theme">&#127769;</button>
 </header>
 <div class="ov" id="ov"></div>
@@ -480,6 +480,8 @@ article img{max-width:100%;border-radius:var(--r);}
 </div>
 <button id="btt" title="Back to top">↑</button>
 <script>
+// Site home button — navigate to the origin root regardless of subpath
+document.getElementById('site-home-btn').href = window.location.origin + '/';
 // Theme
 var html=document.documentElement,themeBtn=document.getElementById('theme-btn');
 function curTheme(){return html.getAttribute('data-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');}
