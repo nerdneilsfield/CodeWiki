@@ -37,6 +37,9 @@ DEFAULT_IGNORE_PATTERNS = {
     ".pnpm-store",
     "bun.lock",
     "bun.lockb",
+    # Rust
+    "target",
+    "Cargo.lock",
     # Java
     "*.class",
     "*.jar",
