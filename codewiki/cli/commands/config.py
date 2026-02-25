@@ -203,7 +203,11 @@ def config_set(
                 click.secho("✓ API key saved to system keychain", fg="green")
             else:
                 click.secho(
-                    "⚠️  System keychain unavailable. API key stored in encrypted file.",
+                    f"⚠  System keychain unavailable. API key saved to {manager.config_file_path} (plaintext).",
+                    fg="yellow"
+                )
+                click.secho(
+                    "   Ensure this file has restricted permissions: chmod 600 " + str(manager.config_file_path),
                     fg="yellow"
                 )
         

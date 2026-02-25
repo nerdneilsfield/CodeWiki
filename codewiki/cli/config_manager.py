@@ -45,7 +45,7 @@ class ConfigManager:
             # Try to get/set a test value
             keyring.get_password(KEYRING_SERVICE, "__test__")
             return True
-        except KeyringError:
+        except Exception:
             return False
     
     def load(self) -> bool:
@@ -69,13 +69,15 @@ class ConfigManager:
                 pass
             
             self._config = Configuration.from_dict(data)
-            
-            # Load API key from keyring
+
+            # Load API key: try keyring first, fallback to config file
             try:
                 self._api_key = keyring.get_password(KEYRING_SERVICE, KEYRING_API_KEY_ACCOUNT)
-            except KeyringError:
-                # Keyring unavailable, API key will be None
-                pass
+            except Exception:
+                self._keyring_available = False
+
+            if self._api_key is None:
+                self._api_key = data.get("api_key")
             
             return True
         except (json.JSONDecodeError, FileSystemError) as e:
@@ -157,23 +159,22 @@ class ConfigManager:
         if self._config.base_url and self._config.main_model and self._config.cluster_model:
             self._config.validate()
         
-        # Save API key to keyring
+        # Save API key to keyring, fallback to config file
         if api_key is not None:
             self._api_key = api_key
-            try:
-                keyring.set_password(KEYRING_SERVICE, KEYRING_API_KEY_ACCOUNT, api_key)
-            except KeyringError as e:
-                # Fallback: warn about keyring unavailability
-                raise ConfigurationError(
-                    f"System keychain unavailable: {e}\n"
-                    f"Please ensure your system keychain is properly configured."
-                )
-        
-        # Save non-sensitive config to JSON
+            if self._keyring_available:
+                try:
+                    keyring.set_password(KEYRING_SERVICE, KEYRING_API_KEY_ACCOUNT, api_key)
+                except Exception:
+                    self._keyring_available = False
+
+        # Save non-sensitive config to JSON (api_key included if keyring unavailable)
         config_data = {
             "version": CONFIG_VERSION,
             **self._config.to_dict()
         }
+        if not self._keyring_available and self._api_key is not None:
+            config_data["api_key"] = self._api_key
         
         try:
             safe_write(CONFIG_FILE, json.dumps(config_data, indent=2))
@@ -190,7 +191,7 @@ class ConfigManager:
         if self._api_key is None:
             try:
                 self._api_key = keyring.get_password(KEYRING_SERVICE, KEYRING_API_KEY_ACCOUNT)
-            except KeyringError:
+            except Exception:
                 pass
         
         return self._api_key
@@ -226,7 +227,7 @@ class ConfigManager:
         try:
             keyring.delete_password(KEYRING_SERVICE, KEYRING_API_KEY_ACCOUNT)
             self._api_key = None
-        except KeyringError:
+        except Exception:
             pass
     
     def clear(self):
