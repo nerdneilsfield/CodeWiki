@@ -65,8 +65,23 @@ def load_module_tree(docs_folder: Path) -> Optional[Dict]:
         return None
 
 
+def _fix_markdown_link_spaces(content: str) -> str:
+    """Percent-encode spaces in markdown link URLs so markdown-it can parse them."""
+    import re
+    # Match [text](url) where url is not angle-bracket-wrapped
+    def _encode_url(m):
+        text, url = m.group(1), m.group(2)
+        if ' ' in url:
+            url = url.replace(' ', '%20')
+        return f'[{text}]({url})'
+    return re.sub(r'\[([^\]]*)\]\(([^)]*)\)', _encode_url, content)
+
+
 def markdown_to_html(content: str) -> str:
     """Convert markdown content to HTML, with special handling for mermaid diagrams."""
+    # Pre-process: fix links whose URLs contain spaces
+    content = _fix_markdown_link_spaces(content)
+
     # First, convert markdown to HTML
     html = md.render(content)
     
