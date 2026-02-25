@@ -293,34 +293,34 @@ class AnalysisService:
 
         return result
 
+    # Single source of truth for all supported languages
+    SUPPORTED_LANGUAGES = {
+        "python",
+        "javascript",
+        "typescript",
+        "java",
+        "csharp",
+        "c",
+        "cpp",
+        "php",
+        "go",
+        "rust",
+        "bash",
+        "cmake",
+        "toml",
+    }
+
     def _filter_supported_languages(self, code_files: List[Dict]) -> List[Dict]:
-        """
-        Filter code files to only include supported languages.
-
-        Supports Python, JavaScript, TypeScript, Java, C#, C, C++, PHP, Go, and Rust.
-        """
-        supported_languages = {
-            "python",
-            "javascript",
-            "typescript",
-            "java",
-            "csharp",
-            "c",
-            "cpp",
-            "php",
-            "go",
-            "rust",
-        }
-
+        """Filter code files to only include supported languages."""
         return [
             file_info
             for file_info in code_files
-            if file_info.get("language") in supported_languages
+            if file_info.get("language") in self.SUPPORTED_LANGUAGES
         ]
 
     def _get_supported_languages(self) -> List[str]:
         """Get list of currently supported languages for analysis."""
-        return ["python", "javascript", "typescript", "java", "csharp", "c", "cpp", "php"]
+        return sorted(self.SUPPORTED_LANGUAGES)
 
     def _cleanup_repository(self, temp_dir: str):
         """Clean up cloned repository."""
