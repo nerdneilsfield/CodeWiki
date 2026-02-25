@@ -157,8 +157,12 @@ Here is list of all potential core components of the repository (It's normal tha
 {potential_core_components}
 </POTENTIAL_CORE_COMPONENTS>
 
+Each entry is structured as:
+  File: <source file path>        ← for context only, NOT a component name
+    Component: <component_id>     ← this is the actual component name to use
+
 Please group the components into groups such that each group is a set of components that are closely related to each other and together they form a module. DO NOT include components that are not essential to the repository.
-IMPORTANT: Use the component names EXACTLY as listed above. Do not modify, abbreviate, or paraphrase any component name.
+IMPORTANT: Use the component identifiers (the dotted paths after "Component:") EXACTLY as listed. Do NOT use the file paths (lines starting with "File:") as component names.
 Firstly reason about the components and then group them and return the result in the following format:
 <GROUPED_COMPONENTS>
 {{
@@ -195,8 +199,12 @@ Here is list of all potential core components of the module {module_name} (It's 
 {potential_core_components}
 </POTENTIAL_CORE_COMPONENTS>
 
+Each entry is structured as:
+  File: <source file path>        ← for context only, NOT a component name
+    Component: <component_id>     ← this is the actual component name to use
+
 Please group the components into groups such that each group is a set of components that are closely related to each other and together they form a smaller module. DO NOT include components that are not essential to the module.
-IMPORTANT: Use the component names EXACTLY as listed above. Do not modify, abbreviate, or paraphrase any component name.
+IMPORTANT: Use the component identifiers (the dotted paths after "Component:") EXACTLY as listed. Do NOT use the file paths (lines starting with "File:") as component names.
 
 Firstly reason based on given context and then group them and return the result in the following format:
 <GROUPED_COMPONENTS>

@@ -14,7 +14,7 @@ from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.prompt_template import (
     format_overview_prompt,
 )
-from codewiki.src.be.cluster_modules import cluster_modules
+from codewiki.src.be.cluster_modules import cluster_modules, heal_module_tree_components
 from codewiki.src.config import (
     Config,
     FIRST_MODULE_TREE_FILENAME,
@@ -212,9 +212,9 @@ class DocumentationGenerator:
             logger.info(f"✓ Overview docs already exists at {overview_docs_path}")
             return module_tree
 
-        # check if parent docs already exists
+        # check if parent docs already exists and has content
         parent_docs_path = os.path.join(working_dir, f"{module_name if len(module_path) >= 1 else OVERVIEW_FILENAME.replace('.md', '')}.md")
-        if os.path.exists(parent_docs_path):
+        if os.path.exists(parent_docs_path) and os.path.getsize(parent_docs_path) > 100:
             logger.info(f"✓ Parent docs already exists at {parent_docs_path}")
             return module_tree
 
@@ -264,11 +264,15 @@ class DocumentationGenerator:
             if os.path.exists(first_module_tree_path):
                 logger.debug(f"Module tree found at {first_module_tree_path}")
                 module_tree = file_manager.load_json(first_module_tree_path)
+                # Heal any file-path strings that a previous clustering LLM may have
+                # stored instead of proper component IDs.
+                module_tree = heal_module_tree_components(module_tree, components)
+                file_manager.save_json(module_tree, first_module_tree_path)
             else:
                 logger.debug(f"Module tree not found at {module_tree_path}, clustering modules")
                 module_tree = cluster_modules(leaf_nodes, components, self.config)
                 file_manager.save_json(module_tree, first_module_tree_path)
-            
+
             file_manager.save_json(module_tree, module_tree_path)
             
             logger.debug(f"Grouped components into {len(module_tree)} modules")

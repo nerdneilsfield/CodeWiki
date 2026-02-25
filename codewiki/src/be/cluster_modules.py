@@ -19,39 +19,123 @@ def _fuzzy_match_component(name: str, components: Dict) -> Optional[str]:
     return matches[0] if matches else None
 
 
+def _build_path_index(components: Dict[str, Node]) -> Dict[str, List[str]]:
+    """Build a reverse index from relative_path to component IDs."""
+    index: Dict[str, List[str]] = defaultdict(list)
+    for comp_id, node in components.items():
+        norm_path = node.relative_path.replace("\\", "/")
+        index[norm_path].append(comp_id)
+    return dict(index)
+
+
+def _resolve_leaf_node(
+    leaf_node: str,
+    components: Dict[str, Node],
+    path_index: Dict[str, List[str]],
+) -> List[str]:
+    """
+    Resolve a single leaf node string to a list of valid component IDs.
+
+    Handles three cases:
+    1. Exact match in components dict — returns [leaf_node].
+    2. Close fuzzy match — returns the matched ID.
+    3. The LLM returned a file path instead of a component ID — expands to
+       all components belonging to that file.
+    Returns an empty list when the node cannot be resolved at all.
+    """
+    if leaf_node in components:
+        return [leaf_node]
+
+    match = _fuzzy_match_component(leaf_node, components)
+    if match:
+        logger.debug(f"Fuzzy-corrected leaf node '{leaf_node}' → '{match}'")
+        return [match]
+
+    # LLM returned a file path — expand to all components in that file
+    normalized = leaf_node.replace("\\", "/")
+    file_components = path_index.get(normalized, [])
+    if file_components:
+        logger.debug(
+            f"Resolved file path '{leaf_node}' to {len(file_components)} component(s)"
+        )
+        return file_components
+
+    logger.warning(f"Skipping invalid leaf node '{leaf_node}' - not found in components")
+    return []
+
+
+def _filter_and_resolve_nodes(
+    leaf_nodes: List[str],
+    components: Dict[str, Node],
+    path_index: Dict[str, List[str]],
+) -> List[str]:
+    """Resolve and deduplicate a list of raw leaf node strings."""
+    seen: set = set()
+    result: List[str] = []
+    for raw in leaf_nodes:
+        for resolved in _resolve_leaf_node(raw, components, path_index):
+            if resolved not in seen:
+                seen.add(resolved)
+                result.append(resolved)
+    return result
+
+
 def format_potential_core_components(leaf_nodes: List[str], components: Dict[str, Node]) -> tuple[str, str]:
     """
     Format the potential core components into a string that can be used in the prompt.
+
+    The output uses an explicit ``File: / Component:`` format so LLMs are less
+    likely to confuse file paths with component identifiers.
     """
-    # Filter out any invalid leaf nodes that don't exist in components
-    valid_leaf_nodes = []
-    for leaf_node in leaf_nodes:
-        if leaf_node in components:
-            valid_leaf_nodes.append(leaf_node)
-        else:
-            match = _fuzzy_match_component(leaf_node, components)
-            if match:
-                logger.debug(f"Fuzzy-corrected leaf node '{leaf_node}' → '{match}'")
-                valid_leaf_nodes.append(match)
-            else:
-                logger.warning(f"Skipping invalid leaf node '{leaf_node}' - not found in components")
-    
-    #group leaf nodes by file
-    leaf_nodes_by_file = defaultdict(list)
+    path_index = _build_path_index(components)
+    valid_leaf_nodes = _filter_and_resolve_nodes(leaf_nodes, components, path_index)
+
+    # Group by file
+    leaf_nodes_by_file: Dict[str, List[str]] = defaultdict(list)
     for leaf_node in valid_leaf_nodes:
         leaf_nodes_by_file[components[leaf_node].relative_path].append(leaf_node)
 
     potential_core_components = ""
     potential_core_components_with_code = ""
-    for file, leaf_nodes in dict(sorted(leaf_nodes_by_file.items())).items():
-        potential_core_components += f"# {file}\n"
+    for file, nodes_in_file in dict(sorted(leaf_nodes_by_file.items())).items():
+        # Use a distinct prefix so LLMs don't confuse the file path with a component name
+        potential_core_components += f"File: {file}\n"
         potential_core_components_with_code += f"# {file}\n"
-        for leaf_node in leaf_nodes:
-            potential_core_components += f"\t{leaf_node}\n"
+        for leaf_node in nodes_in_file:
+            potential_core_components += f"  Component: {leaf_node}\n"
             potential_core_components_with_code += f"\t{leaf_node}\n"
             potential_core_components_with_code += f"{components[leaf_node].source_code}\n"
 
     return potential_core_components, potential_core_components_with_code
+
+
+def heal_module_tree_components(
+    module_tree: Dict[str, Any],
+    components: Dict[str, Node],
+) -> Dict[str, Any]:
+    """
+    Walk a saved module tree and resolve any file-path strings stored in
+    ``components`` lists back to actual component IDs.
+
+    This repairs trees produced by an earlier run where the clustering LLM
+    returned file paths instead of component IDs.  The tree is modified
+    in-place and also returned for convenience.
+    """
+    path_index = _build_path_index(components)
+
+    def _heal(subtree: Dict[str, Any]) -> None:
+        for module_info in subtree.values():
+            raw_components = module_info.get("components", [])
+            if raw_components:
+                module_info["components"] = _filter_and_resolve_nodes(
+                    raw_components, components, path_index
+                )
+            children = module_info.get("children")
+            if isinstance(children, dict) and children:
+                _heal(children)
+
+    _heal(module_tree)
+    return module_tree
 
 
 def cluster_modules(
@@ -107,21 +191,11 @@ def cluster_modules(
             del module_info["path"]
             value[module_name] = module_info
 
+    path_index = _build_path_index(components)
     for module_name, module_info in module_tree.items():
         sub_leaf_nodes = module_info.get("components", [])
-        
-        # Filter sub_leaf_nodes to ensure they exist in components
-        valid_sub_leaf_nodes = []
-        for node in sub_leaf_nodes:
-            if node in components:
-                valid_sub_leaf_nodes.append(node)
-            else:
-                match = _fuzzy_match_component(node, components)
-                if match:
-                    logger.debug(f"Fuzzy-corrected sub leaf node '{node}' → '{match}' in module '{module_name}'")
-                    valid_sub_leaf_nodes.append(match)
-                else:
-                    logger.warning(f"Skipping invalid sub leaf node '{node}' in module '{module_name}' - not found in components")
+
+        valid_sub_leaf_nodes = _filter_and_resolve_nodes(sub_leaf_nodes, components, path_index)
         
         current_module_path.append(module_name)
         module_info["children"] = {}

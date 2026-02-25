@@ -1,3 +1,4 @@
+import os
 from pydantic_ai import RunContext, Tool, Agent
 
 from codewiki.src.be.agent_tools.deps import CodeWikiDeps
@@ -7,6 +8,8 @@ from codewiki.src.be.llm_services import create_fallback_models
 from codewiki.src.be.prompt_template import format_system_prompt, format_leaf_system_prompt, format_user_prompt
 from codewiki.src.be.utils import is_complex_module, count_tokens
 from codewiki.src.be.cluster_modules import format_potential_core_components
+from codewiki.src.config import MODULE_TREE_FILENAME
+from codewiki.src.utils import file_manager
 
 import logging
 logger = logging.getLogger(__name__)
@@ -35,6 +38,11 @@ async def generate_sub_module_documentation(
         value = value[key]["children"]
     for sub_module_name, core_component_ids in sub_module_specs.items():
         value[sub_module_name] = {"components": core_component_ids, "children": {}}
+
+    # Persist the updated tree immediately so the sidebar stays accurate even if
+    # the agent fails later (after sub-module .md files have already been created).
+    module_tree_path = os.path.join(deps.absolute_docs_path, MODULE_TREE_FILENAME)
+    file_manager.save_json(deps.module_tree, module_tree_path)
     
     for sub_module_name, core_component_ids in sub_module_specs.items():
 

@@ -124,9 +124,9 @@ class AgentOrchestrator:
             logger.info(f"✓ Overview docs already exists at {overview_docs_path}")
             return module_tree
 
-        # check if module docs already exists
+        # check if module docs already exists and has content
         docs_path = os.path.join(working_dir, f"{module_name}.md")
-        if os.path.exists(docs_path):
+        if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
             logger.info(f"✓ Module docs already exists at {docs_path}")
             return module_tree
         
