@@ -1,7 +1,9 @@
+import asyncio
 import logging
 import os
 import json
-from typing import Dict, List, Any
+from collections import defaultdict
+from typing import Dict, List, Any, Optional
 from copy import deepcopy
 import traceback
 
@@ -23,21 +25,22 @@ from codewiki.src.config import (
 )
 from codewiki.src.utils import file_manager
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
+from codewiki.src.be.module_tree_manager import ModuleTreeManager
 
 
 class DocumentationGenerator:
     """Main documentation generation orchestrator."""
-    
+
     def __init__(self, config: Config, commit_id: str = None):
         self.config = config
         self.commit_id = commit_id
         self.graph_builder = DependencyGraphBuilder(config)
         self.agent_orchestrator = AgentOrchestrator(config)
-    
+
     def create_documentation_metadata(self, working_dir: str, components: Dict[str, Any], num_leaf_nodes: int):
         """Create a metadata file with documentation generation information."""
         from datetime import datetime
-        
+
         metadata = {
             "generation_info": {
                 "timestamp": datetime.now().isoformat(),
@@ -57,7 +60,7 @@ class DocumentationGenerator:
                 "first_module_tree.json"
             ]
         }
-        
+
         # Add generated markdown files to the metadata
         try:
             for file_path in os.listdir(working_dir):
@@ -65,19 +68,65 @@ class DocumentationGenerator:
                     metadata["files_generated"].append(file_path)
         except Exception as e:
             logger.warning(f"Could not list generated files: {e}")
-        
+
         metadata_path = os.path.join(working_dir, "metadata.json")
         file_manager.save_json(metadata, metadata_path)
 
-    
+    # ── Level-based scheduling ────────────────────────────────────────────
+
+    def get_processing_levels(
+        self, module_tree: Dict[str, Any], parent_path: Optional[List[str]] = None
+    ) -> List[List[tuple]]:
+        """Group modules into levels for parallel processing.
+
+        Returns a list of levels, where level 0 contains the deepest leaf
+        modules and the highest level contains top-level parent modules.
+        Modules within the same level are independent and can be processed
+        concurrently.
+        """
+        if parent_path is None:
+            parent_path = []
+
+        # node_key -> (level, module_path, module_name, module_info)
+        node_levels: Dict[str, tuple] = {}
+
+        def assign_levels(tree: Dict[str, Any], path: List[str]):
+            for name, info in tree.items():
+                current_path = path + [name]
+                key = "/".join(current_path)
+                children = info.get("children") or {}
+                if not children or not isinstance(children, dict):
+                    # Leaf node — level 0
+                    node_levels[key] = (0, current_path, name, info)
+                else:
+                    # Recurse into children first
+                    assign_levels(children, current_path)
+                    # Parent level = max child level + 1
+                    child_max = max(
+                        node_levels["/".join(current_path + [cn])][0]
+                        for cn in children
+                        if "/".join(current_path + [cn]) in node_levels
+                    )
+                    node_levels[key] = (child_max + 1, current_path, name, info)
+
+        assign_levels(module_tree, parent_path)
+
+        by_level: Dict[int, List[tuple]] = defaultdict(list)
+        for _key, (level, path, name, info) in node_levels.items():
+            by_level[level].append((path, name, info))
+
+        return [by_level[i] for i in sorted(by_level.keys())]
+
+    # ── Legacy helper (kept for backward compat) ─────────────────────────
+
     def get_processing_order(self, module_tree: Dict[str, Any], parent_path: List[str] = []) -> List[tuple[List[str], str]]:
         """Get the processing order using topological sort (leaf modules first)."""
         processing_order = []
-        
+
         def collect_modules(tree: Dict[str, Any], path: List[str]):
             for module_name, module_info in tree.items():
                 current_path = path + [module_name]
-                
+
                 # If this module has children, process them first
                 if module_info.get("children") and isinstance(module_info["children"], dict) and module_info["children"]:
                     collect_modules(module_info["children"], current_path)
@@ -86,7 +135,7 @@ class DocumentationGenerator:
                 else:
                     # This is a leaf module, add it immediately
                     processing_order.append((current_path, module_name))
-        
+
         collect_modules(module_tree, parent_path)
         return processing_order
 
@@ -98,7 +147,7 @@ class DocumentationGenerator:
     def build_overview_structure(self, module_tree: Dict[str, Any], module_path: List[str],
                                  working_dir: str) -> Dict[str, Any]:
         """Build structure for overview generation with 1-depth children docs and target indicator."""
-        
+
         processed_module_tree = deepcopy(module_tree)
         module_info = processed_module_tree
         for path_part in module_path:
@@ -120,8 +169,10 @@ class DocumentationGenerator:
 
         return processed_module_tree
 
+    # ── Main entry point ─────────────────────────────────────────────────
+
     async def generate_module_documentation(self, components: Dict[str, Any], leaf_nodes: List[str]) -> str:
-        """Generate documentation for all modules using dynamic programming approach."""
+        """Generate documentation for all modules using level-based concurrency."""
         # Prepare output directory
         working_dir = os.path.abspath(self.config.docs_dir)
         file_manager.ensure_directory(working_dir)
@@ -130,83 +181,89 @@ class DocumentationGenerator:
         first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
         module_tree = file_manager.load_json(module_tree_path)
         first_module_tree = file_manager.load_json(first_module_tree_path)
-        
-        # Get processing order (leaf modules first)
-        processing_order = self.get_processing_order(first_module_tree)
 
-        
-        # Process modules in dependency order
-        final_module_tree = module_tree
-        processed_modules = set()
-
-        if len(module_tree) > 0:
-            for module_path, module_name in processing_order:
-                try:
-                    # Get the module info from the tree
-                    module_info = module_tree
-                    for path_part in module_path:
-                        module_info = module_info[path_part]
-                        if path_part != module_path[-1]:  # Not the last part
-                            module_info = module_info.get("children", {})
-                    
-                    # Skip if already processed
-                    module_key = "/".join(module_path)
-                    if module_key in processed_modules:
-                        continue
-                    
-                    # Process the module
-                    if self.is_leaf_module(module_info):
-                        logger.info(f"📄 Processing leaf module: {module_key}")
-                        final_module_tree = await self.agent_orchestrator.process_module(
-                            module_name, components, module_info["components"], module_path, working_dir
-                        )
-                    else:
-                        logger.info(f"📁 Processing parent module: {module_key}")
-                        final_module_tree = await self.generate_parent_module_docs(
-                            module_path, working_dir
-                        )
-                    
-                    processed_modules.add(module_key)
-                    
-                except Exception as e:
-                    logger.error(f"Failed to process module {module_key}: {str(e)}")
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    continue
-
-            # Generate repo overview
-            logger.info(f"📚 Generating repository overview")
-            final_module_tree = await self.generate_parent_module_docs(
-                [], working_dir
-            )
-        else:
-            logger.info(f"Processing whole repo because repo can fit in the context window")
+        if len(module_tree) == 0:
+            # Small repo that fits in a single context — no parallelism needed
+            logger.info("Processing whole repo because repo can fit in the context window")
             repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
             final_module_tree = await self.agent_orchestrator.process_module(
                 repo_name, components, leaf_nodes, [], working_dir
             )
 
-            # save final_module_tree to module_tree.json
-            file_manager.save_json(final_module_tree, os.path.join(working_dir, MODULE_TREE_FILENAME))
+            file_manager.save_json(final_module_tree, module_tree_path)
 
-            # rename repo_name.md to overview.md
             repo_overview_path = os.path.join(working_dir, f"{repo_name}.md")
             if os.path.exists(repo_overview_path):
                 os.rename(repo_overview_path, os.path.join(working_dir, OVERVIEW_FILENAME))
-        
+
+            return working_dir
+
+        # ── Concurrent path ──────────────────────────────────────────────
+
+        # Create lock-protected tree manager
+        tree_manager = ModuleTreeManager(module_tree, module_tree_path)
+
+        # Compute levels (level 0 = deepest leaves, higher = parents)
+        levels = self.get_processing_levels(first_module_tree)
+        max_concurrent = getattr(self.config, 'max_concurrent', 3)
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        for level_idx, level_modules in enumerate(levels):
+            level_names = [name for _, name, _ in level_modules]
+            logger.info(
+                f"📊 Level {level_idx}: {len(level_modules)} module(s) "
+                f"(concurrency={max_concurrent}) — {', '.join(level_names[:5])}"
+                f"{'...' if len(level_names) > 5 else ''}"
+            )
+
+            async def _process(module_path, module_name, module_info):
+                async with semaphore:
+                    module_key = "/".join(module_path)
+                    try:
+                        if self.is_leaf_module(module_info):
+                            return await self.agent_orchestrator.process_module(
+                                module_name, components,
+                                module_info.get("components", []),
+                                module_path, working_dir, tree_manager
+                            )
+                        else:
+                            return await self.generate_parent_module_docs(
+                                module_path, working_dir, tree_manager
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to process {module_key}: {e}")
+                        logger.error(traceback.format_exc())
+                        return None
+
+            tasks = [
+                _process(mp, mn, mi) for mp, mn, mi in level_modules
+            ]
+            await asyncio.gather(*tasks)
+
+        # ── Root overview (after all modules) ────────────────────────────
+        logger.info("📚 Generating repository overview")
+        await self.generate_parent_module_docs([], working_dir, tree_manager)
+
         return working_dir
 
-    async def generate_parent_module_docs(self, module_path: List[str], 
-                                        working_dir: str) -> Dict[str, Any]:
+    # ── Parent / overview generation ─────────────────────────────────────
+
+    async def generate_parent_module_docs(self, module_path: List[str],
+                                        working_dir: str,
+                                        tree_manager: Optional[ModuleTreeManager] = None) -> Dict[str, Any]:
         """Generate documentation for a parent module based on its children's documentation."""
         module_name = module_path[-1] if len(module_path) >= 1 else os.path.basename(os.path.normpath(self.config.repo_path))
 
         logger.info(f"Generating parent documentation for: {module_name}")
-        
-        # Load module tree
-        module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-        module_tree = file_manager.load_json(module_tree_path)
 
-        # skip if this module's doc already exists and has real content
+        # Get module tree
+        if tree_manager:
+            module_tree = await tree_manager.get_snapshot()
+        else:
+            module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
+            module_tree = file_manager.load_json(module_tree_path)
+
+        # Determine output path and skip if already exists
         if len(module_path) == 0:
             output_path = os.path.join(working_dir, OVERVIEW_FILENAME)
         else:
@@ -224,23 +281,23 @@ class DocumentationGenerator:
             is_repo=(len(module_path) == 0),
             output_language=self.config.output_language,
         )
-        
+
         try:
-            parent_docs = call_llm(prompt, self.config)
-            
+            # Run LLM call in a thread so it doesn't block the event loop
+            parent_docs = await asyncio.to_thread(call_llm, prompt, self.config)
+
             # Parse and save parent documentation
             parent_content = parent_docs.split("<OVERVIEW>")[1].split("</OVERVIEW>")[0].strip()
-            # parent_content = prompt
-            file_manager.save_text(parent_content, parent_docs_path)
-            
+            file_manager.save_text(parent_content, output_path)
+
             logger.debug(f"Successfully generated parent documentation for: {module_name}")
             return module_tree
-            
+
         except Exception as e:
             logger.error(f"Error generating parent documentation for {module_name}: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
-    
+
     async def run(self) -> None:
         """Run the complete documentation generation process using dynamic programming."""
         try:
@@ -248,15 +305,13 @@ class DocumentationGenerator:
             components, leaf_nodes = self.graph_builder.build_dependency_graph()
 
             logger.debug(f"Found {len(leaf_nodes)} leaf nodes")
-            # logger.debug(f"Leaf nodes:\n{'\n'.join(sorted(leaf_nodes)[:200])}")
-            # exit()
-            
+
             # Cluster modules
             working_dir = os.path.abspath(self.config.docs_dir)
             file_manager.ensure_directory(working_dir)
             first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-            
+
             # Check if module tree exists
             if os.path.exists(first_module_tree_path):
                 logger.debug(f"Module tree found at {first_module_tree_path}")
@@ -271,20 +326,20 @@ class DocumentationGenerator:
                 file_manager.save_json(module_tree, first_module_tree_path)
 
             file_manager.save_json(module_tree, module_tree_path)
-            
+
             logger.debug(f"Grouped components into {len(module_tree)} modules")
-            
+
             # Generate module documentation using dynamic programming approach
             # This processes leaf modules first, then parent modules
             working_dir = await self.generate_module_documentation(components, leaf_nodes)
-            
+
             # Create documentation metadata
             self.create_documentation_metadata(working_dir, components, len(leaf_nodes))
-            
+
             logger.debug(f"Documentation generation completed successfully using dynamic programming!")
             logger.debug(f"Processing order: leaf modules → parent modules → repository overview")
             logger.debug(f"Documentation saved to: {working_dir}")
-            
+
         except Exception as e:
             logger.error(f"Documentation generation failed: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")

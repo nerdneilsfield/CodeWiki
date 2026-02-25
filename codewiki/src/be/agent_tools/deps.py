@@ -1,6 +1,10 @@
 from dataclasses import dataclass
+from typing import Optional, TYPE_CHECKING
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.config import Config
+
+if TYPE_CHECKING:
+    from codewiki.src.be.module_tree_manager import ModuleTreeManager
 
 @dataclass
 class CodeWikiDeps:
@@ -15,3 +19,4 @@ class CodeWikiDeps:
     current_depth: int
     config: Config  # LLM configuration
     custom_instructions: str = None
+    module_tree_manager: Optional['ModuleTreeManager'] = None

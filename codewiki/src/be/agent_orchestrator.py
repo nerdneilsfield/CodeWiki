@@ -90,39 +90,49 @@ class AgentOrchestrator:
                 system_prompt=format_leaf_system_prompt(module_name, self.custom_instructions, self.output_language),
             )
     
-    async def process_module(self, module_name: str, components: Dict[str, Node], 
-                           core_component_ids: List[str], module_path: List[str], working_dir: str) -> Dict[str, Any]:
-        """Process a single module and generate its documentation."""
+    async def process_module(self, module_name: str, components: Dict[str, Node],
+                           core_component_ids: List[str], module_path: List[str],
+                           working_dir: str, tree_manager=None) -> Dict[str, Any]:
+        """Process a single module and generate its documentation.
+
+        Args:
+            tree_manager: Optional ModuleTreeManager for lock-protected
+                tree access during concurrent processing.
+        """
         logger.info(f"Processing module: {module_name}")
-        
-        # Load or create module tree
-        module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-        module_tree = file_manager.load_json(module_tree_path)
-        
-        # Create agent
-        agent = self.create_agent(module_name, components, core_component_ids)
-        
-        # Create dependencies
-        deps = CodeWikiDeps(
-            absolute_docs_path=working_dir,
-            absolute_repo_path=str(os.path.abspath(self.config.repo_path)),
-            registry={},
-            components=components,
-            path_to_current_module=module_path,
-            current_module_name=module_name,
-            module_tree=module_tree,
-            max_depth=self.config.max_depth,
-            current_depth=1,
-            config=self.config,
-            custom_instructions=self.custom_instructions
-        )
 
         # skip if this module's doc already exists and has real content
         docs_path = os.path.join(working_dir, f"{module_name}.md")
         if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
             logger.info(f"✓ Module docs already exists at {docs_path}")
-            return module_tree
-        
+            return {}
+
+        # Get module tree snapshot (from manager or disk)
+        if tree_manager:
+            module_tree = await tree_manager.get_snapshot()
+        else:
+            module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
+            module_tree = file_manager.load_json(module_tree_path)
+
+        # Create agent
+        agent = self.create_agent(module_name, components, core_component_ids)
+
+        # Create per-agent dependencies (each agent gets its own mutable copies)
+        deps = CodeWikiDeps(
+            absolute_docs_path=working_dir,
+            absolute_repo_path=str(os.path.abspath(self.config.repo_path)),
+            registry={},
+            components=components,
+            path_to_current_module=list(module_path),  # copy to avoid cross-agent mutation
+            current_module_name=module_name,
+            module_tree=module_tree,
+            max_depth=self.config.max_depth,
+            current_depth=1,
+            config=self.config,
+            custom_instructions=self.custom_instructions,
+            module_tree_manager=tree_manager,
+        )
+
         # Run agent
         try:
             result = await agent.run(
@@ -134,13 +144,17 @@ class AgentOrchestrator:
                 ),
                 deps=deps
             )
-            
-            # Save updated module tree
-            file_manager.save_json(deps.module_tree, module_tree_path)
+
+            # Persist tree — manager handles locking; otherwise save directly
+            if tree_manager:
+                await tree_manager.save()
+            else:
+                module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
+                file_manager.save_json(deps.module_tree, module_tree_path)
+
             logger.debug(f"Successfully processed module: {module_name}")
-            
             return deps.module_tree
-            
+
         except Exception as e:
             logger.error(f"Error processing module {module_name}: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")

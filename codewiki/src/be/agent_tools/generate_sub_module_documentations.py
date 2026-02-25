@@ -41,8 +41,17 @@ async def generate_sub_module_documentation(
 
     # Persist the updated tree immediately so the sidebar stays accurate even if
     # the agent fails later (after sub-module .md files have already been created).
-    module_tree_path = os.path.join(deps.absolute_docs_path, MODULE_TREE_FILENAME)
-    file_manager.save_json(deps.module_tree, module_tree_path)
+    if deps.module_tree_manager:
+        new_children = {
+            name: {"components": ids, "children": {}}
+            for name, ids in sub_module_specs.items()
+        }
+        await deps.module_tree_manager.update_children(
+            deps.path_to_current_module, new_children
+        )
+    else:
+        module_tree_path = os.path.join(deps.absolute_docs_path, MODULE_TREE_FILENAME)
+        file_manager.save_json(deps.module_tree, module_tree_path)
     
     for sub_module_name, core_component_ids in sub_module_specs.items():
 
