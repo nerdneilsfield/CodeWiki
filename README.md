@@ -64,6 +64,9 @@ codewiki generate
 
 # Generate with HTML viewer for GitHub Pages
 codewiki generate --github-pages --create-branch
+
+# Speed up generation with parallel processing
+codewiki generate --max-concurrent 5
 ```
 
 **That's it!** Your documentation will be generated in `./docs/` with comprehensive repository-level analysis.
@@ -111,6 +114,9 @@ codewiki config set --max-tokens 32768 --max-token-per-module 36369 --max-token-
 # Configure max depth for hierarchical decomposition
 codewiki config set --max-depth 3
 
+# Configure concurrent module processing (default: 3)
+codewiki config set --max-concurrent 5
+
 # Show current configuration
 codewiki config show
 
@@ -132,6 +138,12 @@ codewiki generate --create-branch
 
 # Generate HTML viewer for GitHub Pages
 codewiki generate --github-pages
+
+# Generate pre-rendered static HTML pages (one per module, no JS required)
+codewiki generate --static
+
+# Speed up generation with concurrent module processing
+codewiki generate --max-concurrent 5
 
 # Enable verbose logging
 codewiki generate --verbose
@@ -252,8 +264,11 @@ codewiki config set --max-token-per-leaf-module 20000
 # Set max depth for hierarchical decomposition (default: 2)
 codewiki config set --max-depth 3
 
+# Set max concurrent modules processed in parallel (default: 3)
+codewiki config set --max-concurrent 5
+
 # Override at runtime for a single generation
-codewiki generate --max-tokens 16384 --max-token-per-module 40000 --max-depth 3
+codewiki generate --max-tokens 16384 --max-token-per-module 40000 --max-depth 3 --max-concurrent 5
 ```
 
 | Option | Description | Default |
@@ -262,6 +277,7 @@ codewiki generate --max-tokens 16384 --max-token-per-module 40000 --max-depth 3
 | `--max-token-per-module` | Input tokens threshold for module clustering | 36369 |
 | `--max-token-per-leaf-module` | Input tokens threshold for leaf modules | 16000 |
 | `--max-depth` | Maximum depth for hierarchical decomposition | 2 |
+| `--max-concurrent` | Maximum number of modules processed in parallel | 3 |
 | `--language` | Language code for generated documentation | `en` |
 
 ### Configuration Storage
@@ -297,8 +313,19 @@ Generated documentation includes both **textual descriptions** and **visual arti
 ├── module_tree.json         # Hierarchical module structure
 ├── first_module_tree.json   # Initial clustering result
 ├── metadata.json            # Generation metadata
-└── index.html               # Interactive viewer (with --github-pages)
+├── index.html               # Interactive viewer (with --github-pages)
+└── module1.html             # Pre-rendered static pages (with --static)
 ```
+
+### HTML Viewer Features
+
+The interactive HTML viewer (`--github-pages`) and static pages (`--static`) include:
+- **Dark / light mode** with automatic OS preference detection and manual toggle
+- **Collapsible sidebar** with full module tree navigation
+- **Auto-generated table of contents** from document headings
+- **Mobile-responsive** layout with touch-friendly controls
+- **Back-to-top** button for long documents
+- **DeepWiki integration** — links to the corresponding DeepWiki page for quick comparison
 
 ---
 
@@ -339,7 +366,9 @@ CodeWiki employs a three-stage process for comprehensive documentation generatio
 
 2. **Recursive Multi-Agent Processing**: Implements adaptive multi-agent processing with dynamic task delegation, allowing the system to handle complex modules at scale while maintaining quality.
 
-3. **Multi-Modal Synthesis**: Integrates textual descriptions with visual artifacts including architecture diagrams, data-flow representations, and sequence diagrams for comprehensive understanding.
+3. **Level-Based Concurrent Execution**: Modules at the same depth in the hierarchy are independent and processed in parallel using `asyncio` with a configurable concurrency limit (`--max-concurrent`). Parent modules are processed only after all their children complete, ensuring correct context propagation.
+
+4. **Multi-Modal Synthesis**: Integrates textual descriptions with visual artifacts including architecture diagrams, data-flow representations, and sequence diagrams for comprehensive understanding.
 
 ### Data Flow
 
