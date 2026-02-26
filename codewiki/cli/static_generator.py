@@ -76,6 +76,7 @@ a.nv.on{background:var(--primary-lt);color:var(--primary);font-weight:600;}
 .nvcaret:hover{color:var(--primary);}
 .nvcaret.open{transform:rotate(90deg);}
 .nvsub{overflow:hidden;}
+.nv-missing{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;padding:6px 10px;border-radius:var(--r);color:var(--text3);font-size:13.5px;opacity:.5;cursor:default;}
 article h1{font-size:1.9rem;font-weight:700;border-bottom:2px solid var(--border);padding-bottom:.4rem;margin-bottom:1.2rem;line-height:1.3;}
 article h2{font-size:1.45rem;font-weight:600;margin-top:2.2rem;margin-bottom:.7rem;border-bottom:1px solid var(--border);padding-bottom:.2rem;}
 article h3{font-size:1.15rem;font-weight:600;margin-top:1.8rem;margin-bottom:.5rem;}
@@ -231,24 +232,35 @@ themeBtn.addEventListener('click',function(){setTimeout(cwRenderMermaid,50);});
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _build_nav_html(module_tree: Dict[str, Any], current_html: str, depth: int = 0) -> str:
+def _build_nav_html(
+    module_tree: Dict[str, Any],
+    current_html: str,
+    depth: int = 0,
+    known_pages: Optional[set] = None,
+) -> str:
     """Recursively build sidebar nav HTML from the module tree."""
     lines: list[str] = []
     indent = "  " * (depth + 1)
 
     for key, data in module_tree.items():
         href = f"{key}.html"
+        has_page = known_pages is None or href in known_pages
         active = ' on' if current_html == href else ''
         pl = depth * 12
         nav_key = f"{key}-d{depth}".replace('.', '-').replace('/', '-').replace(' ', '-')
         children = data.get("children") or {}
+        label = key.replace("_", " ").title()
 
         lines.append(f'{indent}<div>')
         lines.append(f'{indent}  <div class="nav-row" style="padding-left:{pl}px;">')
-        lines.append(
-            f'{indent}    <a href="{href}" class="nv{active}">'
-            f'{key.replace("_", " ").title()}</a>'
-        )
+        if has_page:
+            lines.append(
+                f'{indent}    <a href="{href}" class="nv{active}">{label}</a>'
+            )
+        else:
+            lines.append(
+                f'{indent}    <span class="nv-missing" title="Documentation not yet generated">{label}</span>'
+            )
         if children:
             lines.append(
                 f'{indent}    <button class="nvcaret" data-nav="{nav_key}" aria-label="Toggle">›</button>'
@@ -257,7 +269,7 @@ def _build_nav_html(module_tree: Dict[str, Any], current_html: str, depth: int =
 
         if children:
             lines.append(f'{indent}  <div class="nvsub" data-nav-sub="{nav_key}">')
-            lines.append(_build_nav_html(children, current_html, depth + 1))
+            lines.append(_build_nav_html(children, current_html, depth + 1, known_pages))
             lines.append(f'{indent}  </div>')
 
         lines.append(f'{indent}</div>')
@@ -386,6 +398,14 @@ class StaticHTMLGenerator:
             logger.warning(f"No .md files found in {docs_dir}")
             return []
 
+        # Pre-compute the set of HTML filenames that will actually be written,
+        # so the sidebar can mark missing modules as unclickable.
+        known_pages: set[str] = set()
+        for _p in md_files:
+            known_pages.add(f"{_p.stem}.html")
+            if _p.stem == "overview":
+                known_pages.add("index.html")
+
         written: list[str] = []
 
         for md_path in md_files:
@@ -418,7 +438,7 @@ class StaticHTMLGenerator:
                     f'    <a href="index.html" class="nv{ov_active}">Overview</a>\n'
                     f'  </div>\n'
                 )
-                nav_html += _build_nav_html(module_tree, html_name)
+                nav_html += _build_nav_html(module_tree, html_name, known_pages=known_pages)
 
             page = _PAGE_TEMPLATE.substitute(
                 title=title,

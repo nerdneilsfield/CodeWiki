@@ -40,6 +40,16 @@ class ModuleTreeManager:
             node.update(new_children)
             file_manager.save_json(self._tree, self._persist_path)
 
+    async def mark_completed(self, module_path: List[str]):
+        """Set ``_completed`` flag on the tree node at *module_path* and persist."""
+        async with self._lock:
+            node = self._tree
+            for key in module_path[:-1]:
+                node = node[key]["children"]
+            if module_path[-1] in node:
+                node[module_path[-1]]["_completed"] = True
+            file_manager.save_json(self._tree, self._persist_path)
+
     async def save(self):
         """Force-persist the current in-memory tree to disk."""
         async with self._lock:

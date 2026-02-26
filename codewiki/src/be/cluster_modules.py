@@ -28,6 +28,42 @@ def _build_path_index(components: Dict[str, Node]) -> Dict[str, List[str]]:
     return dict(index)
 
 
+def _match_by_name_or_stem(
+    name: str,
+    components: Dict[str, Node],
+) -> List[str]:
+    """Match a short name against component name parts (after ::) or file stems.
+
+    LLMs often return abbreviated names like ``orchestrator`` instead of the
+    full component ID ``src/agents/orchestrator.py::Orchestrator``.  This
+    helper catches those cases.
+    """
+    lower = name.lower()
+    # 1. Exact match on the component-name portion (after '::')
+    by_name = [
+        cid for cid in components
+        if '::' in cid and cid.split('::')[-1].lower() == lower
+    ]
+    if by_name:
+        return by_name
+
+    # 2. Exact match on file stem (e.g. 'orchestrator' → orchestrator.py)
+    from pathlib import PurePosixPath
+    by_stem = [
+        cid for cid, node in components.items()
+        if PurePosixPath(node.relative_path).stem.lower() == lower
+    ]
+    if by_stem:
+        return by_stem
+
+    # 3. Substring: name appears as a whole word in the component ID
+    by_substr = [
+        cid for cid in components
+        if lower in cid.lower().replace('_', ' ').replace('-', ' ').split()
+    ]
+    return by_substr
+
+
 def _resolve_leaf_node(
     leaf_node: str,
     components: Dict[str, Node],
@@ -36,11 +72,11 @@ def _resolve_leaf_node(
     """
     Resolve a single leaf node string to a list of valid component IDs.
 
-    Handles three cases:
-    1. Exact match in components dict — returns [leaf_node].
-    2. Close fuzzy match — returns the matched ID.
-    3. The LLM returned a file path instead of a component ID — expands to
-       all components belonging to that file.
+    Handles these cases (in order):
+    1. Exact match in components dict.
+    2. Close fuzzy match (difflib, cutoff 0.85).
+    3. LLM returned a file path — expand to all components in that file.
+    4. Match by component name part (after ::) or file stem.
     Returns an empty list when the node cannot be resolved at all.
     """
     if leaf_node in components:
@@ -59,6 +95,15 @@ def _resolve_leaf_node(
             f"Resolved file path '{leaf_node}' to {len(file_components)} component(s)"
         )
         return file_components
+
+    # LLM returned a short name — try component name / file stem matching
+    name_matches = _match_by_name_or_stem(leaf_node, components)
+    if name_matches:
+        logger.debug(
+            f"Resolved short name '{leaf_node}' to {len(name_matches)} component(s) "
+            f"by name/stem match"
+        )
+        return name_matches
 
     logger.warning(f"Skipping invalid leaf node '{leaf_node}' - not found in components")
     return []

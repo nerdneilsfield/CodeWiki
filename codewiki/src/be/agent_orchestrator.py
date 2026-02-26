@@ -102,13 +102,37 @@ class AgentOrchestrator:
         """
         logger.info(f"Processing module: {module_name}")
 
-        # skip if this module's doc already exists and has real content
+        # ── Cache check ──────────────────────────────────────────────────
         docs_path = os.path.join(working_dir, f"{module_name}.md")
         if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
-            logger.info(f"✓ Module docs already exists at {docs_path}")
-            return {}
+            # For complex modules, only skip when the tree node is marked
+            # _completed (meaning this module AND all its sub-modules finished
+            # successfully in a previous run).  Without the flag the tree may
+            # have been corrupted/overwritten and sub-modules lost.
+            if is_complex_module(components, core_component_ids) and module_path:
+                completed = False
+                if tree_manager:
+                    snapshot = await tree_manager.get_snapshot()
+                    try:
+                        node = snapshot
+                        for key in module_path[:-1]:
+                            node = node[key]["children"]
+                        completed = node.get(module_path[-1], {}).get("_completed", False)
+                    except (KeyError, TypeError):
+                        pass
+                if not completed:
+                    logger.info(
+                        f"↩ Module {module_name} exists but is complex and not marked complete — re-processing"
+                    )
+                else:
+                    logger.info(f"✓ Module docs already exists at {docs_path}")
+                    return {}
+            else:
+                # Leaf / simple module — .md existence is sufficient
+                logger.info(f"✓ Module docs already exists at {docs_path}")
+                return {}
 
-        # Get module tree snapshot (from manager or disk)
+        # ── Get module tree snapshot ─────────────────────────────────────
         if tree_manager:
             module_tree = await tree_manager.get_snapshot()
         else:
@@ -153,6 +177,10 @@ class AgentOrchestrator:
             else:
                 module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
                 file_manager.save_json(deps.module_tree, module_tree_path)
+
+            # Mark the module as fully completed so future runs can skip it
+            if tree_manager and module_path:
+                await tree_manager.mark_completed(module_path)
 
             logger.debug(f"Successfully processed module: {module_name}")
             return deps.module_tree

@@ -192,6 +192,12 @@ class DocumentationGenerator:
 
     # ── Main entry point ─────────────────────────────────────────────────
 
+    @staticmethod
+    def _module_doc_exists(working_dir: str, module_name: str) -> bool:
+        """Return True if a non-trivial .md file already exists for *module_name*."""
+        docs_path = os.path.join(working_dir, f"{module_name}.md")
+        return os.path.exists(docs_path) and os.path.getsize(docs_path) > 100
+
     async def generate_module_documentation(self, components: Dict[str, Any], leaf_nodes: List[str]) -> str:
         """Generate documentation for all modules using level-based concurrency."""
         # Prepare output directory
@@ -227,7 +233,32 @@ class DocumentationGenerator:
         # Compute levels (level 0 = deepest leaves, higher = parents)
         levels = self.get_processing_levels(first_module_tree)
         max_concurrent = getattr(self.config, 'max_concurrent', 3)
+        max_retries = getattr(self.config, 'max_retries', 2)
         semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _process_one(module_path, module_name, module_info):
+            """Process a single module; returns True on success, False on failure."""
+            module_key = "/".join(module_path)
+            try:
+                if self.is_leaf_module(module_info):
+                    await self.agent_orchestrator.process_module(
+                        module_name, components,
+                        module_info.get("components", []),
+                        module_path, working_dir, tree_manager
+                    )
+                else:
+                    await self.generate_parent_module_docs(
+                        module_path, working_dir, tree_manager
+                    )
+                return True
+            except Exception as e:
+                logger.error(f"Failed to process {module_key}: {e}")
+                logger.error(traceback.format_exc())
+                return False
+
+        async def _process(module_path, module_name, module_info):
+            async with semaphore:
+                return await _process_one(module_path, module_name, module_info)
 
         for level_idx, level_modules in enumerate(levels):
             level_names = [name for _, name, _ in level_modules]
@@ -237,35 +268,79 @@ class DocumentationGenerator:
                 f"{'...' if len(level_names) > 5 else ''}"
             )
 
-            async def _process(module_path, module_name, module_info):
-                async with semaphore:
-                    module_key = "/".join(module_path)
-                    try:
-                        if self.is_leaf_module(module_info):
-                            return await self.agent_orchestrator.process_module(
-                                module_name, components,
-                                module_info.get("components", []),
-                                module_path, working_dir, tree_manager
-                            )
-                        else:
-                            return await self.generate_parent_module_docs(
-                                module_path, working_dir, tree_manager
-                            )
-                    except Exception as e:
-                        logger.error(f"Failed to process {module_key}: {e}")
-                        logger.error(traceback.format_exc())
-                        return None
-
-            tasks = [
-                _process(mp, mn, mi) for mp, mn, mi in level_modules
-            ]
+            tasks = [_process(mp, mn, mi) for mp, mn, mi in level_modules]
             await asyncio.gather(*tasks)
+
+            # ── Retry failed modules sequentially ────────────────────────
+            for retry in range(max_retries):
+                failed = [
+                    (mp, mn, mi)
+                    for mp, mn, mi in level_modules
+                    if not self._module_doc_exists(working_dir, mn)
+                ]
+                if not failed:
+                    break
+                logger.warning(
+                    f"↩ Retry {retry + 1}/{max_retries} for {len(failed)} failed module(s): "
+                    f"{', '.join(mn for _, mn, _ in failed)}"
+                )
+                for mp, mn, mi in failed:
+                    await _process_one(mp, mn, mi)
+
+        # ── Fill any sub-modules whose .md was not written ───────────────
+        await self._fill_missing_module_docs(working_dir, components, tree_manager, max_retries)
 
         # ── Root overview (after all modules) ────────────────────────────
         logger.info("📚 Generating repository overview")
         await self.generate_parent_module_docs([], working_dir, tree_manager)
 
         return working_dir
+
+    async def _fill_missing_module_docs(
+        self,
+        working_dir: str,
+        components: Dict[str, Any],
+        tree_manager,
+        max_retries: int,
+    ) -> None:
+        """Walk the full module_tree and retry every module whose .md file is absent.
+
+        Sub-modules are added to module_tree.json dynamically by the recursive
+        agents, but if a sub-agent crashes the parent agent may still succeed and
+        write its own .md.  This pass finds the gaps and fills them.
+        """
+        def collect_missing(tree: Dict[str, Any], path: List[str]) -> List[tuple]:
+            result = []
+            for name, info in tree.items():
+                current_path = path + [name]
+                if not self._module_doc_exists(working_dir, name):
+                    result.append((current_path, name, info))
+                children = info.get("children") or {}
+                if children:
+                    result.extend(collect_missing(children, current_path))
+            return result
+
+        for attempt in range(max_retries):
+            module_tree = await tree_manager.get_snapshot()
+            missing = collect_missing(module_tree, [])
+            if not missing:
+                return
+            logger.warning(
+                f"↩ Fill pass {attempt + 1}/{max_retries}: "
+                f"{len(missing)} module(s) without docs — "
+                f"{', '.join(mn for _, mn, _ in missing[:5])}"
+                f"{'...' if len(missing) > 5 else ''}"
+            )
+            for module_path, module_name, module_info in missing:
+                try:
+                    await self.agent_orchestrator.process_module(
+                        module_name, components,
+                        module_info.get("components", []),
+                        module_path, working_dir, tree_manager
+                    )
+                except Exception as e:
+                    logger.error(f"Fill retry failed for {module_name}: {e}")
+                    logger.error(traceback.format_exc())
 
     # ── Parent / overview generation ─────────────────────────────────────
 
@@ -339,13 +414,17 @@ class DocumentationGenerator:
                 logger.debug(f"Module tree found at {first_module_tree_path}")
                 module_tree = heal_module_tree_components(cached_tree, components)
                 file_manager.save_json(module_tree, first_module_tree_path)
+                # Do NOT overwrite module_tree.json here — it may already contain
+                # sub-module entries added dynamically during a previous run.
+                # Only initialise it when it doesn't exist yet.
+                if not os.path.exists(module_tree_path):
+                    file_manager.save_json(module_tree, module_tree_path)
             else:
                 logger.debug(f"Module tree not found or empty at {first_module_tree_path}, clustering modules")
                 module_tree = cluster_modules(leaf_nodes, components, self.config)
                 if module_tree:
                     file_manager.save_json(module_tree, first_module_tree_path)
-
-            file_manager.save_json(module_tree, module_tree_path)
+                    file_manager.save_json(module_tree, module_tree_path)
 
             logger.debug(f"Grouped components into {len(module_tree)} modules")
 

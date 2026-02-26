@@ -21,15 +21,52 @@ async def generate_sub_module_documentation(
     ctx: RunContext[CodeWikiDeps],
     sub_module_specs: dict[str, list[str]]
 ) -> str:
-    """Generate detailed description of a given sub-module specs to the sub-agents
+    """Delegate documentation generation for sub-modules to sub-agents.
+
+    Each key in *sub_module_specs* is a human-readable sub-module name
+    (e.g. ``"authentication_layer"``).  Its value is a **list of component
+    IDs** taken verbatim from the core_components list you were given.
 
     Args:
-        sub_module_specs: The specs of the sub-modules to generate documentation for. E.g. {"sub_module_1": ["core_component_1.1", "core_component_1.2"], "sub_module_2": ["core_component_2.1", "core_component_2.2"], ...}
+        sub_module_specs: A mapping of sub-module names to their component IDs.
+            Keys   – descriptive sub-module names (snake_case, NOT metadata
+                     keys like ``module_name`` / ``language``).
+            Values – lists of **exact component IDs** from the core_components
+                     list (NOT module names, language codes, or descriptions).
+            Example: {"auth_layer": ["src/auth.py::AuthManager", "src/auth.py::Token"],
+                      "data_store": ["src/db.py::Database"]}
     """
 
     deps = ctx.deps
     previous_module_name = deps.current_module_name
-    
+
+    # ── Validate & filter out obviously wrong entries ────────────────────
+    _META_KEYS = {
+        'module_name', 'sub_modules', 'language', 'output_language',
+        'name', 'description', 'specs', 'components', 'children',
+    }
+    filtered: dict[str, list[str]] = {}
+    for sub_name, comp_ids in sub_module_specs.items():
+        if sub_name.lower() in _META_KEYS:
+            logger.warning(f"Skipping invalid sub-module name '{sub_name}' (looks like a metadata key, not a module name)")
+            continue
+        if sub_name == deps.current_module_name:
+            logger.warning(f"Skipping sub-module '{sub_name}' (same as parent module name)")
+            continue
+        if not isinstance(comp_ids, list) or not comp_ids:
+            logger.warning(f"Skipping sub-module '{sub_name}' — component list is empty or invalid")
+            continue
+        filtered[sub_name] = comp_ids
+
+    if not filtered:
+        return (
+            "ERROR: All sub-module entries were invalid. Please call this tool again "
+            "with correct sub_module_specs: keys must be descriptive sub-module names "
+            "(NOT 'module_name', 'language', etc.) and values must be lists of "
+            "component IDs from the core_components list."
+        )
+    sub_module_specs = filtered
+
     # Create fallback models from config
     fallback_models = create_fallback_models(deps.config)
 
@@ -108,4 +145,4 @@ async def generate_sub_module_documentation(
     return f"Generate successfully. Documentations: {', '.join([key + '.md' for key in sub_module_specs.keys()])} are saved in the working directory."
 
 
-generate_sub_module_documentation_tool = Tool(function=generate_sub_module_documentation, name="generate_sub_module_documentation", description="Generate detailed description of a given sub-module specs to the sub-agents", takes_ctx=True)
+generate_sub_module_documentation_tool = Tool(function=generate_sub_module_documentation, name="generate_sub_module_documentation", description="Generate detailed description of a given sub-module specs to the sub-agents", takes_ctx=True, max_retries=3)
