@@ -218,7 +218,7 @@ class DocumentationGenerator:
             # Small repo that fits in a single context — no parallelism needed
             logger.info("Processing whole repo because repo can fit in the context window")
             repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
-            final_module_tree = await self.agent_orchestrator.process_module(
+            final_module_tree, _ = await self.agent_orchestrator.process_module(
                 repo_name, components, leaf_nodes, [], working_dir
             )
 
@@ -352,6 +352,7 @@ class DocumentationGenerator:
                 try:
                     progress.set_postfix_str(label, refresh=False)
                     task_t0 = asyncio.get_event_loop().time()
+                    task_models_used = ""
                     last_exc = None
                     for attempt in range(len(_WORKER_RETRY_DELAYS) + 1):
                         if attempt > 0:
@@ -368,9 +369,10 @@ class DocumentationGenerator:
                             if key == ROOT_KEY:
                                 logger.info("📚 Generating repository overview")
                                 await self.generate_parent_module_docs([], working_dir, tree_manager)
+                                task_models_used = self.config.main_model
                             else:
                                 path, name, info, _ = all_tasks[key]
-                                await self.agent_orchestrator.process_module(
+                                _, task_models_used = await self.agent_orchestrator.process_module(
                                     name, components,
                                     info.get("components", []),
                                     path, working_dir, tree_manager,
@@ -385,7 +387,8 @@ class DocumentationGenerator:
 
                     task_elapsed = asyncio.get_event_loop().time() - task_t0
                     progress.update(1)
-                    logger.info(f"✓ Task '{label}' completed in {task_elapsed:.1f}s")
+                    model_suffix = f" (model: {task_models_used})" if task_models_used else ""
+                    logger.info(f"✓ Task '{label}' completed in {task_elapsed:.1f}s{model_suffix}")
 
                     # Unblock parent when all siblings are done
                     parent_key = child_to_parent.get(key)

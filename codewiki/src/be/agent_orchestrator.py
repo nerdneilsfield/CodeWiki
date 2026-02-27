@@ -96,12 +96,16 @@ class AgentOrchestrator:
     
     async def process_module(self, module_name: str, components: Dict[str, Node],
                            core_component_ids: List[str], module_path: List[str],
-                           working_dir: str, tree_manager=None) -> Dict[str, Any]:
+                           working_dir: str, tree_manager=None) -> tuple[Dict[str, Any], str]:
         """Process a single module and generate its documentation.
 
         Args:
             tree_manager: Optional ModuleTreeManager for lock-protected
                 tree access during concurrent processing.
+
+        Returns:
+            A tuple of (module_tree, models_used) where *models_used* is a
+            comma-separated string of model names that actually responded.
         """
         logger.info(f"Processing module: {module_name}")
 
@@ -144,18 +148,18 @@ class AgentOrchestrator:
                             f"✓ Module {module_name} and all children have docs — auto-marking complete"
                         )
                         await tree_manager.mark_completed(module_path)
-                        return {}
+                        return {}, "cached"
                 if not completed:
                     logger.debug(
                         f"↩ Module {module_name} exists but is complex and not marked complete — re-processing"
                     )
                 else:
                     logger.debug(f"✓ Module docs already exists at {docs_path}")
-                    return {}
+                    return {}, "cached"
             else:
                 # Leaf / simple module — .md existence is sufficient
                 logger.debug(f"✓ Module docs already exists at {docs_path}")
-                return {}
+                return {}, "cached"
 
         # ── Get module tree snapshot ─────────────────────────────────────
         if tree_manager:
@@ -227,7 +231,7 @@ class AgentOrchestrator:
             if tree_manager and module_path:
                 await tree_manager.mark_completed(module_path)
 
-            return deps.module_tree
+            return deps.module_tree, models_used
 
         except Exception as e:
             logger.error(f"Error processing module {module_name}: {str(e)}")
