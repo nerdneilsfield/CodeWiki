@@ -92,6 +92,8 @@ CodeWiki is an open-source framework for **automated repository-level documentat
 | **Multi-Modal Synthesis** | Generates textual documentation, architecture diagrams, data flows, and sequence diagrams | Comprehensive understanding from multiple perspectives |
 | **Incremental Resume** | `_completed` flags track finished modules; interrupted runs resume automatically | No wasted work on re-runs |
 | **Multi-Fallback Models** | Comma-separated fallback chain with automatic long-context model switching | Robust against API failures and token limits |
+| **Real-Time Progress** | `tqdm` progress bar with ETA across the dynamic task queue and fill passes | Instant visibility into generation status |
+| **Math Notation (KaTeX)** | Agents use LaTeX `$...$` / `$$...$$` when formulas genuinely clarify (complexity, ML objectives, etc.); both viewers render via KaTeX | Precise, readable documentation for algorithm-heavy modules |
 
 ### Supported Languages
 
@@ -157,6 +159,10 @@ codewiki generate --verbose
 
 # Full-featured generation
 codewiki generate --create-branch --github-pages --verbose
+
+# Override model for this run only (without changing config)
+codewiki generate --main-model gpt-4o
+codewiki generate --main-model gpt-4o --long-context-model gpt-4o-128k --long-context-threshold 100000
 ```
 
 ### Customization Options
@@ -276,6 +282,9 @@ codewiki config set --max-concurrent 5
 
 # Override at runtime for a single generation
 codewiki generate --max-tokens 16384 --max-token-per-module 40000 --max-depth 3 --max-concurrent 5
+
+# Override model at runtime (takes precedence over config for this run only)
+codewiki generate --main-model gpt-4o --long-context-model gpt-4o-128k --long-context-threshold 100000
 ```
 
 | Option | Description | Default |
@@ -289,6 +298,9 @@ codewiki generate --max-tokens 16384 --max-token-per-module 40000 --max-depth 3 
 | `--long-context-model` | Model for prompts exceeding the threshold | _(none)_ |
 | `--long-context-threshold` | Token count to trigger long-context model switch | 200000 |
 | `--language` | Language code for generated documentation | `en` |
+
+> **Runtime-only overrides** (available on `codewiki generate`, do not persist to config):
+> `--main-model`, `--long-context-model`, `--long-context-threshold`, `--max-tokens`, `--max-token-per-module`, `--max-token-per-leaf-module`, `--max-depth`, `--max-concurrent`, `--language`
 
 ### Configuration Storage
 
@@ -334,6 +346,7 @@ The interactive HTML viewer (`--github-pages`) and static pages (`--static`) inc
 - **Collapsible sidebar** with full module tree navigation
 - **Auto-generated table of contents** from document headings
 - **Syntax highlighting** for code blocks via highlight.js
+- **Math rendering** via KaTeX — `$inline$` and `$$block$$` LaTeX formulas render natively
 - **Mobile-responsive** layout with touch-friendly controls
 - **Back-to-top** button for long documents
 - **DeepWiki integration** — links to the corresponding DeepWiki page for quick comparison
