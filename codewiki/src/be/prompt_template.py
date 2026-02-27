@@ -41,6 +41,14 @@ Generate documentation following this structure:
 - Include concrete examples, configuration options, and known limitations or gotchas where applicable
 </CONTENT_QUALITY>
 
+<GROUNDING_RULES>
+- ONLY reference function names, class names, and APIs that actually exist in the provided source code
+- Do NOT invent or hallucinate function signatures, parameter names, or return types — verify against the code
+- Use the dependency graph (depends_on / depended_by) to describe architecture and data flow accurately
+- When describing component interactions, cite the actual call relationships from the provided dependency data
+- If you are uncertain about implementation details, say so rather than guessing
+</GROUNDING_RULES>
+
 <WORKFLOW>
 1. Analyze the provided code components and module structure, explore the not given dependencies between the components if needed
 2. Create the main `{module_name}.md` file with overview and architecture in working directory
@@ -89,6 +97,14 @@ Generate documentation following the following requirements:
 6. References: Link to other module documentation instead of duplicating information
 7. Prose over bullets: Write conceptual explanations in full paragraphs; use bullet points only for enumerations, not for descriptions that deserve narrative
 </DOCUMENTATION_REQUIREMENTS>
+
+<GROUNDING_RULES>
+- ONLY reference function names, class names, and APIs that actually exist in the provided source code
+- Do NOT invent or hallucinate function signatures, parameter names, or return types — verify against the code
+- Use the dependency graph (depends_on / depended_by) to describe architecture and data flow accurately
+- When describing component interactions, cite the actual call relationships from the provided dependency data
+- If you are uncertain about implementation details, say so rather than guessing
+</GROUNDING_RULES>
 
 <WORKFLOW>
 1. Analyze provided code components and module structure
@@ -326,6 +342,9 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
 
     # print(f"Formatted module tree:\n{formatted_module_tree}")
 
+    # Build set of IDs in this module for filtering dependencies
+    module_ids = set(core_component_ids)
+
     # Group core component IDs by their file path
     grouped_components: dict[str, list[str]] = {}
     for component_id in core_component_ids:
@@ -341,23 +360,81 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
     for path, component_ids_in_file in grouped_components.items():
         core_component_codes += f"# File: {path}\n\n"
         core_component_codes += f"## Core Components in this file:\n"
-        
+
         for component_id in component_ids_in_file:
-            core_component_codes += f"- {component_id}\n"
-        
+            node = components[component_id]
+            # Component identity
+            comp_type = node.component_type or node.node_type or "unknown"
+            core_component_codes += f"- **{component_id}** ({comp_type})"
+            if node.base_classes:
+                core_component_codes += f" extends {', '.join(node.base_classes)}"
+            core_component_codes += "\n"
+            # Signature
+            if node.parameters:
+                core_component_codes += f"  Parameters: {', '.join(node.parameters)}\n"
+            # Docstring (truncated)
+            if node.docstring:
+                doc = node.docstring.strip().split('\n')[0][:200]
+                core_component_codes += f"  Summary: {doc}\n"
+            # Dependencies within this module
+            deps_in_module = node.depends_on & module_ids
+            if deps_in_module:
+                core_component_codes += f"  Depends on: {', '.join(sorted(deps_in_module))}\n"
+            # Dependencies on external components
+            deps_external = node.depends_on - module_ids
+            if deps_external:
+                core_component_codes += f"  External deps: {', '.join(sorted(deps_external))}\n"
+
         ext = '.' + path.split('.')[-1] if '.' in path else ''
         lang = EXTENSION_TO_LANGUAGE.get(ext, ext.lstrip('.') or 'text')
         core_component_codes += f"\n## File Content:\n```{lang}\n"
-        
+
         # Read content of the file using the first component's file path
         try:
             core_component_codes += file_manager.load_text(components[component_ids_in_file[0]].file_path)
         except (FileNotFoundError, IOError) as e:
             core_component_codes += f"# Error reading file: {e}\n"
-        
+
         core_component_codes += "```\n\n"
-        
-    return USER_PROMPT.format(module_name=module_name, formatted_core_component_codes=core_component_codes, module_tree=formatted_module_tree)
+
+    # Build a reverse dependency map (who depends on me) for this module
+    depended_by: dict[str, list[str]] = {}
+    for cid in module_ids:
+        if cid not in components:
+            continue
+        for dep in components[cid].depends_on:
+            if dep in module_ids:
+                depended_by.setdefault(dep, []).append(cid)
+
+    # Format dependency graph summary
+    dep_graph_lines = []
+    for cid in core_component_ids:
+        if cid not in components:
+            continue
+        node = components[cid]
+        outgoing = sorted(node.depends_on & module_ids)
+        incoming = sorted(depended_by.get(cid, []))
+        if outgoing or incoming:
+            dep_graph_lines.append(f"  {cid}:")
+            if outgoing:
+                dep_graph_lines.append(f"    calls → {', '.join(outgoing)}")
+            if incoming:
+                dep_graph_lines.append(f"    called by ← {', '.join(incoming)}")
+
+    dependency_section = ""
+    if dep_graph_lines:
+        dependency_section = (
+            "\n<DEPENDENCY_GRAPH>\n"
+            "Intra-module call relationships (use this to describe architecture accurately):\n"
+            + "\n".join(dep_graph_lines)
+            + "\n</DEPENDENCY_GRAPH>\n"
+        )
+
+    return USER_PROMPT.format(
+        module_name=module_name,
+        formatted_core_component_codes=core_component_codes,
+        module_tree=formatted_module_tree,
+    ) + dependency_section
 
 
 
