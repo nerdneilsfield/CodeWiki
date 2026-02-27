@@ -7,6 +7,9 @@ from typing import Dict, List, Any, Optional
 from copy import deepcopy
 import traceback
 
+import openai
+from pydantic_ai.exceptions import UnexpectedModelBehavior
+
 from tqdm import tqdm
 
 # Configure logging and monitoring
@@ -315,8 +318,28 @@ class DocumentationGenerator:
             leave=True,
         )
 
-        # Retry delays for transient errors: 10 s, 30 s, 90 s
+        # Retry delays for transient server errors: 10 s, 30 s, 90 s.
+        # Model-quality errors (bad JSON output, exceeded tool retries) resolve
+        # immediately on a fresh agent — no delay needed.
         _WORKER_RETRY_DELAYS = [10, 30, 90]
+
+        def _retry_delay(attempt: int, exc: Exception) -> int:
+            """Return seconds to wait before the given retry attempt.
+
+            Server-side transient errors (rate limits, 5xx) need real back-off.
+            Model-quality errors (HTTP 400 invalid JSON args, UnexpectedModelBehavior)
+            resolve immediately once a fresh agent context is used — delay = 0.
+            """
+            is_model_quality = (
+                isinstance(exc, UnexpectedModelBehavior)
+                or (
+                    isinstance(exc, openai.APIStatusError)
+                    and exc.status_code == 400
+                )
+            )
+            if is_model_quality:
+                return 0
+            return _WORKER_RETRY_DELAYS[attempt - 1]
 
         # ── Worker ───────────────────────────────────────────────────────
         async def _worker(_worker_id: int):
@@ -328,15 +351,19 @@ class DocumentationGenerator:
                 label = "overview" if key == ROOT_KEY else all_tasks[key][1]
                 try:
                     progress.set_postfix_str(label, refresh=False)
+                    task_t0 = asyncio.get_event_loop().time()
                     last_exc = None
-                    for attempt, delay in enumerate([0] + _WORKER_RETRY_DELAYS):
-                        if delay:
+                    for attempt in range(len(_WORKER_RETRY_DELAYS) + 1):
+                        if attempt > 0:
+                            delay = _retry_delay(attempt, last_exc)
                             logger.warning(
-                                f"  ↻ Retrying '{label}' in {delay}s "
-                                f"(attempt {attempt}/{len(_WORKER_RETRY_DELAYS)}) "
-                                f"after: {last_exc}"
+                                f"  ↻ Retrying '{label}'"
+                                + (f" in {delay}s" if delay else " immediately")
+                                + f" (attempt {attempt}/{len(_WORKER_RETRY_DELAYS)})"
+                                + f" after: {last_exc}"
                             )
-                            await asyncio.sleep(delay)
+                            if delay:
+                                await asyncio.sleep(delay)
                         try:
                             if key == ROOT_KEY:
                                 logger.info("📚 Generating repository overview")
@@ -356,7 +383,9 @@ class DocumentationGenerator:
                     if last_exc is not None:
                         raise last_exc
 
+                    task_elapsed = asyncio.get_event_loop().time() - task_t0
                     progress.update(1)
+                    logger.info(f"✓ Task '{label}' completed in {task_elapsed:.1f}s")
 
                     # Unblock parent when all siblings are done
                     parent_key = child_to_parent.get(key)
@@ -446,7 +475,7 @@ class DocumentationGenerator:
         """Generate documentation for a parent module based on its children's documentation."""
         module_name = module_path[-1] if len(module_path) >= 1 else os.path.basename(os.path.normpath(self.config.repo_path))
 
-        logger.info(f"Generating parent documentation for: {module_name}")
+        logger.debug(f"Generating parent documentation for: {module_name}")
 
         # Get module tree
         if tree_manager:
@@ -461,7 +490,7 @@ class DocumentationGenerator:
         else:
             output_path = os.path.join(working_dir, f"{module_name}.md")
         if os.path.exists(output_path) and os.path.getsize(output_path) > 100:
-            logger.info(f"✓ Docs already exists at {output_path}")
+            logger.debug(f"✓ Docs already exists at {output_path}")
             return module_tree
 
         # Create repo structure with 1-depth children docs and target indicator

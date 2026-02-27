@@ -320,7 +320,7 @@ def graph_pre_cluster(
         communities = _merge_smallest(communities)
 
     if len(communities) != n_before:
-        logger.info(
+        logger.debug(
             f"Merged {n_before} → {len(communities)} communities "
             f"(tiny merge + {MAX_CLUSTERS}-cluster cap)"
         )
@@ -354,7 +354,7 @@ def graph_pre_cluster(
             if dst_cluster and dst_cluster != src_cluster:
                 cross_edges[src_cluster].add(dst_cluster)
 
-    logger.info(
+    logger.debug(
         f"Graph pre-clustering: {len(node_set)} nodes, {G.number_of_edges()} edges "
         f"→ {len(clusters)} communities"
     )
@@ -424,12 +424,12 @@ def cluster_modules(
             if cid in components
         }
         n_files = len(unique_files)
-        logger.info(
+        logger.debug(
             f"Sub-clustering '{current_module_name}' "
             f"({len(leaf_nodes)} components, {n_files} file(s))"
         )
         if n_files < _MIN_FILES_FOR_SUB_CLUSTER:
-            logger.info(
+            logger.debug(
                 f"  → skipped (only {n_files} file(s), need ≥ {_MIN_FILES_FOR_SUB_CLUSTER})"
             )
             return {}
@@ -438,12 +438,12 @@ def cluster_modules(
         token_threshold = config.max_token_per_module
         _, _code_for_count = format_potential_core_components(leaf_nodes, components)
         token_count = count_tokens(_code_for_count)
-        logger.info(
+        logger.debug(
             f"Clustering check: {len(leaf_nodes)} leaf node(s), "
             f"{token_count} tokens (threshold: {token_threshold})"
         )
         if token_count <= token_threshold:
-            logger.info(
+            logger.debug(
                 f"Skipping clustering — fits in a single context window "
                 f"({token_count} ≤ {token_threshold} tokens)"
             )
@@ -456,7 +456,7 @@ def cluster_modules(
     graph_hint = ""
     if graph_clusters:
         graph_hint = _format_graph_clusters_hint(graph_clusters, cross_edges, components)
-        logger.info(
+        logger.debug(
             f"Graph pre-clustering produced {len(graph_clusters)} clusters: "
             f"{', '.join(f'{k}({len(v)})' for k, v in graph_clusters.items())}"
         )
@@ -534,7 +534,7 @@ def cluster_modules(
     else:
         value = current_module_tree
         for key in current_module_path:
-            value = value[key]["children"]
+            value = value[key].setdefault("children", {})
         for module_name, module_info in module_tree.items():
             module_info.pop("path", None)
             value[module_name] = module_info
@@ -567,7 +567,7 @@ def cluster_modules(
             module_tree[module_name]["children"] = children
             n_children = len(children)
             if n_children:
-                logger.info(
+                logger.debug(
                     f"  → '{module_name}' split into {n_children} sub-modules: "
                     + ", ".join(children.keys())
                 )
@@ -587,7 +587,7 @@ def _log_tree_summary(module_tree: Dict[str, Any], indent: int = 0) -> None:
         n_comp = len(info.get("components", []))
         suffix = f"  [{n_comp} components]"
         if children:
-            logger.info(f"{prefix}├── {name}{suffix}")
+            logger.debug(f"{prefix}├── {name}{suffix}")
             _log_tree_summary(children, indent + 1)
         else:
-            logger.info(f"{prefix}└── {name}{suffix}  [leaf]")
+            logger.debug(f"{prefix}└── {name}{suffix}  [leaf]")

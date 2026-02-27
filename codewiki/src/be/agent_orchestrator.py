@@ -1,4 +1,7 @@
+import time
+
 from pydantic_ai import Agent
+from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 # import logfire
 import logging
@@ -137,21 +140,21 @@ class AgentOrchestrator:
                         and os.path.getsize(os.path.join(working_dir, f"{cn}.md")) > 100
                         for cn in children
                     ):
-                        logger.info(
+                        logger.debug(
                             f"✓ Module {module_name} and all children have docs — auto-marking complete"
                         )
                         await tree_manager.mark_completed(module_path)
                         return {}
                 if not completed:
-                    logger.info(
+                    logger.debug(
                         f"↩ Module {module_name} exists but is complex and not marked complete — re-processing"
                     )
                 else:
-                    logger.info(f"✓ Module docs already exists at {docs_path}")
+                    logger.debug(f"✓ Module docs already exists at {docs_path}")
                     return {}
             else:
                 # Leaf / simple module — .md existence is sufficient
-                logger.info(f"✓ Module docs already exists at {docs_path}")
+                logger.debug(f"✓ Module docs already exists at {docs_path}")
                 return {}
 
         # ── Get module tree snapshot ─────────────────────────────────────
@@ -182,6 +185,7 @@ class AgentOrchestrator:
 
         # Run agent
         try:
+            t0 = time.time()
             result = await agent.run(
                 format_user_prompt(
                     module_name=module_name,
@@ -192,6 +196,24 @@ class AgentOrchestrator:
                 deps=deps,
                 usage_limits=UsageLimits(request_limit=None),
                 event_stream_handler=agent_progress_handler,
+            )
+            elapsed = time.time() - t0
+
+            # Log which model(s) actually responded (detects fallback switches)
+            model_names = []
+            for msg in result.all_messages():
+                if isinstance(msg, ModelResponse) and msg.model_name:
+                    if msg.model_name not in model_names:
+                        model_names.append(msg.model_name)
+            models_used = ", ".join(model_names) if model_names else "unknown"
+            if len(model_names) > 1:
+                logger.info(
+                    f"Fallback triggered for '{module_name}': "
+                    f"models used: {models_used} ({elapsed:.1f}s)"
+                )
+            logger.debug(
+                f"Successfully processed module: {module_name} "
+                f"in {elapsed:.1f}s (model: {models_used})"
             )
 
             # Persist tree — manager handles locking; otherwise save directly
@@ -205,7 +227,6 @@ class AgentOrchestrator:
             if tree_manager and module_path:
                 await tree_manager.mark_completed(module_path)
 
-            logger.debug(f"Successfully processed module: {module_name}")
             return deps.module_tree
 
         except Exception as e:

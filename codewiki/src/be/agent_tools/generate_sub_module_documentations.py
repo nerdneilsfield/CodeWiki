@@ -1,6 +1,10 @@
+import asyncio
 import os
+import time
 from pydantic_ai import RunContext, Tool, Agent
+from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
+import openai
 
 from codewiki.src.be.agent_tools.deps import CodeWikiDeps
 from codewiki.src.be.agent_tools.read_code_components import read_code_components_tool
@@ -103,14 +107,14 @@ async def generate_sub_module_documentation(
 
         # ── Skip sub-modules already dispatched in this agent run ─────
         if sub_module_name in deps._dispatched_sub_modules:
-            logger.info(f"{indent}{arrow} ✓ Sub-module {sub_module_name} already dispatched in this run, skipping")
+            logger.debug(f"{indent}{arrow} ✓ Sub-module {sub_module_name} already dispatched in this run, skipping")
             continue
         deps._dispatched_sub_modules.add(sub_module_name)
 
         # ── Skip sub-modules whose docs already exist ─────────────────
         docs_path = os.path.join(deps.absolute_docs_path, f"{sub_module_name}.md")
         if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
-            logger.info(f"{indent}{arrow} ✓ Sub-module {sub_module_name} already has docs, skipping")
+            logger.debug(f"{indent}{arrow} ✓ Sub-module {sub_module_name} already has docs, skipping")
             continue
 
         logger.info(f"{indent}{arrow} Generating documentation for sub-module: {sub_module_name}")
@@ -138,17 +142,60 @@ async def generate_sub_module_documentation(
         deps.path_to_current_module.append(sub_module_name)
         deps.current_depth += 1
 
-        result = await sub_agent.run(
-            format_user_prompt(
-                module_name=deps.current_module_name,
-                core_component_ids=core_component_ids,
-                components=ctx.deps.components,
-                module_tree=ctx.deps.module_tree,
-            ),
-            deps=ctx.deps,
-            usage_limits=UsageLimits(request_limit=None),
-            event_stream_handler=agent_progress_handler,
-        )
+        _sub_retry_delays = [5, 15]
+        _sub_last_exc = None
+        for _sub_attempt in range(len(_sub_retry_delays) + 1):
+            if _sub_attempt > 0:
+                _delay = _sub_retry_delays[_sub_attempt - 1]
+                logger.warning(
+                    f"{indent}{arrow} Retrying sub-module '{sub_module_name}' "
+                    f"in {_delay}s (attempt {_sub_attempt}/{len(_sub_retry_delays)}) "
+                    f"after: {_sub_last_exc}"
+                )
+                await asyncio.sleep(_delay)
+            try:
+                _sub_t0 = time.time()
+                _sub_result = await sub_agent.run(
+                    format_user_prompt(
+                        module_name=deps.current_module_name,
+                        core_component_ids=core_component_ids,
+                        components=ctx.deps.components,
+                        module_tree=ctx.deps.module_tree,
+                    ),
+                    deps=ctx.deps,
+                    usage_limits=UsageLimits(request_limit=None),
+                    event_stream_handler=agent_progress_handler,
+                )
+                _sub_elapsed = time.time() - _sub_t0
+                # Log which model(s) responded
+                _sub_models = []
+                for _msg in _sub_result.all_messages():
+                    if isinstance(_msg, ModelResponse) and _msg.model_name:
+                        if _msg.model_name not in _sub_models:
+                            _sub_models.append(_msg.model_name)
+                _sub_models_str = ", ".join(_sub_models) if _sub_models else "unknown"
+                if len(_sub_models) > 1:
+                    logger.info(
+                        f"{indent}{arrow} Fallback triggered for sub-module '{sub_module_name}': "
+                        f"models used: {_sub_models_str} ({_sub_elapsed:.1f}s)"
+                    )
+                logger.debug(
+                    f"{indent}{arrow} Sub-module '{sub_module_name}' completed "
+                    f"in {_sub_elapsed:.1f}s (model: {_sub_models_str})"
+                )
+                _sub_last_exc = None
+                break
+            except Exception as _exc:
+                _sub_last_exc = _exc
+
+        if _sub_last_exc is not None:
+            logger.error(
+                f"{indent}{arrow} Sub-module '{sub_module_name}' failed after all retries: "
+                f"{_sub_last_exc} — skipping (fill pass will retry)"
+            )
+            deps.path_to_current_module.pop()
+            deps.current_depth -= 1
+            continue
 
         # Mark this sub-module as completed so re-runs can skip it
         if deps.module_tree_manager:

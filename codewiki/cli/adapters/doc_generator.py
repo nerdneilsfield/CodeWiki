@@ -39,16 +39,18 @@ class CLIDocumentationGenerator:
         verbose: bool = False,
         generate_html: bool = False,
         generate_static: bool = False,
+        no_cache: bool = False,
     ):
         """
         Initialize the CLI documentation generator.
-        
+
         Args:
             repo_path: Repository path
             output_dir: Output directory
             config: LLM configuration
             verbose: Enable verbose output
             generate_html: Whether to generate HTML viewer
+            no_cache: Clear existing docs before generation
         """
         self.repo_path = repo_path
         self.output_dir = output_dir
@@ -56,6 +58,7 @@ class CLIDocumentationGenerator:
         self.verbose = verbose
         self.generate_html = generate_html
         self.generate_static = generate_static
+        self.no_cache = no_cache
         self.progress_tracker = ProgressTracker(total_stages=5, verbose=verbose)
         self.job = DocumentationJob()
         
@@ -75,43 +78,47 @@ class CLIDocumentationGenerator:
     def _configure_backend_logging(self):
         """Configure backend logger for CLI use with colored output."""
         from codewiki.src.be.dependency_analyzer.utils.logging_config import ColoredFormatter
-        
+
         # Get backend logger (parent of all backend modules)
         backend_logger = logging.getLogger('codewiki.src.be')
-        
+
         # Remove existing handlers to avoid duplicates
         backend_logger.handlers.clear()
-        
+
         if self.verbose:
-            # In verbose mode, show INFO and above
-            backend_logger.setLevel(logging.INFO)
-            
+            # In verbose mode, show DEBUG and above for our own code
+            backend_logger.setLevel(logging.DEBUG)
+
             # Create console handler with formatting
             console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setLevel(logging.INFO)
-            
+            console_handler.setLevel(logging.DEBUG)
+
             # Use colored formatter for better readability
             colored_formatter = ColoredFormatter()
             console_handler.setFormatter(colored_formatter)
-            
+
             # Add handler to logger
             backend_logger.addHandler(console_handler)
         else:
             # In non-verbose mode, suppress backend logs (use WARNING level to hide INFO/DEBUG)
             backend_logger.setLevel(logging.WARNING)
-            
+
             # Create console handler for warnings and errors only
             console_handler = logging.StreamHandler(sys.stderr)
             console_handler.setLevel(logging.WARNING)
-            
+
             # Use colored formatter even for warnings/errors
             colored_formatter = ColoredFormatter()
             console_handler.setFormatter(colored_formatter)
-            
+
             backend_logger.addHandler(console_handler)
-        
+
         # Prevent propagation to root logger to avoid duplicate messages
         backend_logger.propagate = False
+
+        # Suppress noisy third-party loggers regardless of mode
+        for lib_logger_name in ('httpx', 'openai', 'urllib3', 'httpcore', 'pydantic_ai'):
+            logging.getLogger(lib_logger_name).setLevel(logging.WARNING)
     
     def generate(self) -> DocumentationJob:
         """
@@ -139,11 +146,14 @@ class CLIDocumentationGenerator:
                 main_model=self.config.get('main_model'),
                 cluster_model=self.config.get('cluster_model'),
                 fallback_model=self.config.get('fallback_model'),
+                long_context_model=self.config.get('long_context_model') or None,
+                long_context_threshold=self.config.get('long_context_threshold', 200000),
                 max_tokens=self.config.get('max_tokens', 32768),
                 max_token_per_module=self.config.get('max_token_per_module', 36369),
                 max_token_per_leaf_module=self.config.get('max_token_per_leaf_module', 16000),
                 max_depth=self.config.get('max_depth', 2),
                 max_concurrent=self.config.get('max_concurrent', 3),
+                max_retries=self.config.get('max_retries', 2),
                 output_language=self.config.get('output_language', 'en'),
                 agent_instructions=self.config.get('agent_instructions')
             )
@@ -173,9 +183,40 @@ class CLIDocumentationGenerator:
             self.job.fail(str(e))
             raise
     
+    @staticmethod
+    def _clear_completed_flags(tree: dict) -> None:
+        """Recursively remove _completed flags from a module tree so all modules are re-processed."""
+        for info in tree.values():
+            info.pop('_completed', None)
+            children = info.get('children') or {}
+            if children:
+                CLIDocumentationGenerator._clear_completed_flags(children)
+
     async def _run_backend_generation(self, backend_config: BackendConfig):
         """Run the backend documentation generation with progress tracking."""
-        
+
+        # --no-cache: wipe existing markdown files and _completed flags so every
+        # module is regenerated from scratch (e.g. to switch main_model mid-run).
+        if self.no_cache:
+            working_dir = str(self.output_dir.absolute())
+            import glob as _glob
+            removed = 0
+            for md_file in _glob.glob(os.path.join(working_dir, '*.md')):
+                os.remove(md_file)
+                removed += 1
+            if removed:
+                logging.getLogger(__name__).info(
+                    f"--no-cache: removed {removed} existing .md file(s) from {working_dir}"
+                )
+            # Clear _completed flags so complex modules are not skipped
+            from codewiki.src.utils import file_manager as _fm
+            from codewiki.src.config import MODULE_TREE_FILENAME
+            module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
+            if os.path.exists(module_tree_path):
+                tree = _fm.load_json(module_tree_path) or {}
+                self._clear_completed_flags(tree)
+                _fm.save_json(tree, module_tree_path)
+
         # Stage 1: Dependency Analysis
         self.progress_tracker.start_stage(1, "Dependency Analysis")
         if self.verbose:

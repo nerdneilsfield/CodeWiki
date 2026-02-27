@@ -108,20 +108,22 @@ def call_llm(
         and prompt_tokens > config.long_context_threshold
         and model == config.main_model
     ):
-        import logging
-        logging.getLogger(__name__).info(
-            f"Prompt has {prompt_tokens} tokens (> {config.long_context_threshold}), "
-            f"switching from {model} to long-context model {config.long_context_model}"
+        _logger.info(
+            f"Switching model: {model} → {config.long_context_model} "
+            f"(prompt {prompt_tokens} tokens > threshold {config.long_context_threshold})"
         )
         model = config.long_context_model
 
+    _logger.debug(f"call_llm: model={model}, prompt_tokens={prompt_tokens}, temperature={temperature}")
+
     client = create_openai_client(config)
     last_exc: Exception = None
+    t0 = time.time()
     for attempt, delay in enumerate([0] + _RETRY_DELAYS):
         if delay:
             _logger.warning(
-                f"call_llm: retrying in {delay}s (attempt {attempt}/{len(_RETRY_DELAYS)}) "
-                f"after: {last_exc}"
+                f"call_llm [model={model}]: retrying in {delay}s "
+                f"(attempt {attempt}/{len(_RETRY_DELAYS)}) after: {last_exc}"
             )
             time.sleep(delay)
         try:
@@ -131,7 +133,13 @@ def call_llm(
                 temperature=temperature,
                 max_tokens=config.max_tokens
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            elapsed = time.time() - t0
+            _logger.debug(
+                f"call_llm [model={model}]: success in {elapsed:.1f}s, "
+                f"response length={len(content)}"
+            )
+            return content
         except Exception as exc:
             last_exc = exc
     raise last_exc

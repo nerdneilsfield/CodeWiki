@@ -35,10 +35,10 @@ async def agent_progress_handler(ctx, stream: AsyncIterable) -> None:
 
     async for event in stream:
         if isinstance(event, PartStartEvent):
-            logger.info(f"    [{agent_name}] LLM response part {event.index} started")
+            logger.debug(f"    [{agent_name}] LLM response part {event.index} started")
         elif isinstance(event, FunctionToolCallEvent):
             tool_name = event.part.tool_name if hasattr(event.part, "tool_name") else "?"
-            logger.info(f"    [{agent_name}] calling tool: {tool_name}")
+            logger.debug(f"    [{agent_name}] calling tool: {tool_name}")
         elif isinstance(event, FunctionToolResultEvent):
             pass  # tool results are logged by the tools themselves
 
