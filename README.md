@@ -50,7 +50,7 @@ codewiki config set \
   --base-url https://api.anthropic.com \
   --main-model claude-sonnet-4 \
   --cluster-model claude-sonnet-4 \
-  --fallback-model glm-4p5
+  --fallback-model "glm-4p5,gpt-4o-mini"
 ```
 
 ### 3. Generate Documentation
@@ -79,19 +79,23 @@ codewiki generate --max-concurrent 5
 
 ## What is CodeWiki?
 
-CodeWiki is an open-source framework for **automated repository-level documentation** across seven programming languages. It generates holistic, architecture-aware documentation that captures not only individual functions but also their cross-file, cross-module, and system-level interactions.
+CodeWiki is an open-source framework for **automated repository-level documentation** across nine programming languages. It generates holistic, architecture-aware documentation that captures not only individual functions but also their cross-file, cross-module, and system-level interactions.
 
 ### Key Innovations
 
 | Innovation | Description | Impact |
 |------------|-------------|--------|
 | **Hierarchical Decomposition** | Dynamic programming-inspired strategy that preserves architectural context | Handles codebases of arbitrary size (86K-1.4M LOC tested) |
+| **Graph-Based Clustering** | Louvain community detection on dependency graphs, refined by LLM | Structurally-aware module grouping, not just semantic |
+| **Dynamic Task-Queue Parallelism** | `asyncio.Queue` with N workers; parents enqueued as soon as children finish | Eliminates idle time from level-based blocking |
 | **Recursive Agentic System** | Adaptive multi-agent processing with dynamic delegation capabilities | Maintains quality while scaling to repository-level scope |
 | **Multi-Modal Synthesis** | Generates textual documentation, architecture diagrams, data flows, and sequence diagrams | Comprehensive understanding from multiple perspectives |
+| **Incremental Resume** | `_completed` flags track finished modules; interrupted runs resume automatically | No wasted work on re-runs |
+| **Multi-Fallback Models** | Comma-separated fallback chain with automatic long-context model switching | Robust against API failures and token limits |
 
 ### Supported Languages
 
-**🐍 Python** • **☕ Java** • **🟨 JavaScript** • **🔷 TypeScript** • **⚙️ C** • **🔧 C++** • **🪟 C#**
+**🐍 Python** • **☕ Java** • **🟨 JavaScript** • **🔷 TypeScript** • **⚙️ C** • **🔧 C++** • **🪟 C#** • **🦀 Rust** • **🐹 Go**
 
 ---
 
@@ -106,7 +110,10 @@ codewiki config set \
   --base-url <provider-url> \
   --main-model <model-name> \
   --cluster-model <model-name> \
-  --fallback-model <model-name>
+  --fallback-model "model1,model2"          # comma-separated fallback chain
+
+# Configure a long-context model for very large prompts
+codewiki config set --long-context-model gemini-2.5-flash --long-context-threshold 200000
 
 # Configure max token settings
 codewiki config set --max-tokens 32768 --max-token-per-module 36369 --max-token-per-leaf-module 16000
@@ -278,6 +285,9 @@ codewiki generate --max-tokens 16384 --max-token-per-module 40000 --max-depth 3 
 | `--max-token-per-leaf-module` | Input tokens threshold for leaf modules | 16000 |
 | `--max-depth` | Maximum depth for hierarchical decomposition | 2 |
 | `--max-concurrent` | Maximum number of modules processed in parallel | 3 |
+| `--fallback-model` | Comma-separated fallback model chain | `glm-4p5` |
+| `--long-context-model` | Model for prompts exceeding the threshold | _(none)_ |
+| `--long-context-threshold` | Token count to trigger long-context model switch | 200000 |
 | `--language` | Language code for generated documentation | `en` |
 
 ### Configuration Storage
@@ -323,6 +333,7 @@ The interactive HTML viewer (`--github-pages`) and static pages (`--static`) inc
 - **Dark / light mode** with automatic OS preference detection and manual toggle
 - **Collapsible sidebar** with full module tree navigation
 - **Auto-generated table of contents** from document headings
+- **Syntax highlighting** for code blocks via highlight.js
 - **Mobile-responsive** layout with touch-friendly controls
 - **Back-to-top** button for long documents
 - **DeepWiki integration** — links to the corresponding DeepWiki page for quick comparison
@@ -360,29 +371,33 @@ CodeWiki has been evaluated on **CodeWikiBench**, the first benchmark specifical
 
 ### Architecture Overview
 
-CodeWiki employs a three-stage process for comprehensive documentation generation:
+CodeWiki employs a multi-stage pipeline for comprehensive documentation generation:
 
-1. **Hierarchical Decomposition**: Uses dynamic programming-inspired algorithms to partition repositories into coherent modules while preserving architectural context across multiple granularity levels.
+1. **Dependency Analysis & Graph-Based Clustering**: Builds a dependency graph from the codebase and applies Louvain community detection to pre-cluster components by actual dependency and co-location structure. The LLM then refines these graph clusters into semantically named modules.
 
-2. **Recursive Multi-Agent Processing**: Implements adaptive multi-agent processing with dynamic task delegation, allowing the system to handle complex modules at scale while maintaining quality.
+2. **Hierarchical Decomposition**: Uses dynamic programming-inspired algorithms to recursively partition large modules until each fits within a context window, preserving architectural context across multiple granularity levels.
 
-3. **Level-Based Concurrent Execution**: Modules at the same depth in the hierarchy are independent and processed in parallel using `asyncio` with a configurable concurrency limit (`--max-concurrent`). Parent modules are processed only after all their children complete, ensuring correct context propagation.
+3. **Recursive Multi-Agent Processing**: Implements adaptive multi-agent processing with dynamic task delegation. Each agent has access to tools for reading code, editing documentation, and delegating to sub-agents for complex modules.
 
-4. **Multi-Modal Synthesis**: Integrates textual descriptions with visual artifacts including architecture diagrams, data-flow representations, and sequence diagrams for comprehensive understanding.
+4. **Dynamic Task-Queue Concurrency**: Instead of level-by-level processing, a dynamic `asyncio.Queue` with N workers processes modules as they become ready. When all children of a parent complete, the parent is immediately enqueued — no waiting for unrelated modules. This significantly reduces idle time compared to traditional level-based parallelism.
+
+5. **Multi-Modal Synthesis**: Integrates textual descriptions with visual artifacts including architecture diagrams, data-flow representations, and sequence diagrams for comprehensive understanding.
+
+6. **Incremental Resume**: Completed modules are tracked with `_completed` flags in the module tree. If generation is interrupted, re-running `codewiki generate` automatically skips finished modules and resumes from where it left off.
 
 ### Data Flow
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Codebase      │───▶│  Hierarchical    │───▶│  Multi-Agent    │
-│   Analysis      │    │  Decomposition   │    │  Processing     │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                                │                        │
-                                ▼                        ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Visual        │◀───│  Multi-Modal     │◀───│  Structured     │
-│   Artifacts     │    │  Synthesis       │    │  Content        │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+┌─────────────┐    ┌───────────────┐    ┌──────────────┐    ┌──────────────┐
+│  Dependency  │───▶│ Graph-Based   │───▶│ Hierarchical │───▶│  Dynamic     │
+│  Analysis    │    │ Clustering    │    │ Decomposition│    │  Task Queue  │
+│              │    │ (Louvain)     │    │              │    │  (N workers) │
+└─────────────┘    └───────────────┘    └──────────────┘    └──────┬───────┘
+                                                                   │
+                    ┌───────────────┐    ┌──────────────┐          │
+                    │  Visual       │◀───│  Multi-Agent │◀─────────┘
+                    │  Artifacts    │    │  Processing  │
+                    └───────────────┘    └──────────────┘
 ```
 
 ---
