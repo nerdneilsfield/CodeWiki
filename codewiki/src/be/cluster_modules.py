@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional, Tuple
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import PurePosixPath
 import difflib
 import json
@@ -534,25 +535,37 @@ def cluster_modules(
             value[module_name] = module_info
 
     path_index = _build_path_index(components)
-    for module_name, module_info in module_tree.items():
+
+    def _sub_cluster(module_name: str, module_info: Dict, parent_path: List[str]) -> Dict:
         sub_leaf_nodes = module_info.get("components", [])
-
         valid_sub_leaf_nodes = _filter_and_resolve_nodes(sub_leaf_nodes, components, path_index)
-
-        current_module_path.append(module_name)
-        module_info["children"] = {}
-        module_info["children"] = cluster_modules(
+        return cluster_modules(
             valid_sub_leaf_nodes, components, config,
-            current_module_tree, module_name, current_module_path,
+            current_module_tree, module_name, parent_path,
             _token_threshold=config.max_token_per_leaf_module,
         )
-        n_children = len(module_info["children"])
-        if n_children:
-            logger.info(
-                f"  → '{module_name}' split into {n_children} sub-modules: "
-                + ", ".join(module_info["children"].keys())
-            )
-        current_module_path.pop()
+
+    max_workers = max(1, config.max_concurrent)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_name = {
+            executor.submit(
+                _sub_cluster,
+                module_name,
+                module_info,
+                current_module_path + [module_name],
+            ): module_name
+            for module_name, module_info in module_tree.items()
+        }
+        for future in as_completed(future_to_name):
+            module_name = future_to_name[future]
+            children = future.result()
+            module_tree[module_name]["children"] = children
+            n_children = len(children)
+            if n_children:
+                logger.info(
+                    f"  → '{module_name}' split into {n_children} sub-modules: "
+                    + ", ".join(children.keys())
+                )
 
     # At the top level, print a summary tree
     if not is_recursive_call:
