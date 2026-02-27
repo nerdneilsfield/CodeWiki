@@ -50,6 +50,7 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
 3. **Visual Documentation**:
    - Mermaid diagrams for architecture, dependency graphs, and data flow — include ONLY when they genuinely clarify (max ~10 nodes per diagram)
    - Every diagram must be accompanied by a written explanation — diagrams supplement prose, never replace it
+   - Mathematical notation: use LaTeX syntax (`$inline$` / `$$block$$`) ONLY when a formula communicates something prose cannot — e.g., algorithmic complexity (O(n log n)), ML loss functions, probability distributions, or cryptographic properties. Default to plain language; reach for math only when it genuinely adds precision.
 </DOCUMENTATION_STRUCTURE>
 
 <GROUNDING_RULES>
@@ -129,6 +130,7 @@ Good: "`Tokenizer.split()` exists because the downstream parser expects a flat t
 7. **Edge cases & gotchas**: Error conditions, behavioral constraints, known limitations, operational considerations
 8. **References**: Link to other module docs rather than duplicating their content
 9. **Prose over bullets**: Write conceptual explanations in full paragraphs; reserve bullet points for enumerations, not for narratives
+10. **Mathematical notation**: Use LaTeX syntax (`$inline$` / `$$block$$`) ONLY when a formula genuinely aids understanding — e.g., algorithmic complexity, ML objectives, or probability properties. Default to prose; math is a last resort, not a default.
 </DOCUMENTATION_REQUIREMENTS>
 
 <GROUNDING_RULES>
