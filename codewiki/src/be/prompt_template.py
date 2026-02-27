@@ -223,16 +223,17 @@ Each entry is structured as:
   File: <source file path>        ← for context only, NOT a component name
     Component: <component_id>     ← this is the actual component name to use
 {graph_clusters_section}
-Your task: group the components into cohesive modules. Each module should represent a feature, layer, or domain.
+Your task: group the components into cohesive top-level modules. Each module should represent a distinct feature, layer, or domain of the codebase.
 
 Guidelines:
-- Use the graph-based clusters above as a starting point — they reflect actual call/dependency relationships
-- You MAY merge small clusters that belong together semantically, or split large ones that mix unrelated concerns
+- Aim for **6–15 top-level modules** — enough granularity to be meaningful, few enough to stay navigable
+- The graph-based clusters above are pre-computed structural hints (dependency + co-location). Use them as a starting point but **apply your own semantic judgement**: merge clusters that serve the same logical purpose, and split clusters that mix unrelated concerns
 - Give each module a clear, human-readable name that describes its purpose (e.g. "Authentication", "Database Layer", "API Routes")
 - DO NOT include components that are not essential to the repository
 - Use the component identifiers (after "Component:") EXACTLY as listed — NOT the file paths
+- Every component listed must appear in exactly one module
 
-Firstly reason about the dependency structure and semantic relationships, then return the result:
+First reason about what the high-level architecture of this codebase looks like — identify the main domains, layers, or subsystems — then map the components to those domains:
 <GROUPED_COMPONENTS>
 {{
     "module_name_1": {{
@@ -264,16 +265,17 @@ Each entry is structured as:
   File: <source file path>        ← for context only, NOT a component name
     Component: <component_id>     ← this is the actual component name to use
 {graph_clusters_section}
-Your task: split this module's components into smaller sub-modules. Each sub-module should represent a cohesive feature or responsibility.
+Your task: split this module's components into meaningful sub-modules. Each sub-module should represent a cohesive feature or responsibility within this module.
 
 Guidelines:
-- Use the graph-based clusters above as a starting point — they reflect actual call/dependency relationships
-- You MAY merge small clusters that belong together semantically, or split large ones
-- Give each sub-module a clear, descriptive name
+- Aim for **3–8 sub-modules** — coarse enough to be comprehensible, fine enough to be useful
+- The graph-based clusters above are structural hints. Use them as context but **apply semantic judgement**: merge clusters with the same responsibility, split clusters that mix concerns
+- Give each sub-module a clear, descriptive name reflecting what it does within {module_name}
 - DO NOT include components that are not essential to the module
 - Use the component identifiers (after "Component:") EXACTLY as listed — NOT the file paths
+- Every component listed must appear in exactly one sub-module
 
-Firstly reason based on dependency structure and semantic relationships, then return the result:
+First reason about what responsibilities exist inside {module_name}, then map components to those responsibilities:
 <GROUPED_COMPONENTS>
 {{
     "module_name_1": {{

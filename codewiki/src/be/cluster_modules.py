@@ -264,11 +264,12 @@ def graph_pre_cluster(
                 if not G.has_edge(a, b):
                     G.add_edge(a, b, weight=0.3)
 
-    # Run Louvain with higher resolution to produce fewer, larger clusters.
-    # GitNexus uses resolution=2.0; we also cap at ~12 clusters and merge
-    # tiny communities (< 3 members) into the most-connected neighbour.
+    # Run Louvain community detection; cap to MAX_CLUSTERS afterwards.
+    # Resolution 1.0 produces coarser communities than the original 2.0,
+    # reducing the initial count before the cap step.
+    MAX_CLUSTERS = 12
     try:
-        communities = louvain_communities(G, weight="weight", resolution=2.0, seed=42)
+        communities = louvain_communities(G, weight="weight", resolution=1.0, seed=42)
     except Exception as e:
         logger.warning(f"Louvain community detection failed: {e}")
         return {}, {}
@@ -279,25 +280,42 @@ def graph_pre_cluster(
     # Sort: largest first
     communities = sorted(communities, key=len, reverse=True)
 
-    # Merge tiny communities (< 3 members) into the most-connected neighbour
+    def _merge_smallest(comms):
+        """Merge the smallest community into its most-connected neighbour."""
+        comms = sorted(comms, key=len)  # smallest first
+        smallest = comms[0]
+        rest = comms[1:]
+        best, best_score = 0, -1
+        for idx, other in enumerate(rest):
+            score = sum(1 for n in smallest for nbr in G.neighbors(n) if nbr in other)
+            if score > best_score:
+                best, best_score = idx, score
+        rest[best] = rest[best] | smallest
+        return sorted(rest, key=len, reverse=True)
+
+    # Phase 1: merge tiny (< 3 members) communities
     MIN_CLUSTER_SIZE = 3
+    n_before = len(communities)
     large = [c for c in communities if len(c) >= MIN_CLUSTER_SIZE]
     small = [c for c in communities if len(c) < MIN_CLUSTER_SIZE]
     if large and small:
         for tiny in small:
-            # Find the large community with the most edges to this tiny one
             best, best_score = 0, -1
             for idx, big in enumerate(large):
-                score = sum(
-                    1 for n in tiny for nbr in G.neighbors(n) if nbr in big
-                )
+                score = sum(1 for n in tiny for nbr in G.neighbors(n) if nbr in big)
                 if score > best_score:
                     best, best_score = idx, score
             large[best] = large[best] | tiny
         communities = sorted(large, key=len, reverse=True)
+
+    # Phase 2: enforce MAX_CLUSTERS cap — keep merging smallest until at cap
+    while len(communities) > MAX_CLUSTERS:
+        communities = _merge_smallest(communities)
+
+    if len(communities) != n_before:
         logger.info(
-            f"Merged {len(small)} tiny cluster(s) into neighbours → "
-            f"{len(communities)} communities"
+            f"Merged {n_before} → {len(communities)} communities "
+            f"(tiny merge + {MAX_CLUSTERS}-cluster cap)"
         )
 
     # Build cluster dict with heuristic names
