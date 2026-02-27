@@ -220,22 +220,21 @@ Here is list of all potential core components of the repository (It's normal tha
 Each entry is structured as:
   File: <source file path>        ← for context only, NOT a component name
     Component: <component_id>     ← this is the actual component name to use
+{graph_clusters_section}
+Your task: group the components into cohesive modules. Each module should represent a feature, layer, or domain.
 
-Please group the components into groups such that each group is a set of components that are closely related to each other and together they form a module. DO NOT include components that are not essential to the repository.
-IMPORTANT: Use the component identifiers (the dotted paths after "Component:") EXACTLY as listed. Do NOT use the file paths (lines starting with "File:") as component names.
-Firstly reason about the components and then group them and return the result in the following format:
+Guidelines:
+- Use the graph-based clusters above as a starting point — they reflect actual call/dependency relationships
+- You MAY merge small clusters that belong together semantically, or split large ones that mix unrelated concerns
+- Give each module a clear, human-readable name that describes its purpose (e.g. "Authentication", "Database Layer", "API Routes")
+- DO NOT include components that are not essential to the repository
+- Use the component identifiers (after "Component:") EXACTLY as listed — NOT the file paths
+
+Firstly reason about the dependency structure and semantic relationships, then return the result:
 <GROUPED_COMPONENTS>
 {{
     "module_name_1": {{
-        "path": <path_to_the_module_1>, # the path to the module can be file or directory
-        "components": [
-            <component_name_1>,
-            <component_name_2>,
-            ...
-        ]
-    }},
-    "module_name_2": {{
-        "path": <path_to_the_module_2>,
+        "path": <path_to_the_module_1>,
         "components": [
             <component_name_1>,
             <component_name_2>,
@@ -262,23 +261,21 @@ Here is list of all potential core components of the module {module_name} (It's 
 Each entry is structured as:
   File: <source file path>        ← for context only, NOT a component name
     Component: <component_id>     ← this is the actual component name to use
+{graph_clusters_section}
+Your task: split this module's components into smaller sub-modules. Each sub-module should represent a cohesive feature or responsibility.
 
-Please group the components into groups such that each group is a set of components that are closely related to each other and together they form a smaller module. DO NOT include components that are not essential to the module.
-IMPORTANT: Use the component identifiers (the dotted paths after "Component:") EXACTLY as listed. Do NOT use the file paths (lines starting with "File:") as component names.
+Guidelines:
+- Use the graph-based clusters above as a starting point — they reflect actual call/dependency relationships
+- You MAY merge small clusters that belong together semantically, or split large ones
+- Give each sub-module a clear, descriptive name
+- DO NOT include components that are not essential to the module
+- Use the component identifiers (after "Component:") EXACTLY as listed — NOT the file paths
 
-Firstly reason based on given context and then group them and return the result in the following format:
+Firstly reason based on dependency structure and semantic relationships, then return the result:
 <GROUPED_COMPONENTS>
 {{
     "module_name_1": {{
-        "path": <path_to_the_module_1>, # the path to the module can be file or directory
-        "components": [
-            <component_name_1>,
-            <component_name_2>,
-            ...
-        ]
-    }},
-    "module_name_2": {{
-        "path": <path_to_the_module_2>,
+        "path": <path_to_the_module_1>,
         "components": [
             <component_name_1>,
             <component_name_2>,
@@ -473,36 +470,61 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
 
 
 
-def format_cluster_prompt(potential_core_components: str, module_tree: dict[str, any] = {}, module_name: str = None) -> str:
+def format_cluster_prompt(
+    potential_core_components: str,
+    module_tree: dict[str, any] = {},
+    module_name: str = None,
+    graph_clusters_hint: str = "",
+) -> str:
     """
-    Format the cluster prompt with potential core components and module tree.
+    Format the cluster prompt with potential core components, module tree,
+    and optional graph-based pre-clustering hints.
     """
 
     # format module tree
     lines = []
 
-    # print(f"Module tree:\n{json.dumps(module_tree, indent=2)}")
-    
     def _format_module_tree(module_tree: dict[str, any], indent: int = 0):
         for key, value in module_tree.items():
             if key == module_name:
                 lines.append(f"{'  ' * indent}{key} (current module)")
             else:
                 lines.append(f"{'  ' * indent}{key}")
-            
+
             lines.append(f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}")
             if ("children" in value) and isinstance(value["children"], dict) and len(value["children"]) > 0:
                 lines.append(f"{'  ' * (indent + 1)} Children:")
                 _format_module_tree(value["children"], indent + 2)
-    
+
     _format_module_tree(module_tree, 0)
     formatted_module_tree = "\n".join(lines)
 
+    # Build graph clusters section
+    if graph_clusters_hint:
+        graph_section = (
+            "\n<GRAPH_BASED_CLUSTERS>\n"
+            "The following clusters were pre-computed by analyzing actual call/dependency "
+            "relationships between components using community detection (Louvain algorithm). "
+            "Use these as a strong starting point — components within the same cluster call "
+            "each other or live in the same file:\n"
+            f"{graph_clusters_hint}\n"
+            "</GRAPH_BASED_CLUSTERS>\n"
+        )
+    else:
+        graph_section = ""
 
     if module_tree == {}:
-        return CLUSTER_REPO_PROMPT.format(potential_core_components=potential_core_components)
+        return CLUSTER_REPO_PROMPT.format(
+            potential_core_components=potential_core_components,
+            graph_clusters_section=graph_section,
+        )
     else:
-        return CLUSTER_MODULE_PROMPT.format(potential_core_components=potential_core_components, module_tree=formatted_module_tree, module_name=module_name)
+        return CLUSTER_MODULE_PROMPT.format(
+            potential_core_components=potential_core_components,
+            module_tree=formatted_module_tree,
+            module_name=module_name,
+            graph_clusters_section=graph_section,
+        )
 
 
 LANGUAGE_NAMES = {
