@@ -10,7 +10,9 @@ import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Optional, Tuple, Literal
+from typing import Annotated, List, Optional, Tuple, Literal, Union
+
+from pydantic import BeforeValidator
 import io
 
 import logging
@@ -29,6 +31,26 @@ from ..utils import validate_mermaid_diagrams
 # that can be solved with setting the default encoding for stdout
 # (note that python3.6 doesn't have the reconfigure method)
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
+def _coerce_int_list(v):
+    """Coerce a JSON-encoded string like '[240, 280]' to [240, 280].
+
+    Some models emit view_range as a string instead of an array; this
+    validator normalises the value before Pydantic's type check runs.
+    """
+    if isinstance(v, str):
+        import json as _json
+        try:
+            parsed = _json.loads(v)
+            if isinstance(parsed, list):
+                return parsed
+        except (ValueError, TypeError):
+            pass
+    return v
+
+
+ViewRangeType = Annotated[List[int], BeforeValidator(_coerce_int_list)]
+
 
 TRUNCATED_MESSAGE: str = "<response clipped><NOTE>To save on context only part of this file has been shown to you. You should retry this tool after you have searched inside the file with `grep -n` in order to find the line numbers of what you are looking for.</NOTE>"
 MAX_RESPONSE_LEN: int = 16000
@@ -717,7 +739,7 @@ async def str_replace_editor(
     path: Optional[str] = None,
     file: Optional[str] = None,
     file_text: Optional[str] = None,
-    view_range: Optional[List[int]] = None,
+    view_range: Optional[ViewRangeType] = None,
     old_str: Optional[str] = None,
     new_str: Optional[str] = None,
     insert_line: Optional[int] = None,
@@ -780,6 +802,7 @@ async def str_replace_editor(
 str_replace_editor_tool = Tool(
     function=str_replace_editor,
     name="str_replace_editor",
+    max_retries=3,
     description="""
 Custom editing tool for viewing, creating and editing files
     * State is persistent across command calls and discussions with the user
