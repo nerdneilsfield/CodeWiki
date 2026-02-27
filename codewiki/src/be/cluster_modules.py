@@ -366,7 +366,8 @@ def cluster_modules(
     config: Config,
     current_module_tree: dict[str, Any] = {},
     current_module_name: str = None,
-    current_module_path: List[str] = []
+    current_module_path: List[str] = [],
+    _token_threshold: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Cluster the potential core components into modules.
@@ -377,18 +378,27 @@ def cluster_modules(
     2. **LLM refinement** takes the graph clusters as hints and produces
        semantically named modules, optionally merging or splitting clusters.
     3. **Fallback**: if the LLM fails, the graph clusters are used directly.
+
+    ``_token_threshold`` controls when a group of components is considered
+    large enough to warrant splitting.  The top-level call uses
+    ``max_token_per_module``; recursive sub-module calls use the lower
+    ``max_token_per_leaf_module`` so that the complete tree is built during
+    the clustering phase — matching the threshold the documentation agents
+    use to decide whether to call ``generate_sub_module_documentation``.
     """
+    token_threshold = _token_threshold if _token_threshold is not None else config.max_token_per_module
+
     potential_core_components, potential_core_components_with_code = format_potential_core_components(leaf_nodes, components)
 
     token_count = count_tokens(potential_core_components_with_code)
     logger.info(
         f"Clustering check: {len(leaf_nodes)} leaf node(s), "
-        f"{token_count} tokens (threshold: {config.max_token_per_module})"
+        f"{token_count} tokens (threshold: {token_threshold})"
     )
-    if token_count <= config.max_token_per_module:
+    if token_count <= token_threshold:
         logger.info(
-            f"Skipping clustering — repository fits in a single context window "
-            f"({token_count} ≤ {config.max_token_per_module} tokens)"
+            f"Skipping clustering — fits in a single context window "
+            f"({token_count} ≤ {token_threshold} tokens)"
         )
         return {}
 
@@ -462,7 +472,11 @@ def cluster_modules(
 
         current_module_path.append(module_name)
         module_info["children"] = {}
-        module_info["children"] = cluster_modules(valid_sub_leaf_nodes, components, config, current_module_tree, module_name, current_module_path)
+        module_info["children"] = cluster_modules(
+            valid_sub_leaf_nodes, components, config,
+            current_module_tree, module_name, current_module_path,
+            _token_threshold=config.max_token_per_leaf_module,
+        )
         current_module_path.pop()
 
     return module_tree
