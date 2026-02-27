@@ -157,6 +157,12 @@ def parse_patterns(patterns_str: str) -> List[str]:
     help="Override the main model for this generation (e.g. gpt-4o, claude-3-5-sonnet). Overrides config.",
 )
 @click.option(
+    "--cluster-model",
+    type=str,
+    default=None,
+    help="Override the clustering model for this generation. Overrides config.",
+)
+@click.option(
     "--long-context-model",
     type=str,
     default=None,
@@ -190,6 +196,7 @@ def generate_command(
     max_retries: Optional[int],
     language: Optional[str],
     main_model: Optional[str],
+    cluster_model: Optional[str],
     long_context_model: Optional[str],
     long_context_threshold: Optional[int],
 ):
@@ -306,7 +313,9 @@ def generate_command(
         
         # Check for existing documentation
         if output_dir.exists() and list(output_dir.glob("*.md")):
-            if not click.confirm(
+            if no_cache:
+                logger.info("--no-cache specified: existing docs will be cleared before generation.")
+            elif not click.confirm(
                 f"\n{output_dir} already contains documentation. Overwrite?",
                 default=True
             ):
@@ -411,7 +420,7 @@ def generate_command(
             output_dir=output_dir,
             config={
                 'main_model': main_model if main_model else config.main_model,
-                'cluster_model': config.cluster_model,
+                'cluster_model': cluster_model if cluster_model else config.cluster_model,
                 'fallback_model': config.fallback_model,
                 'long_context_model': long_context_model if long_context_model else config.long_context_model,
                 'base_url': config.base_url,
