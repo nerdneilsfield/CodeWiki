@@ -144,6 +144,24 @@ def parse_patterns(patterns_str: str) -> List[str]:
     default=None,
     help="Language for generated documentation (e.g. en, zh, ja). Overrides config.",
 )
+@click.option(
+    "--model",
+    type=str,
+    default=None,
+    help="Override the main model for this generation (e.g. gpt-4o, claude-3-5-sonnet). Overrides config.",
+)
+@click.option(
+    "--long-context-model",
+    type=str,
+    default=None,
+    help="Override the long-context model for this generation. Overrides config.",
+)
+@click.option(
+    "--long-context-threshold",
+    type=int,
+    default=None,
+    help="Override the token threshold for switching to long-context model. Overrides config.",
+)
 @click.pass_context
 def generate_command(
     ctx,
@@ -164,6 +182,9 @@ def generate_command(
     max_depth: Optional[int],
     max_concurrent: Optional[int],
     language: Optional[str],
+    model: Optional[str],
+    long_context_model: Optional[str],
+    long_context_threshold: Optional[int],
 ):
     """
     Generate comprehensive documentation for a code repository.
@@ -212,6 +233,11 @@ def generate_command(
     \b
     # Generate pre-rendered static HTML pages (no runtime JS markdown rendering)
     $ codewiki generate --static
+
+    \b
+    # Override model for this run only
+    $ codewiki generate --model gpt-4o
+    $ codewiki generate --model gpt-4o --long-context-model gpt-4o-128k --long-context-threshold 100000
     """
     logger = create_logger(verbose=verbose)
     start_time = time.time()
@@ -343,6 +369,9 @@ def generate_command(
         
         # Log max token settings if verbose
         if verbose:
+            logger.debug(f"Main model: {model or config.main_model}")
+            if model:
+                logger.debug(f"  (overridden from config: {config.main_model})")
             effective_max_tokens = max_tokens if max_tokens is not None else config.max_tokens
             effective_max_token_per_module = max_token_per_module if max_token_per_module is not None else config.max_token_per_module
             effective_max_token_per_leaf = max_token_per_leaf_module if max_token_per_leaf_module is not None else config.max_token_per_leaf_module
@@ -374,9 +403,10 @@ def generate_command(
             repo_path=repo_path,
             output_dir=output_dir,
             config={
-                'main_model': config.main_model,
+                'main_model': model if model else config.main_model,
                 'cluster_model': config.cluster_model,
                 'fallback_model': config.fallback_model,
+                'long_context_model': long_context_model if long_context_model else config.long_context_model,
                 'base_url': config.base_url,
                 'api_key': api_key,
                 'agent_instructions': agent_instructions_dict,
@@ -390,6 +420,8 @@ def generate_command(
                 'max_concurrent': max_concurrent if max_concurrent is not None else config.max_concurrent,
                 # Output language (runtime override takes precedence)
                 'output_language': language.strip().lower() if language else config.output_language,
+                # Long-context threshold (runtime override takes precedence)
+                'long_context_threshold': long_context_threshold if long_context_threshold is not None else config.long_context_threshold,
             },
             verbose=verbose,
             generate_html=github_pages,
