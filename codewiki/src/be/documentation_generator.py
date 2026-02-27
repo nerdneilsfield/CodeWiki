@@ -244,9 +244,15 @@ class DocumentationGenerator:
 
         ROOT_KEY = "__root__"
 
-        # ── Build dependency graph from first_module_tree ────────────────
-        # all_tasks:       key → (path, name, info, is_leaf)
-        # pending_count:   parent_key → number of children still pending
+        # ── Build dependency graph from module_tree ──────────────────────
+        # Use module_tree (not first_module_tree) so that sub-modules
+        # discovered in previous runs are included as independent tasks
+        # and can be parallelised in the outer queue.
+        #
+        # all_tasks:       key → (path, name, info, is_queue_leaf)
+        #   is_queue_leaf  True  → no children in module_tree; enqueue now
+        #                  False → has children; enqueue after children done
+        # pending_count:   key → number of children still in-flight
         # child_to_parent: child_key → parent_key
         all_tasks: Dict[str, tuple] = {}
         pending_count: Dict[str, int] = {}
@@ -257,20 +263,22 @@ class DocumentationGenerator:
                 current_path = parent_path + [name]
                 key = "/".join(current_path)
                 children = info.get("children") or {}
-                is_leaf = not children or not isinstance(children, dict)
-                all_tasks[key] = (current_path, name, info, is_leaf)
+                is_queue_leaf = not children or not isinstance(children, dict)
+                all_tasks[key] = (current_path, name, info, is_queue_leaf)
 
                 if parent_key is not None:
                     child_to_parent[key] = parent_key
 
-                if not is_leaf:
+                if not is_queue_leaf:
                     pending_count[key] = len(children)
                     _walk(children, current_path, parent_key=key)
 
-        _walk(first_module_tree, [])
+        # Use a snapshot of module_tree taken before any workers mutate it
+        graph_tree = await tree_manager.get_snapshot()
+        _walk(graph_tree, [])
 
         # Virtual root depends on all top-level modules
-        top_level_keys = list(first_module_tree.keys())
+        top_level_keys = list(graph_tree.keys())
         pending_count[ROOT_KEY] = len(top_level_keys)
         for name in top_level_keys:
             child_to_parent[name] = ROOT_KEY
@@ -316,17 +324,17 @@ class DocumentationGenerator:
                             [], working_dir, tree_manager
                         )
                     else:
-                        path, name, info, is_leaf = all_tasks[key]
-                        if is_leaf:
-                            await self.agent_orchestrator.process_module(
-                                name, components,
-                                info.get("components", []),
-                                path, working_dir, tree_manager
-                            )
-                        else:
-                            await self.generate_parent_module_docs(
-                                path, working_dir, tree_manager
-                            )
+                        # All actual module nodes (leaf or intermediate) run
+                        # a full agent via process_module.  When a parent node
+                        # is dequeued its children are already done, so any
+                        # generate_sub_module_documentation calls inside the
+                        # agent will skip them (docs already exist).
+                        path, name, info, _ = all_tasks[key]
+                        await self.agent_orchestrator.process_module(
+                            name, components,
+                            info.get("components", []),
+                            path, working_dir, tree_manager
+                        )
 
                     progress.update(1)
 
