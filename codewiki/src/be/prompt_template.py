@@ -233,6 +233,11 @@ Guidelines:
 - Use the component identifiers (after "Component:") EXACTLY as listed — NOT the file paths
 - Every component listed must appear in exactly one module
 
+Output requirements:
+- Return ONLY valid JSON (no markdown, no prose)
+- Wrap the JSON in <GROUPED_COMPONENTS> ... </GROUPED_COMPONENTS>
+- Do NOT use code fences
+
 First reason about what the high-level architecture of this codebase looks like — identify the main domains, layers, or subsystems — then map the components to those domains:
 <GROUPED_COMPONENTS>
 {{
@@ -274,6 +279,11 @@ Guidelines:
 - DO NOT include components that are not essential to the module
 - Use the component identifiers (after "Component:") EXACTLY as listed — NOT the file paths
 - Every component listed must appear in exactly one sub-module
+
+Output requirements:
+- Return ONLY valid JSON (no markdown, no prose)
+- Wrap the JSON in <GROUPED_COMPONENTS> ... </GROUPED_COMPONENTS>
+- Do NOT use code fences
 
 First reason about what responsibilities exist inside {module_name}, then map components to those responsibilities:
 <GROUPED_COMPONENTS>

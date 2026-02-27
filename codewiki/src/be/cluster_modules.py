@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from collections import defaultdict
 from pathlib import PurePosixPath
 import difflib
+import json
 import logging
 import traceback
 
@@ -462,18 +463,34 @@ def cluster_modules(
     response = call_llm(prompt, config, model=config.cluster_model)
 
     module_tree = None
-    try:
-        if "<GROUPED_COMPONENTS>" not in response or "</GROUPED_COMPONENTS>" not in response:
-            logger.error(f"Invalid LLM response format - missing component tags: {response[:200]}...")
-        else:
-            response_content = response.split("<GROUPED_COMPONENTS>")[1].split("</GROUPED_COMPONENTS>")[0]
-            module_tree = eval(response_content)
-            if not isinstance(module_tree, dict):
-                logger.error(f"Invalid module tree format - expected dict, got {type(module_tree)}")
-                module_tree = None
-    except Exception as e:
-        logger.error(f"Failed to parse LLM response: {e}. Response: {response[:200]}...")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+    def _strip_code_fence(text: str) -> str:
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            lines = stripped.splitlines()
+            if len(lines) >= 2 and lines[-1].strip().startswith("```"):
+                return "\n".join(lines[1:-1]).strip()
+        return stripped
+
+    def _try_parse(content: str) -> Optional[Dict[str, Any]]:
+        try:
+            payload = _strip_code_fence(content)
+            parsed = json.loads(payload)
+            if not isinstance(parsed, dict):
+                logger.error(f"Invalid module tree format - expected dict, got {type(parsed)}")
+                return None
+            return parsed
+        except Exception as e:
+            logger.error(f"Failed to parse LLM response: {e}. Response: {response[:200]}...")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None
+
+    if "<GROUPED_COMPONENTS>" in response and "</GROUPED_COMPONENTS>" in response:
+        response_content = response.split("<GROUPED_COMPONENTS>")[1].split("</GROUPED_COMPONENTS>")[0]
+        module_tree = _try_parse(response_content)
+    else:
+        # Accept bare JSON/dict responses as a fallback
+        logger.warning("LLM response missing <GROUPED_COMPONENTS> tags — attempting to parse raw response")
+        module_tree = _try_parse(response)
 
     # ── Step 3: Fallback to graph clusters if LLM failed ──────────────────
     if not module_tree and graph_clusters:
