@@ -514,6 +514,25 @@ def cluster_modules(
     if not module_tree:
         return {}
 
+    def _compute_rep_path(component_ids: List[str]) -> str:
+        counts: Dict[str, int] = defaultdict(int)
+        for cid in component_ids:
+            node = components.get(cid)
+            if not node:
+                continue
+            parent = PurePosixPath(node.relative_path).parent.as_posix()
+            counts[parent] += 1
+        if not counts:
+            return ""
+        return max(counts, key=counts.get)
+
+    def _ensure_paths(tree: Dict[str, Any]) -> None:
+        for info in tree.values():
+            if not info.get("path"):
+                info["path"] = _compute_rep_path(info.get("components", []))
+
+    _ensure_paths(module_tree)
+
     # check if the module tree is valid
     if len(module_tree) <= 1:
         logger.debug(f"Skipping clustering for {current_module_name} because the module tree is too small: {len(module_tree)} modules")
@@ -536,7 +555,6 @@ def cluster_modules(
         for key in current_module_path:
             value = value[key].setdefault("children", {})
         for module_name, module_info in module_tree.items():
-            module_info.pop("path", None)
             value[module_name] = module_info
 
     path_index = _build_path_index(components)

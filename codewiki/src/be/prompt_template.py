@@ -237,6 +237,7 @@ Output requirements:
 - Return ONLY valid JSON (no markdown, no prose)
 - Wrap the JSON in <GROUPED_COMPONENTS> ... </GROUPED_COMPONENTS>
 - Do NOT use code fences
+- Each module entry MUST include a non-empty "path" field (relative directory path)
 
 First reason about what the high-level architecture of this codebase looks like — identify the main domains, layers, or subsystems — then map the components to those domains:
 <GROUPED_COMPONENTS>
@@ -284,6 +285,7 @@ Output requirements:
 - Return ONLY valid JSON (no markdown, no prose)
 - Wrap the JSON in <GROUPED_COMPONENTS> ... </GROUPED_COMPONENTS>
 - Do NOT use code fences
+- Each module entry MUST include a non-empty "path" field (relative directory path)
 
 First reason about what responsibilities exist inside {module_name}, then map components to those responsibilities:
 <GROUPED_COMPONENTS>
