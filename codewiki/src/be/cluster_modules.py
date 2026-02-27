@@ -18,6 +18,11 @@ from codewiki.src.be.prompt_template import format_cluster_prompt
 
 logger = logging.getLogger(__name__)
 
+# Minimum number of distinct files a module must span before sub-clustering
+# is attempted.  Modules with fewer files are unlikely to benefit from an
+# extra LLM call and are skipped directly.
+_MIN_FILES_FOR_SUB_CLUSTER = 4
+
 
 def _fuzzy_match_component(name: str, components: Dict) -> Optional[str]:
     """Try to find a close match for a component name that wasn't found exactly."""
@@ -423,9 +428,9 @@ def cluster_modules(
             f"Sub-clustering '{current_module_name}' "
             f"({len(leaf_nodes)} components, {n_files} file(s))"
         )
-        if n_files <= 1:
+        if n_files < _MIN_FILES_FOR_SUB_CLUSTER:
             logger.info(
-                f"  → skipped (single-file module)"
+                f"  → skipped (only {n_files} file(s), need ≥ {_MIN_FILES_FOR_SUB_CLUSTER})"
             )
             return {}
     else:
