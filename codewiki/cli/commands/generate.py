@@ -145,7 +145,7 @@ def parse_patterns(patterns_str: str) -> List[str]:
     help="Language for generated documentation (e.g. en, zh, ja). Overrides config.",
 )
 @click.option(
-    "--model",
+    "--main-model",
     type=str,
     default=None,
     help="Override the main model for this generation (e.g. gpt-4o, claude-3-5-sonnet). Overrides config.",
@@ -182,7 +182,7 @@ def generate_command(
     max_depth: Optional[int],
     max_concurrent: Optional[int],
     language: Optional[str],
-    model: Optional[str],
+    main_model: Optional[str],
     long_context_model: Optional[str],
     long_context_threshold: Optional[int],
 ):
@@ -236,8 +236,8 @@ def generate_command(
 
     \b
     # Override model for this run only
-    $ codewiki generate --model gpt-4o
-    $ codewiki generate --model gpt-4o --long-context-model gpt-4o-128k --long-context-threshold 100000
+    $ codewiki generate --main-model gpt-4o
+    $ codewiki generate --main-model gpt-4o --long-context-model gpt-4o-128k --long-context-threshold 100000
     """
     logger = create_logger(verbose=verbose)
     start_time = time.time()
@@ -369,8 +369,8 @@ def generate_command(
         
         # Log max token settings if verbose
         if verbose:
-            logger.debug(f"Main model: {model or config.main_model}")
-            if model:
+            logger.debug(f"Main model: {main_model or config.main_model}")
+            if main_model:
                 logger.debug(f"  (overridden from config: {config.main_model})")
             effective_max_tokens = max_tokens if max_tokens is not None else config.max_tokens
             effective_max_token_per_module = max_token_per_module if max_token_per_module is not None else config.max_token_per_module
@@ -403,7 +403,7 @@ def generate_command(
             repo_path=repo_path,
             output_dir=output_dir,
             config={
-                'main_model': model if model else config.main_model,
+                'main_model': main_model if main_model else config.main_model,
                 'cluster_model': config.cluster_model,
                 'fallback_model': config.fallback_model,
                 'long_context_model': long_context_model if long_context_model else config.long_context_model,
