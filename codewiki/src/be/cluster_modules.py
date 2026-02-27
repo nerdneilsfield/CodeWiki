@@ -379,28 +379,48 @@ def cluster_modules(
        semantically named modules, optionally merging or splitting clusters.
     3. **Fallback**: if the LLM fails, the graph clusters are used directly.
 
-    ``_token_threshold`` controls when a group of components is considered
-    large enough to warrant splitting.  The top-level call uses
-    ``max_token_per_module``; recursive sub-module calls use the lower
-    ``max_token_per_leaf_module`` so that the complete tree is built during
-    the clustering phase — matching the threshold the documentation agents
-    use to decide whether to call ``generate_sub_module_documentation``.
+    ``_token_threshold`` is set only on recursive calls (not None) to
+    signal that sub-module splitting should use file-count logic instead of
+    token-count logic.  The top-level call skips clustering when the whole
+    repo fits in one context window (token-based).  Recursive calls skip
+    only single-file modules — mirroring ``is_complex_module`` which the
+    documentation agents use to decide whether to call
+    ``generate_sub_module_documentation``.
     """
-    token_threshold = _token_threshold if _token_threshold is not None else config.max_token_per_module
+    is_recursive_call = _token_threshold is not None
+
+    if is_recursive_call:
+        # Mirror is_complex_module: only attempt sub-clustering if components
+        # span more than one file.  Token size doesn't matter here — the agent
+        # will sub-cluster any multi-file module regardless of token count.
+        unique_files = {
+            components[cid].relative_path
+            for cid in leaf_nodes
+            if cid in components
+        }
+        if len(unique_files) <= 1:
+            logger.info(
+                f"Skipping sub-clustering for '{current_module_name}' — "
+                f"single-file module ({len(leaf_nodes)} component(s))"
+            )
+            return {}
+    else:
+        # Top-level call: skip only if the entire repo fits in one context window
+        token_threshold = config.max_token_per_module
+        _, _code_for_count = format_potential_core_components(leaf_nodes, components)
+        token_count = count_tokens(_code_for_count)
+        logger.info(
+            f"Clustering check: {len(leaf_nodes)} leaf node(s), "
+            f"{token_count} tokens (threshold: {token_threshold})"
+        )
+        if token_count <= token_threshold:
+            logger.info(
+                f"Skipping clustering — fits in a single context window "
+                f"({token_count} ≤ {token_threshold} tokens)"
+            )
+            return {}
 
     potential_core_components, potential_core_components_with_code = format_potential_core_components(leaf_nodes, components)
-
-    token_count = count_tokens(potential_core_components_with_code)
-    logger.info(
-        f"Clustering check: {len(leaf_nodes)} leaf node(s), "
-        f"{token_count} tokens (threshold: {token_threshold})"
-    )
-    if token_count <= token_threshold:
-        logger.info(
-            f"Skipping clustering — fits in a single context window "
-            f"({token_count} ≤ {token_threshold} tokens)"
-        )
-        return {}
 
     # ── Step 1: Graph-based pre-clustering ────────────────────────────────
     graph_clusters, cross_edges = graph_pre_cluster(leaf_nodes, components)
