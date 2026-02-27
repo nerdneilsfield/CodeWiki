@@ -225,74 +225,127 @@ class DocumentationGenerator:
 
             return working_dir
 
-        # ── Concurrent path ──────────────────────────────────────────────
+        # ── Dynamic task-queue concurrent path ────────────────────────────
+        #
+        # Instead of processing level-by-level (which blocks on the slowest
+        # sibling), we use a dynamic queue:
+        #   1. All leaf modules are enqueued immediately.
+        #   2. N workers consume the queue concurrently.
+        #   3. When ALL children of a parent complete, the parent is
+        #      dynamically enqueued — no need to wait for unrelated modules.
+        #   4. A virtual ROOT task generates the repo overview once all
+        #      top-level modules finish.
 
-        # Create lock-protected tree manager
         tree_manager = ModuleTreeManager(module_tree, module_tree_path)
-
-        # Compute levels (level 0 = deepest leaves, higher = parents)
-        levels = self.get_processing_levels(first_module_tree)
         max_concurrent = getattr(self.config, 'max_concurrent', 3)
         max_retries = getattr(self.config, 'max_retries', 2)
-        semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def _process_one(module_path, module_name, module_info):
-            """Process a single module; returns True on success, False on failure."""
-            module_key = "/".join(module_path)
-            try:
-                if self.is_leaf_module(module_info):
-                    await self.agent_orchestrator.process_module(
-                        module_name, components,
-                        module_info.get("components", []),
-                        module_path, working_dir, tree_manager
-                    )
-                else:
-                    await self.generate_parent_module_docs(
-                        module_path, working_dir, tree_manager
-                    )
-                return True
-            except Exception as e:
-                logger.error(f"Failed to process {module_key}: {e}")
-                logger.error(traceback.format_exc())
-                return False
+        ROOT_KEY = "__root__"
 
-        async def _process(module_path, module_name, module_info):
-            async with semaphore:
-                return await _process_one(module_path, module_name, module_info)
+        # ── Build dependency graph from first_module_tree ────────────────
+        # all_tasks:       key → (path, name, info, is_leaf)
+        # pending_count:   parent_key → number of children still pending
+        # child_to_parent: child_key → parent_key
+        all_tasks: Dict[str, tuple] = {}
+        pending_count: Dict[str, int] = {}
+        child_to_parent: Dict[str, str] = {}
 
-        for level_idx, level_modules in enumerate(levels):
-            level_names = [name for _, name, _ in level_modules]
-            logger.info(
-                f"📊 Level {level_idx}: {len(level_modules)} module(s) "
-                f"(concurrency={max_concurrent}) — {', '.join(level_names[:5])}"
-                f"{'...' if len(level_names) > 5 else ''}"
-            )
+        def _walk(tree: Dict[str, Any], parent_path: List[str], parent_key: Optional[str] = None):
+            for name, info in tree.items():
+                current_path = parent_path + [name]
+                key = "/".join(current_path)
+                children = info.get("children") or {}
+                is_leaf = not children or not isinstance(children, dict)
+                all_tasks[key] = (current_path, name, info, is_leaf)
 
-            tasks = [_process(mp, mn, mi) for mp, mn, mi in level_modules]
-            await asyncio.gather(*tasks)
+                if parent_key is not None:
+                    child_to_parent[key] = parent_key
 
-            # ── Retry failed modules concurrently ─────────────────────────
-            for retry in range(max_retries):
-                failed = [
-                    (mp, mn, mi)
-                    for mp, mn, mi in level_modules
-                    if not self._module_doc_exists(working_dir, mn)
-                ]
-                if not failed:
-                    break
-                logger.warning(
-                    f"↩ Retry {retry + 1}/{max_retries} for {len(failed)} failed module(s): "
-                    f"{', '.join(mn for _, mn, _ in failed)}"
-                )
-                retry_tasks = [_process(mp, mn, mi) for mp, mn, mi in failed]
-                await asyncio.gather(*retry_tasks)
+                if not is_leaf:
+                    pending_count[key] = len(children)
+                    _walk(children, current_path, parent_key=key)
+
+        _walk(first_module_tree, [])
+
+        # Virtual root depends on all top-level modules
+        top_level_keys = list(first_module_tree.keys())
+        pending_count[ROOT_KEY] = len(top_level_keys)
+        for name in top_level_keys:
+            child_to_parent[name] = ROOT_KEY
+
+        lock = asyncio.Lock()
+        queue: asyncio.Queue[str] = asyncio.Queue()
+
+        # Enqueue all leaf tasks
+        leaf_count = 0
+        for key, (path, name, info, is_leaf) in all_tasks.items():
+            if is_leaf:
+                await queue.put(key)
+                leaf_count += 1
+
+        total_tasks = len(all_tasks) + 1  # +1 for root
+        logger.info(
+            f"📊 Dynamic queue: {leaf_count} leaf tasks, "
+            f"{len(all_tasks) - leaf_count} parent tasks, "
+            f"1 root overview (concurrency={max_concurrent})"
+        )
+
+        # ── Worker ───────────────────────────────────────────────────────
+        async def _worker(worker_id: int):
+            while True:
+                try:
+                    key = await queue.get()
+                except asyncio.CancelledError:
+                    return
+                try:
+                    if key == ROOT_KEY:
+                        logger.info("📚 Generating repository overview")
+                        await self.generate_parent_module_docs(
+                            [], working_dir, tree_manager
+                        )
+                    else:
+                        path, name, info, is_leaf = all_tasks[key]
+                        if is_leaf:
+                            await self.agent_orchestrator.process_module(
+                                name, components,
+                                info.get("components", []),
+                                path, working_dir, tree_manager
+                            )
+                        else:
+                            await self.generate_parent_module_docs(
+                                path, working_dir, tree_manager
+                            )
+
+                    # On success — check if parent is unblocked
+                    parent_key = child_to_parent.get(key)
+                    if parent_key is not None:
+                        async with lock:
+                            pending_count[parent_key] -= 1
+                            remaining = pending_count[parent_key]
+                        if remaining == 0:
+                            if parent_key == ROOT_KEY:
+                                logger.info("🔓 All top-level modules done — enqueueing root overview")
+                            else:
+                                p_path, p_name, _, _ = all_tasks[parent_key]
+                                logger.info(f"🔓 Parent unblocked: {p_name} — all children done")
+                            await queue.put(parent_key)
+
+                except Exception as e:
+                    label = key if key == ROOT_KEY else all_tasks[key][1]
+                    logger.error(f"Failed to process {label}: {e}")
+                    logger.error(traceback.format_exc())
+                    # Don't unblock parent — fill pass will handle gaps
+                finally:
+                    queue.task_done()
+
+        # ── Spawn workers and wait ───────────────────────────────────────
+        workers = [asyncio.create_task(_worker(i)) for i in range(max_concurrent)]
+        await queue.join()
+        for w in workers:
+            w.cancel()
 
         # ── Fill any sub-modules whose .md was not written ───────────────
         await self._fill_missing_module_docs(working_dir, components, tree_manager, max_retries)
-
-        # ── Root overview (after all modules) ────────────────────────────
-        logger.info("📚 Generating repository overview")
-        await self.generate_parent_module_docs([], working_dir, tree_manager)
 
         return working_dir
 
