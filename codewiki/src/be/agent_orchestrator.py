@@ -120,6 +120,28 @@ class AgentOrchestrator:
                         completed = node.get(module_path[-1], {}).get("_completed", False)
                     except (KeyError, TypeError):
                         pass
+                if not completed and tree_manager:
+                    # Auto-infer: if all child modules also have docs, mark
+                    # completed and skip (handles modules from before the
+                    # _completed flag was introduced).
+                    children = {}
+                    try:
+                        info_node = snapshot
+                        for key in module_path[:-1]:
+                            info_node = info_node[key]["children"]
+                        children = info_node.get(module_path[-1], {}).get("children", {})
+                    except (KeyError, TypeError):
+                        pass
+                    if children and all(
+                        os.path.exists(os.path.join(working_dir, f"{cn}.md"))
+                        and os.path.getsize(os.path.join(working_dir, f"{cn}.md")) > 100
+                        for cn in children
+                    ):
+                        logger.info(
+                            f"✓ Module {module_name} and all children have docs — auto-marking complete"
+                        )
+                        await tree_manager.mark_completed(module_path)
+                        return {}
                 if not completed:
                     logger.info(
                         f"↩ Module {module_name} exists but is complex and not marked complete — re-processing"

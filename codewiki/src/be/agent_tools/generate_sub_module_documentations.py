@@ -70,12 +70,16 @@ async def generate_sub_module_documentation(
     # Create fallback models from config
     fallback_models = create_fallback_models(deps.config)
 
-    # add the sub-module to the module tree
+    # add the sub-module to the module tree (preserve existing entries)
     value = deps.module_tree
     for key in deps.path_to_current_module:
         value = value[key]["children"]
     for sub_module_name, core_component_ids in sub_module_specs.items():
-        value[sub_module_name] = {"components": core_component_ids, "children": {}}
+        if sub_module_name not in value:
+            value[sub_module_name] = {"components": core_component_ids, "children": {}}
+        else:
+            # Only refresh components; keep existing _completed / children
+            value[sub_module_name]["components"] = core_component_ids
 
     # Persist the updated tree immediately so the sidebar stays accurate even if
     # the agent fails later (after sub-module .md files have already been created).
@@ -97,10 +101,16 @@ async def generate_sub_module_documentation(
         indent = "  " * deps.current_depth
         arrow = "└─" if deps.current_depth > 0 else "→"
 
+        # ── Skip sub-modules whose docs already exist ─────────────────
+        docs_path = os.path.join(deps.absolute_docs_path, f"{sub_module_name}.md")
+        if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
+            logger.info(f"{indent}{arrow} ✓ Sub-module {sub_module_name} already has docs, skipping")
+            continue
+
         logger.info(f"{indent}{arrow} Generating documentation for sub-module: {sub_module_name}")
 
         num_tokens = count_tokens(format_potential_core_components(core_component_ids, ctx.deps.components)[-1])
-        
+
         if is_complex_module(ctx.deps.components, core_component_ids) and ctx.deps.current_depth < ctx.deps.max_depth and num_tokens >= ctx.deps.config.max_token_per_leaf_module:
             sub_agent = Agent(
                 model=fallback_models,
@@ -121,8 +131,6 @@ async def generate_sub_module_documentation(
         deps.current_module_name = sub_module_name
         deps.path_to_current_module.append(sub_module_name)
         deps.current_depth += 1
-        # log the current module tree
-        # print(f"Current module tree: {json.dumps(deps.module_tree, indent=4)}")
 
         result = await sub_agent.run(
             format_user_prompt(
@@ -134,6 +142,10 @@ async def generate_sub_module_documentation(
             deps=ctx.deps,
             usage_limits=UsageLimits(request_limit=None),
         )
+
+        # Mark this sub-module as completed so re-runs can skip it
+        if deps.module_tree_manager:
+            await deps.module_tree_manager.mark_completed(list(deps.path_to_current_module))
 
         # remove the sub-module name from the path to current module and the module tree
         deps.path_to_current_module.pop()

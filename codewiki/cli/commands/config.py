@@ -61,7 +61,7 @@ def config_group():
 @click.option(
     "--fallback-model",
     type=str,
-    help="Fallback model for documentation generation"
+    help="Fallback model(s) for documentation generation (comma-separated, e.g. 'glm-4p5,gpt-4o-mini')"
 )
 @click.option(
     "--max-tokens",
@@ -160,7 +160,9 @@ def config_set(
             validated_data['cluster_model'] = validate_model_name(cluster_model)
         
         if fallback_model:
-            validated_data['fallback_model'] = validate_model_name(fallback_model)
+            for name in fallback_model.split(","):
+                validate_model_name(name.strip())
+            validated_data['fallback_model'] = fallback_model
         
         if max_tokens is not None:
             if max_tokens < 1:

@@ -32,12 +32,23 @@ class ModuleTreeManager:
         ``path`` is the list of module keys leading to the parent node whose
         ``children`` dict should be updated.  For a top-level module named
         ``"API Server"``, ``path`` would be ``["API Server"]``.
+
+        Existing entries are preserved (their ``_completed`` flag and
+        ``children`` dict are kept intact); only genuinely new entries are
+        inserted.
         """
         async with self._lock:
             node = self._tree
             for key in path:
                 node = node[key]["children"]
-            node.update(new_children)
+            for name, info in new_children.items():
+                if name not in node:
+                    node[name] = info
+                else:
+                    # Only refresh the components list; keep _completed / children
+                    node[name]["components"] = info.get(
+                        "components", node[name].get("components", [])
+                    )
             file_manager.save_json(self._tree, self._persist_path)
 
     async def mark_completed(self, module_path: List[str]):

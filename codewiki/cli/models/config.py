@@ -142,7 +142,8 @@ class Configuration:
         validate_url(self.base_url)
         validate_model_name(self.main_model)
         validate_model_name(self.cluster_model)
-        validate_model_name(self.fallback_model)
+        for name in self.fallback_model.split(","):
+            validate_model_name(name.strip())
     
     def to_dict(self) -> dict:
         """Convert to dictionary."""

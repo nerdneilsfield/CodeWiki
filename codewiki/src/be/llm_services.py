@@ -37,23 +37,25 @@ def create_main_model(config: Config) -> OpenAIModel:
     )
 
 
-def create_fallback_model(config: Config) -> OpenAIModel:
-    """Create the fallback LLM model from configuration."""
-    return OpenAIModel(
-        model_name=config.fallback_model,
-        provider=_make_provider(config),
-        settings=OpenAIModelSettings(
-            temperature=0.0,
-            max_tokens=config.max_tokens
-        )
-    )
-
-
 def create_fallback_models(config: Config) -> FallbackModel:
-    """Create fallback models chain from configuration."""
+    """Create fallback models chain from configuration.
+
+    ``config.fallback_model`` may contain a single model name or multiple
+    names separated by commas (e.g. ``"glm-4p5,gpt-4o-mini"``).  Each name
+    becomes an additional fallback in the chain after the main model.
+    """
+    provider = _make_provider(config)
+    settings = OpenAIModelSettings(temperature=0.0, max_tokens=config.max_tokens)
+
     main = create_main_model(config)
-    fallback = create_fallback_model(config)
-    return FallbackModel(main, fallback)
+
+    fallback_names = [n.strip() for n in config.fallback_model.split(",") if n.strip()]
+    fallbacks = [
+        OpenAIModel(model_name=name, provider=provider, settings=settings)
+        for name in fallback_names
+    ]
+
+    return FallbackModel(main, *fallbacks)
 
 
 def create_openai_client(config: Config) -> OpenAI:
