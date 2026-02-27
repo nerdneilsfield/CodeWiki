@@ -139,6 +139,12 @@ def parse_patterns(patterns_str: str) -> List[str]:
     help="Maximum number of modules to process in parallel (overrides config, default: 3)",
 )
 @click.option(
+    "--max-retries",
+    type=int,
+    default=None,
+    help="Number of fill-pass retries for missing module docs (overrides config, default: 2)",
+)
+@click.option(
     "--language",
     type=str,
     default=None,
@@ -181,6 +187,7 @@ def generate_command(
     max_token_per_leaf_module: Optional[int],
     max_depth: Optional[int],
     max_concurrent: Optional[int],
+    max_retries: Optional[int],
     language: Optional[str],
     main_model: Optional[str],
     long_context_model: Optional[str],
@@ -418,6 +425,7 @@ def generate_command(
                 'max_depth': max_depth if max_depth is not None else config.max_depth,
                 # Concurrency
                 'max_concurrent': max_concurrent if max_concurrent is not None else config.max_concurrent,
+                'max_retries': max_retries if max_retries is not None else config.max_retries,
                 # Output language (runtime override takes precedence)
                 'output_language': language.strip().lower() if language else config.output_language,
                 # Long-context threshold (runtime override takes precedence)

@@ -99,6 +99,11 @@ def config_group():
     help="Maximum number of modules processed concurrently (default: 3)"
 )
 @click.option(
+    "--max-retries",
+    type=int,
+    help="Number of fill-pass retries for missing module docs (default: 2)"
+)
+@click.option(
     "--language",
     type=str,
     default=None,
@@ -117,6 +122,7 @@ def config_set(
     max_token_per_leaf_module: Optional[int],
     max_depth: Optional[int],
     max_concurrent: Optional[int],
+    max_retries: Optional[int],
     language: Optional[str]
 ):
     """
@@ -152,7 +158,7 @@ def config_set(
     """
     try:
         # Check if at least one option is provided
-        if not any([api_key, base_url, main_model, cluster_model, fallback_model, long_context_model, long_context_threshold, max_tokens, max_token_per_module, max_token_per_leaf_module, max_depth, max_concurrent, language]):
+        if not any([api_key, base_url, main_model, cluster_model, fallback_model, long_context_model, long_context_threshold, max_tokens, max_token_per_module, max_token_per_leaf_module, max_depth, max_concurrent, max_retries, language]):
             click.echo("No options provided. Use --help for usage information.")
             sys.exit(EXIT_CONFIG_ERROR)
         
@@ -209,6 +215,11 @@ def config_set(
                 raise ConfigurationError("max_concurrent must be a positive integer")
             validated_data['max_concurrent'] = max_concurrent
 
+        if max_retries is not None:
+            if max_retries < 0:
+                raise ConfigurationError("max_retries must be a non-negative integer")
+            validated_data['max_retries'] = max_retries
+
         if language is not None:
             validated_data['output_language'] = language.strip().lower()
 
@@ -229,6 +240,7 @@ def config_set(
             max_token_per_leaf_module=validated_data.get('max_token_per_leaf_module'),
             max_depth=validated_data.get('max_depth'),
             max_concurrent=validated_data.get('max_concurrent'),
+            max_retries=validated_data.get('max_retries'),
             output_language=validated_data.get('output_language'),
         )
         
@@ -290,6 +302,9 @@ def config_set(
 
         if max_concurrent:
             click.secho(f"✓ Max concurrent: {max_concurrent}", fg="green")
+
+        if max_retries is not None:
+            click.secho(f"✓ Max retries: {max_retries}", fg="green")
 
         if language:
             click.secho(f"✓ Output language: {language}", fg="green")

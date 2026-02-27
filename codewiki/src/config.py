@@ -19,6 +19,7 @@ DEFAULT_MAX_TOKENS = 32_768
 DEFAULT_MAX_TOKEN_PER_MODULE = 36_369
 DEFAULT_MAX_TOKEN_PER_LEAF_MODULE = 16_000
 DEFAULT_MAX_CONCURRENT = 3
+DEFAULT_MAX_RETRIES = 2
 DEFAULT_LONG_CONTEXT_THRESHOLD = 200_000
 # Legacy constants (for backward compatibility)
 MAX_TOKEN_PER_MODULE = DEFAULT_MAX_TOKEN_PER_MODULE
@@ -67,6 +68,7 @@ class Config:
     max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE
     # Concurrency
     max_concurrent: int = DEFAULT_MAX_CONCURRENT
+    max_retries: int = DEFAULT_MAX_RETRIES
     # Output language for generated documentation (e.g. "en", "zh", "ja")
     output_language: str = "en"
     # Agent instructions for customization
@@ -170,6 +172,7 @@ class Config:
         max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE,
         max_depth: int = MAX_DEPTH,
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
+        max_retries: int = DEFAULT_MAX_RETRIES,
         output_language: str = "en",
         agent_instructions: Optional[Dict[str, Any]] = None
     ) -> 'Config':
@@ -196,6 +199,7 @@ class Config:
             max_token_per_module=max_token_per_module,
             max_token_per_leaf_module=max_token_per_leaf_module,
             max_concurrent=max_concurrent,
+            max_retries=max_retries,
             output_language=output_language,
             agent_instructions=agent_instructions
         )

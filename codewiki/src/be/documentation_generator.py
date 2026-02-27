@@ -240,7 +240,7 @@ class DocumentationGenerator:
 
         tree_manager = ModuleTreeManager(module_tree, module_tree_path)
         max_concurrent = getattr(self.config, 'max_concurrent', 3)
-        max_retries = getattr(self.config, 'max_retries', 2)
+        max_retries = self.config.max_retries
 
         ROOT_KEY = "__root__"
 
