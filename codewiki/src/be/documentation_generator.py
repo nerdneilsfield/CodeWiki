@@ -271,7 +271,7 @@ class DocumentationGenerator:
             tasks = [_process(mp, mn, mi) for mp, mn, mi in level_modules]
             await asyncio.gather(*tasks)
 
-            # ── Retry failed modules sequentially ────────────────────────
+            # ── Retry failed modules concurrently ─────────────────────────
             for retry in range(max_retries):
                 failed = [
                     (mp, mn, mi)
@@ -284,8 +284,8 @@ class DocumentationGenerator:
                     f"↩ Retry {retry + 1}/{max_retries} for {len(failed)} failed module(s): "
                     f"{', '.join(mn for _, mn, _ in failed)}"
                 )
-                for mp, mn, mi in failed:
-                    await _process_one(mp, mn, mi)
+                retry_tasks = [_process(mp, mn, mi) for mp, mn, mi in failed]
+                await asyncio.gather(*retry_tasks)
 
         # ── Fill any sub-modules whose .md was not written ───────────────
         await self._fill_missing_module_docs(working_dir, components, tree_manager, max_retries)
@@ -309,6 +309,9 @@ class DocumentationGenerator:
         agents, but if a sub-agent crashes the parent agent may still succeed and
         write its own .md.  This pass finds the gaps and fills them.
         """
+        max_concurrent = getattr(self.config, 'max_concurrent', 3)
+        semaphore = asyncio.Semaphore(max_concurrent)
+
         def collect_missing(tree: Dict[str, Any], path: List[str]) -> List[tuple]:
             result = []
             for name, info in tree.items():
@@ -319,6 +322,18 @@ class DocumentationGenerator:
                 if children:
                     result.extend(collect_missing(children, current_path))
             return result
+
+        async def _process_one(module_path, module_name, module_info):
+            async with semaphore:
+                try:
+                    await self.agent_orchestrator.process_module(
+                        module_name, components,
+                        module_info.get("components", []),
+                        module_path, working_dir, tree_manager
+                    )
+                except Exception as e:
+                    logger.error(f"Fill retry failed for {module_name}: {e}")
+                    logger.error(traceback.format_exc())
 
         for attempt in range(max_retries):
             module_tree = await tree_manager.get_snapshot()
@@ -331,16 +346,8 @@ class DocumentationGenerator:
                 f"{', '.join(mn for _, mn, _ in missing[:5])}"
                 f"{'...' if len(missing) > 5 else ''}"
             )
-            for module_path, module_name, module_info in missing:
-                try:
-                    await self.agent_orchestrator.process_module(
-                        module_name, components,
-                        module_info.get("components", []),
-                        module_path, working_dir, tree_manager
-                    )
-                except Exception as e:
-                    logger.error(f"Fill retry failed for {module_name}: {e}")
-                    logger.error(traceback.format_exc())
+            tasks = [_process_one(mp, mn, mi) for mp, mn, mi in missing]
+            await asyncio.gather(*tasks)
 
     # ── Parent / overview generation ─────────────────────────────────────
 
