@@ -1,12 +1,46 @@
 import re
+import time
+from collections import defaultdict
 from pathlib import Path
-from typing import List, Tuple
+from typing import AsyncIterable, List, Tuple
 import logging
 import tiktoken
 import traceback
 
 
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------
+# ---------------------- Agent Progress Logger ----------------
+# ------------------------------------------------------------
+
+async def agent_progress_handler(ctx, stream: AsyncIterable) -> None:
+    """Event stream handler that logs each agent iteration for visibility.
+
+    Pass this to ``agent.run(event_stream_handler=agent_progress_handler)``
+    so that long-running agent calls emit periodic log messages instead of
+    appearing frozen.
+    """
+    from pydantic_ai.messages import (
+        FunctionToolCallEvent,
+        FunctionToolResultEvent,
+        PartStartEvent,
+    )
+
+    agent_name = getattr(ctx, "tool_name", None) or getattr(ctx, "agent_name", None) or "agent"
+    # Try to get agent name from deps
+    if hasattr(ctx, "deps") and hasattr(ctx.deps, "current_module_name"):
+        agent_name = ctx.deps.current_module_name
+
+    async for event in stream:
+        if isinstance(event, PartStartEvent):
+            logger.info(f"    [{agent_name}] LLM response part {event.index} started")
+        elif isinstance(event, FunctionToolCallEvent):
+            tool_name = event.part.tool_name if hasattr(event.part, "tool_name") else "?"
+            logger.info(f"    [{agent_name}] calling tool: {tool_name}")
+        elif isinstance(event, FunctionToolResultEvent):
+            pass  # tool results are logged by the tools themselves
 
 # ------------------------------------------------------------
 # ---------------------- Complexity Check --------------------

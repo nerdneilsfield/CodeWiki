@@ -69,6 +69,11 @@ def config_group():
     help="Model for long-context prompts that exceed main model's limit (e.g. 'gemini-2.5-flash')"
 )
 @click.option(
+    "--long-context-threshold",
+    type=int,
+    help="Token threshold to switch to long-context model (default: 200000)"
+)
+@click.option(
     "--max-tokens",
     type=int,
     help="Maximum tokens for LLM response (default: 32768)"
@@ -106,6 +111,7 @@ def config_set(
     cluster_model: Optional[str],
     fallback_model: Optional[str],
     long_context_model: Optional[str],
+    long_context_threshold: Optional[int],
     max_tokens: Optional[int],
     max_token_per_module: Optional[int],
     max_token_per_leaf_module: Optional[int],
@@ -146,7 +152,7 @@ def config_set(
     """
     try:
         # Check if at least one option is provided
-        if not any([api_key, base_url, main_model, cluster_model, fallback_model, long_context_model, max_tokens, max_token_per_module, max_token_per_leaf_module, max_depth, max_concurrent, language]):
+        if not any([api_key, base_url, main_model, cluster_model, fallback_model, long_context_model, long_context_threshold, max_tokens, max_token_per_module, max_token_per_leaf_module, max_depth, max_concurrent, language]):
             click.echo("No options provided. Use --help for usage information.")
             sys.exit(EXIT_CONFIG_ERROR)
         
@@ -172,6 +178,11 @@ def config_set(
 
         if long_context_model:
             validated_data['long_context_model'] = validate_model_name(long_context_model)
+
+        if long_context_threshold is not None:
+            if long_context_threshold < 1:
+                raise ConfigurationError("long_context_threshold must be a positive integer")
+            validated_data['long_context_threshold'] = long_context_threshold
 
         if max_tokens is not None:
             if max_tokens < 1:
@@ -212,6 +223,7 @@ def config_set(
             cluster_model=validated_data.get('cluster_model'),
             fallback_model=validated_data.get('fallback_model'),
             long_context_model=validated_data.get('long_context_model'),
+            long_context_threshold=validated_data.get('long_context_threshold'),
             max_tokens=validated_data.get('max_tokens'),
             max_token_per_module=validated_data.get('max_token_per_module'),
             max_token_per_leaf_module=validated_data.get('max_token_per_leaf_module'),
@@ -260,6 +272,9 @@ def config_set(
 
         if long_context_model:
             click.secho(f"✓ Long-context model: {long_context_model}", fg="green")
+
+        if long_context_threshold:
+            click.secho(f"✓ Long-context threshold: {long_context_threshold}", fg="green")
 
         if max_tokens:
             click.secho(f"✓ Max tokens: {max_tokens}", fg="green")

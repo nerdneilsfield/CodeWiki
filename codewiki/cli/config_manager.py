@@ -91,6 +91,7 @@ class ConfigManager:
         cluster_model: Optional[str] = None,
         fallback_model: Optional[str] = None,
         long_context_model: Optional[str] = None,
+        long_context_threshold: Optional[int] = None,
         default_output: Optional[str] = None,
         max_tokens: Optional[int] = None,
         max_token_per_module: Optional[int] = None,
@@ -146,6 +147,8 @@ class ConfigManager:
             self._config.fallback_model = fallback_model
         if long_context_model is not None:
             self._config.long_context_model = long_context_model
+        if long_context_threshold is not None:
+            self._config.long_context_threshold = long_context_threshold
         if default_output is not None:
             self._config.default_output = default_output
         if max_tokens is not None:

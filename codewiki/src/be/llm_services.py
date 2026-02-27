@@ -98,12 +98,12 @@ def call_llm(
     prompt_tokens = count_tokens(prompt)
     if (
         config.long_context_model
-        and prompt_tokens > config.max_token_per_module
+        and prompt_tokens > config.long_context_threshold
         and model == config.main_model
     ):
         import logging
         logging.getLogger(__name__).info(
-            f"Prompt has {prompt_tokens} tokens (> {config.max_token_per_module}), "
+            f"Prompt has {prompt_tokens} tokens (> {config.long_context_threshold}), "
             f"switching from {model} to long-context model {config.long_context_model}"
         )
         model = config.long_context_model

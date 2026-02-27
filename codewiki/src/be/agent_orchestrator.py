@@ -48,7 +48,7 @@ from codewiki.src.be.prompt_template import (
     format_leaf_system_prompt,
     format_overview_prompt,
 )
-from codewiki.src.be.utils import is_complex_module
+from codewiki.src.be.utils import is_complex_module, agent_progress_handler
 from codewiki.src.config import (
     Config,
     MODULE_TREE_FILENAME,
@@ -191,6 +191,7 @@ class AgentOrchestrator:
                 ),
                 deps=deps,
                 usage_limits=UsageLimits(request_limit=None),
+                event_stream_handler=agent_progress_handler,
             )
 
             # Persist tree — manager handles locking; otherwise save directly

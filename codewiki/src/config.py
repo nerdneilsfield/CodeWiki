@@ -19,6 +19,7 @@ DEFAULT_MAX_TOKENS = 32_768
 DEFAULT_MAX_TOKEN_PER_MODULE = 36_369
 DEFAULT_MAX_TOKEN_PER_LEAF_MODULE = 16_000
 DEFAULT_MAX_CONCURRENT = 3
+DEFAULT_LONG_CONTEXT_THRESHOLD = 200_000
 # Legacy constants (for backward compatibility)
 MAX_TOKEN_PER_MODULE = DEFAULT_MAX_TOKEN_PER_MODULE
 MAX_TOKEN_PER_LEAF_MODULE = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE
@@ -59,6 +60,7 @@ class Config:
     cluster_model: str
     fallback_model: str = FALLBACK_MODEL_1
     long_context_model: Optional[str] = None
+    long_context_threshold: int = DEFAULT_LONG_CONTEXT_THRESHOLD
     # Max token settings
     max_tokens: int = DEFAULT_MAX_TOKENS
     max_token_per_module: int = DEFAULT_MAX_TOKEN_PER_MODULE
@@ -162,6 +164,7 @@ class Config:
         cluster_model: str,
         fallback_model: str = FALLBACK_MODEL_1,
         long_context_model: Optional[str] = None,
+        long_context_threshold: int = DEFAULT_LONG_CONTEXT_THRESHOLD,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         max_token_per_module: int = DEFAULT_MAX_TOKEN_PER_MODULE,
         max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE,
@@ -188,6 +191,7 @@ class Config:
             cluster_model=cluster_model,
             fallback_model=fallback_model,
             long_context_model=long_context_model,
+            long_context_threshold=long_context_threshold,
             max_tokens=max_tokens,
             max_token_per_module=max_token_per_module,
             max_token_per_leaf_module=max_token_per_leaf_module,
