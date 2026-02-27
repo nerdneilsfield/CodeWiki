@@ -52,7 +52,16 @@ Generate documentation following this structure:
 <AVAILABLE_TOOLS>
 - `str_replace_editor`: File system operations for creating and editing documentation files
 - `read_code_components`: Explore additional code dependencies not included in the provided components
-- `generate_sub_module_documentation`: Generate detailed documentation for individual sub-modules via sub-agents
+- `generate_sub_module_documentation`: Delegate sub-module documentation to sub-agents.
+  The ONLY parameter is `sub_module_specs` — a flat dict mapping sub-module names to
+  lists of component IDs.  Example:
+  ```json
+  {{"auth_layer": ["src/auth.py::AuthManager", "src/auth.py::Token"],
+    "data_store": ["src/db.py::Database", "src/db.py::Migration"]}}
+  ```
+  Do NOT wrap it in metadata like `{{"module_name": ..., "sub_modules": ...}}`.
+  Keys must be descriptive snake_case names; values must be component IDs from your
+  core_components list.
 </AVAILABLE_TOOLS>
 {custom_instructions}
 """.strip()
