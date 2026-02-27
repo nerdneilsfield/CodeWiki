@@ -58,6 +58,7 @@ class Config:
     main_model: str
     cluster_model: str
     fallback_model: str = FALLBACK_MODEL_1
+    long_context_model: Optional[str] = None
     # Max token settings
     max_tokens: int = DEFAULT_MAX_TOKENS
     max_token_per_module: int = DEFAULT_MAX_TOKEN_PER_MODULE
@@ -160,6 +161,7 @@ class Config:
         main_model: str,
         cluster_model: str,
         fallback_model: str = FALLBACK_MODEL_1,
+        long_context_model: Optional[str] = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         max_token_per_module: int = DEFAULT_MAX_TOKEN_PER_MODULE,
         max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE,
@@ -170,27 +172,10 @@ class Config:
     ) -> 'Config':
         """
         Create configuration for CLI context.
-        
-        Args:
-            repo_path: Repository path
-            output_dir: Output directory for generated docs
-            llm_base_url: LLM API base URL
-            llm_api_key: LLM API key
-            main_model: Primary model
-            cluster_model: Clustering model
-            fallback_model: Fallback model
-            max_tokens: Maximum tokens for LLM response
-            max_token_per_module: Maximum tokens per module for clustering
-            max_token_per_leaf_module: Maximum tokens per leaf module
-            max_depth: Maximum depth for hierarchical decomposition
-            agent_instructions: Custom agent instructions dict
-            
-        Returns:
-            Config instance
         """
         repo_name = os.path.basename(os.path.normpath(repo_path))
         base_output_dir = os.path.join(output_dir, "temp")
-        
+
         return cls(
             repo_path=repo_path,
             output_dir=base_output_dir,
@@ -202,6 +187,7 @@ class Config:
             main_model=main_model,
             cluster_model=cluster_model,
             fallback_model=fallback_model,
+            long_context_model=long_context_model,
             max_tokens=max_tokens,
             max_token_per_module=max_token_per_module,
             max_token_per_leaf_module=max_token_per_leaf_module,

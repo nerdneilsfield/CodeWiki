@@ -264,9 +264,11 @@ def graph_pre_cluster(
                 if not G.has_edge(a, b):
                     G.add_edge(a, b, weight=0.3)
 
-    # Run Louvain
+    # Run Louvain with higher resolution to produce fewer, larger clusters.
+    # GitNexus uses resolution=2.0; we also cap at ~12 clusters and merge
+    # tiny communities (< 3 members) into the most-connected neighbour.
     try:
-        communities = louvain_communities(G, weight="weight", resolution=1.0, seed=42)
+        communities = louvain_communities(G, weight="weight", resolution=2.0, seed=42)
     except Exception as e:
         logger.warning(f"Louvain community detection failed: {e}")
         return {}, {}
@@ -276,6 +278,27 @@ def graph_pre_cluster(
 
     # Sort: largest first
     communities = sorted(communities, key=len, reverse=True)
+
+    # Merge tiny communities (< 3 members) into the most-connected neighbour
+    MIN_CLUSTER_SIZE = 3
+    large = [c for c in communities if len(c) >= MIN_CLUSTER_SIZE]
+    small = [c for c in communities if len(c) < MIN_CLUSTER_SIZE]
+    if large and small:
+        for tiny in small:
+            # Find the large community with the most edges to this tiny one
+            best, best_score = 0, -1
+            for idx, big in enumerate(large):
+                score = sum(
+                    1 for n in tiny for nbr in G.neighbors(n) if nbr in big
+                )
+                if score > best_score:
+                    best, best_score = idx, score
+            large[best] = large[best] | tiny
+        communities = sorted(large, key=len, reverse=True)
+        logger.info(
+            f"Merged {len(small)} tiny cluster(s) into neighbours → "
+            f"{len(communities)} communities"
+        )
 
     # Build cluster dict with heuristic names
     clusters: Dict[str, List[str]] = {}

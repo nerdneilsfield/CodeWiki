@@ -123,6 +123,7 @@ class Configuration:
     main_model: str
     cluster_model: str
     fallback_model: str = "glm-4p5"
+    long_context_model: str = ""
     default_output: str = "docs"
     max_tokens: int = 32768
     max_token_per_module: int = 36369
@@ -152,6 +153,7 @@ class Configuration:
             'main_model': self.main_model,
             'cluster_model': self.cluster_model,
             'fallback_model': self.fallback_model,
+            'long_context_model': self.long_context_model,
             'default_output': self.default_output,
             'max_tokens': self.max_tokens,
             'max_token_per_module': self.max_token_per_module,
@@ -184,6 +186,7 @@ class Configuration:
             main_model=data.get('main_model', ''),
             cluster_model=data.get('cluster_model', ''),
             fallback_model=data.get('fallback_model', 'glm-4p5'),
+            long_context_model=data.get('long_context_model', ''),
             default_output=data.get('default_output', 'docs'),
             max_tokens=data.get('max_tokens', 32768),
             max_token_per_module=data.get('max_token_per_module', 36369),
@@ -241,6 +244,7 @@ class Configuration:
             main_model=self.main_model,
             cluster_model=self.cluster_model,
             fallback_model=self.fallback_model,
+            long_context_model=self.long_context_model or None,
             max_tokens=self.max_tokens,
             max_token_per_module=self.max_token_per_module,
             max_token_per_leaf_module=self.max_token_per_leaf_module,

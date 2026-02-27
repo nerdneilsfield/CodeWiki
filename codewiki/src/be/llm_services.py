@@ -75,19 +75,39 @@ def call_llm(
 ) -> str:
     """
     Call LLM with the given prompt.
-    
+
+    Automatically switches to ``config.long_context_model`` when the prompt
+    token count exceeds ``config.max_token_per_module`` and a long-context
+    model is configured.
+
     Args:
         prompt: The prompt to send
         config: Configuration containing LLM settings
         model: Model name (defaults to config.main_model)
         temperature: Temperature setting
-        
+
     Returns:
         LLM response text
     """
+    from codewiki.src.be.utils import count_tokens
+
     if model is None:
         model = config.main_model
-    
+
+    # Auto-switch to long-context model when prompt is too large
+    prompt_tokens = count_tokens(prompt)
+    if (
+        config.long_context_model
+        and prompt_tokens > config.max_token_per_module
+        and model == config.main_model
+    ):
+        import logging
+        logging.getLogger(__name__).info(
+            f"Prompt has {prompt_tokens} tokens (> {config.max_token_per_module}), "
+            f"switching from {model} to long-context model {config.long_context_model}"
+        )
+        model = config.long_context_model
+
     client = create_openai_client(config)
     response = client.chat.completions.create(
         model=model,

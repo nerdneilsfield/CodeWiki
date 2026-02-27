@@ -64,6 +64,11 @@ def config_group():
     help="Fallback model(s) for documentation generation (comma-separated, e.g. 'glm-4p5,gpt-4o-mini')"
 )
 @click.option(
+    "--long-context-model",
+    type=str,
+    help="Model for long-context prompts that exceed main model's limit (e.g. 'gemini-2.5-flash')"
+)
+@click.option(
     "--max-tokens",
     type=int,
     help="Maximum tokens for LLM response (default: 32768)"
@@ -100,6 +105,7 @@ def config_set(
     main_model: Optional[str],
     cluster_model: Optional[str],
     fallback_model: Optional[str],
+    long_context_model: Optional[str],
     max_tokens: Optional[int],
     max_token_per_module: Optional[int],
     max_token_per_leaf_module: Optional[int],
@@ -140,7 +146,7 @@ def config_set(
     """
     try:
         # Check if at least one option is provided
-        if not any([api_key, base_url, main_model, cluster_model, fallback_model, max_tokens, max_token_per_module, max_token_per_leaf_module, max_depth, max_concurrent, language]):
+        if not any([api_key, base_url, main_model, cluster_model, fallback_model, long_context_model, max_tokens, max_token_per_module, max_token_per_leaf_module, max_depth, max_concurrent, language]):
             click.echo("No options provided. Use --help for usage information.")
             sys.exit(EXIT_CONFIG_ERROR)
         
@@ -163,7 +169,10 @@ def config_set(
             for name in fallback_model.split(","):
                 validate_model_name(name.strip())
             validated_data['fallback_model'] = fallback_model
-        
+
+        if long_context_model:
+            validated_data['long_context_model'] = validate_model_name(long_context_model)
+
         if max_tokens is not None:
             if max_tokens < 1:
                 raise ConfigurationError("max_tokens must be a positive integer")
@@ -202,6 +211,7 @@ def config_set(
             main_model=validated_data.get('main_model'),
             cluster_model=validated_data.get('cluster_model'),
             fallback_model=validated_data.get('fallback_model'),
+            long_context_model=validated_data.get('long_context_model'),
             max_tokens=validated_data.get('max_tokens'),
             max_token_per_module=validated_data.get('max_token_per_module'),
             max_token_per_leaf_module=validated_data.get('max_token_per_leaf_module'),
@@ -247,7 +257,10 @@ def config_set(
         
         if fallback_model:
             click.secho(f"✓ Fallback model: {fallback_model}", fg="green")
-        
+
+        if long_context_model:
+            click.secho(f"✓ Long-context model: {long_context_model}", fg="green")
+
         if max_tokens:
             click.secho(f"✓ Max tokens: {max_tokens}", fg="green")
         
@@ -321,6 +334,7 @@ def config_show(output_json: bool):
                 "main_model": config.main_model if config else "",
                 "cluster_model": config.cluster_model if config else "",
                 "fallback_model": config.fallback_model if config else "glm-4p5",
+                "long_context_model": config.long_context_model if config else "",
                 "default_output": config.default_output if config else "docs",
                 "max_tokens": config.max_tokens if config else 32768,
                 "max_token_per_module": config.max_token_per_module if config else 36369,
@@ -352,6 +366,8 @@ def config_show(output_json: bool):
                 click.echo(f"  Main Model:       {config.main_model or 'Not set'}")
                 click.echo(f"  Cluster Model:    {config.cluster_model or 'Not set'}")
                 click.echo(f"  Fallback Model:   {config.fallback_model or 'Not set'}")
+                if config.long_context_model:
+                    click.echo(f"  Long-Context Model: {config.long_context_model}")
             else:
                 click.secho("  Not configured", fg="yellow")
             
@@ -506,7 +522,9 @@ def config_validate(quick: bool, verbose: bool):
             click.echo(f"      Main model: {config.main_model}")
             click.echo(f"      Cluster model: {config.cluster_model}")
             click.echo(f"      Fallback model: {config.fallback_model}")
-        
+            if config.long_context_model:
+                click.echo(f"      Long-context model: {config.long_context_model}")
+
         if not config.main_model or not config.cluster_model or not config.fallback_model:
             click.secho("✗ Models not configured", fg="red")
             sys.exit(EXIT_CONFIG_ERROR)
