@@ -228,32 +228,44 @@ class DocumentationGenerator:
             return working_dir
 
         # ── Dynamic task-queue concurrent path ────────────────────────────
-        #
-        # Instead of processing level-by-level (which blocks on the slowest
-        # sibling), we use a dynamic queue:
-        #   1. All leaf modules are enqueued immediately.
-        #   2. N workers consume the queue concurrently.
-        #   3. When ALL children of a parent complete, the parent is
-        #      dynamically enqueued — no need to wait for unrelated modules.
-        #   4. A virtual ROOT task generates the repo overview once all
-        #      top-level modules finish.
-
         tree_manager = ModuleTreeManager(module_tree, module_tree_path)
-        max_concurrent = getattr(self.config, 'max_concurrent', 3)
+        max_concurrent = self.config.max_concurrent
         max_retries = self.config.max_retries
 
-        ROOT_KEY = "__root__"
+        graph_tree = await tree_manager.get_snapshot()
+        logger.info(f"📊 Running queue on {len(graph_tree)} top-level modules (concurrency={max_concurrent})")
+        await self._run_module_queue(
+            graph_tree, components, working_dir, tree_manager,
+            desc="Generating docs", include_root=True,
+        )
 
-        # ── Build dependency graph from module_tree ──────────────────────
-        # Use module_tree (not first_module_tree) so that sub-modules
-        # discovered in previous runs are included as independent tasks
-        # and can be parallelised in the outer queue.
-        #
-        # all_tasks:       key → (path, name, info, is_queue_leaf)
-        #   is_queue_leaf  True  → no children in module_tree; enqueue now
-        #                  False → has children; enqueue after children done
-        # pending_count:   key → number of children still in-flight
-        # child_to_parent: child_key → parent_key
+        # ── Fill any modules whose .md was not written ────────────────────
+        await self._fill_missing_module_docs(working_dir, components, tree_manager, max_retries)
+
+        return working_dir
+
+    async def _run_module_queue(
+        self,
+        graph_tree: Dict[str, Any],
+        components: Dict[str, Any],
+        working_dir: str,
+        tree_manager,
+        desc: str = "Generating docs",
+        include_root: bool = True,
+    ) -> None:
+        """Process all modules in *graph_tree* using a dependency-aware async queue.
+
+        Leaf nodes (no children) are enqueued immediately and processed in
+        parallel.  A parent node is enqueued only after ALL its children
+        complete, preserving the bottom-up ordering required for documentation
+        quality.  When *include_root* is True a virtual ROOT task runs
+        ``generate_parent_module_docs`` for the repo-level overview after all
+        top-level modules finish.
+        """
+        ROOT_KEY = "__root__"
+        max_concurrent = self.config.max_concurrent
+
+        # ── Build dependency graph ────────────────────────────────────────
         all_tasks: Dict[str, tuple] = {}
         pending_count: Dict[str, int] = {}
         child_to_parent: Dict[str, str] = {}
@@ -265,51 +277,46 @@ class DocumentationGenerator:
                 children = info.get("children") or {}
                 is_queue_leaf = not children or not isinstance(children, dict)
                 all_tasks[key] = (current_path, name, info, is_queue_leaf)
-
                 if parent_key is not None:
                     child_to_parent[key] = parent_key
-
                 if not is_queue_leaf:
                     pending_count[key] = len(children)
                     _walk(children, current_path, parent_key=key)
 
-        # Use a snapshot of module_tree taken before any workers mutate it
-        graph_tree = await tree_manager.get_snapshot()
         _walk(graph_tree, [])
 
-        # Virtual root depends on all top-level modules
         top_level_keys = list(graph_tree.keys())
-        pending_count[ROOT_KEY] = len(top_level_keys)
-        for name in top_level_keys:
-            child_to_parent[name] = ROOT_KEY
+        if include_root:
+            pending_count[ROOT_KEY] = len(top_level_keys)
+            for name in top_level_keys:
+                child_to_parent[name] = ROOT_KEY
 
         lock = asyncio.Lock()
         queue: asyncio.Queue[str] = asyncio.Queue()
 
-        # Enqueue all leaf tasks
         leaf_count = 0
-        for key, (path, name, info, is_leaf) in all_tasks.items():
+        for key, (_, _, _, is_leaf) in all_tasks.items():
             if is_leaf:
                 await queue.put(key)
                 leaf_count += 1
 
-        total_tasks = len(all_tasks) + 1  # +1 for root
+        total_tasks = len(all_tasks) + (1 if include_root else 0)
         logger.info(
             f"📊 Dynamic queue: {leaf_count} leaf tasks, "
-            f"{len(all_tasks) - leaf_count} parent tasks, "
-            f"1 root overview (concurrency={max_concurrent})"
+            f"{len(all_tasks) - leaf_count} parent tasks"
+            + (", 1 root overview" if include_root else "")
         )
 
         progress = tqdm(
             total=total_tasks,
-            desc="Generating docs",
+            desc=desc,
             unit="module",
             dynamic_ncols=True,
             leave=True,
         )
 
         # ── Worker ───────────────────────────────────────────────────────
-        async def _worker(worker_id: int):
+        async def _worker(_worker_id: int):
             while True:
                 try:
                     key = await queue.get()
@@ -320,25 +327,18 @@ class DocumentationGenerator:
                     progress.set_postfix_str(label, refresh=False)
                     if key == ROOT_KEY:
                         logger.info("📚 Generating repository overview")
-                        await self.generate_parent_module_docs(
-                            [], working_dir, tree_manager
-                        )
+                        await self.generate_parent_module_docs([], working_dir, tree_manager)
                     else:
-                        # All actual module nodes (leaf or intermediate) run
-                        # a full agent via process_module.  When a parent node
-                        # is dequeued its children are already done, so any
-                        # generate_sub_module_documentation calls inside the
-                        # agent will skip them (docs already exist).
                         path, name, info, _ = all_tasks[key]
                         await self.agent_orchestrator.process_module(
                             name, components,
                             info.get("components", []),
-                            path, working_dir, tree_manager
+                            path, working_dir, tree_manager,
                         )
 
                     progress.update(1)
 
-                    # On success — check if parent is unblocked
+                    # Unblock parent when all siblings are done
                     parent_key = child_to_parent.get(key)
                     if parent_key is not None:
                         async with lock:
@@ -348,8 +348,7 @@ class DocumentationGenerator:
                             if parent_key == ROOT_KEY:
                                 logger.info("🔓 All top-level modules done — enqueueing root overview")
                             else:
-                                p_path, p_name, _, _ = all_tasks[parent_key]
-                                logger.info(f"🔓 Parent unblocked: {p_name} — all children done")
+                                logger.info(f"🔓 Parent unblocked: {all_tasks[parent_key][1]}")
                             await queue.put(parent_key)
 
                 except Exception as e:
@@ -360,17 +359,11 @@ class DocumentationGenerator:
                 finally:
                     queue.task_done()
 
-        # ── Spawn workers and wait ───────────────────────────────────────
         workers = [asyncio.create_task(_worker(i)) for i in range(max_concurrent)]
         await queue.join()
         for w in workers:
             w.cancel()
         progress.close()
-
-        # ── Fill any sub-modules whose .md was not written ───────────────
-        await self._fill_missing_module_docs(working_dir, components, tree_manager, max_retries)
-
-        return working_dir
 
     async def _fill_missing_module_docs(
         self,
@@ -379,61 +372,51 @@ class DocumentationGenerator:
         tree_manager,
         max_retries: int,
     ) -> None:
-        """Walk the full module_tree and retry every module whose .md file is absent.
+        """Retry missing module docs using the same dependency-aware queue.
 
-        Sub-modules are added to module_tree.json dynamically by the recursive
-        agents, but if a sub-agent crashes the parent agent may still succeed and
-        write its own .md.  This pass finds the gaps and fills them.
+        Uses _run_module_queue so parent-child ordering is respected even
+        during retries — a parent won't run before its children have docs.
+        ``process_module`` and ``generate_parent_module_docs`` both skip
+        nodes whose .md already exists, so only truly missing modules are
+        regenerated.
         """
-        max_concurrent = getattr(self.config, 'max_concurrent', 3)
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        def collect_missing(tree: Dict[str, Any], path: List[str]) -> List[tuple]:
-            result = []
+        def _count_missing(tree: Dict[str, Any]) -> int:
+            count = 0
             for name, info in tree.items():
-                current_path = path + [name]
                 if not self._module_doc_exists(working_dir, name):
-                    result.append((current_path, name, info))
+                    count += 1
                 children = info.get("children") or {}
                 if children:
-                    result.extend(collect_missing(children, current_path))
-            return result
+                    count += _count_missing(children)
+            return count
 
-        async def _process_one(module_path, module_name, module_info, fill_bar: tqdm):
-            async with semaphore:
-                try:
-                    fill_bar.set_postfix_str(module_name, refresh=False)
-                    await self.agent_orchestrator.process_module(
-                        module_name, components,
-                        module_info.get("components", []),
-                        module_path, working_dir, tree_manager
-                    )
-                except Exception as e:
-                    logger.error(f"Fill retry failed for {module_name}: {e}")
-                    logger.error(traceback.format_exc())
-                finally:
-                    fill_bar.update(1)
+        def _missing_names(tree: Dict[str, Any]) -> List[str]:
+            names: List[str] = []
+            for name, info in tree.items():
+                if not self._module_doc_exists(working_dir, name):
+                    names.append(name)
+                children = info.get("children") or {}
+                if children:
+                    names.extend(_missing_names(children))
+            return names
 
         for attempt in range(max_retries):
             module_tree = await tree_manager.get_snapshot()
-            missing = collect_missing(module_tree, [])
-            if not missing:
+            missing_count = _count_missing(module_tree)
+            if missing_count == 0:
                 return
+            missing_names = _missing_names(module_tree)
             logger.warning(
                 f"↩ Fill pass {attempt + 1}/{max_retries}: "
-                f"{len(missing)} module(s) without docs — "
-                f"{', '.join(mn for _, mn, _ in missing[:5])}"
-                f"{'...' if len(missing) > 5 else ''}"
+                f"{missing_count} module(s) without docs — "
+                f"{', '.join(missing_names[:5])}"
+                f"{'...' if len(missing_names) > 5 else ''}"
             )
-            with tqdm(
-                total=len(missing),
+            await self._run_module_queue(
+                module_tree, components, working_dir, tree_manager,
                 desc=f"Fill pass {attempt + 1}/{max_retries}",
-                unit="module",
-                dynamic_ncols=True,
-                leave=True,
-            ) as fill_bar:
-                tasks = [_process_one(mp, mn, mi, fill_bar) for mp, mn, mi in missing]
-                await asyncio.gather(*tasks)
+                include_root=False,
+            )
 
     # ── Parent / overview generation ─────────────────────────────────────
 
