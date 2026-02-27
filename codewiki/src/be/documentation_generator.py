@@ -315,6 +315,9 @@ class DocumentationGenerator:
             leave=True,
         )
 
+        # Retry delays for transient errors: 10 s, 30 s, 90 s
+        _WORKER_RETRY_DELAYS = [10, 30, 90]
+
         # ── Worker ───────────────────────────────────────────────────────
         async def _worker(_worker_id: int):
             while True:
@@ -325,16 +328,33 @@ class DocumentationGenerator:
                 label = "overview" if key == ROOT_KEY else all_tasks[key][1]
                 try:
                     progress.set_postfix_str(label, refresh=False)
-                    if key == ROOT_KEY:
-                        logger.info("📚 Generating repository overview")
-                        await self.generate_parent_module_docs([], working_dir, tree_manager)
-                    else:
-                        path, name, info, _ = all_tasks[key]
-                        await self.agent_orchestrator.process_module(
-                            name, components,
-                            info.get("components", []),
-                            path, working_dir, tree_manager,
-                        )
+                    last_exc = None
+                    for attempt, delay in enumerate([0] + _WORKER_RETRY_DELAYS):
+                        if delay:
+                            logger.warning(
+                                f"  ↻ Retrying '{label}' in {delay}s "
+                                f"(attempt {attempt}/{len(_WORKER_RETRY_DELAYS)}) "
+                                f"after: {last_exc}"
+                            )
+                            await asyncio.sleep(delay)
+                        try:
+                            if key == ROOT_KEY:
+                                logger.info("📚 Generating repository overview")
+                                await self.generate_parent_module_docs([], working_dir, tree_manager)
+                            else:
+                                path, name, info, _ = all_tasks[key]
+                                await self.agent_orchestrator.process_module(
+                                    name, components,
+                                    info.get("components", []),
+                                    path, working_dir, tree_manager,
+                                )
+                            last_exc = None
+                            break  # success
+                        except Exception as exc:
+                            last_exc = exc
+
+                    if last_exc is not None:
+                        raise last_exc
 
                     progress.update(1)
 
@@ -353,7 +373,7 @@ class DocumentationGenerator:
 
                 except Exception as e:
                     progress.update(1)
-                    logger.error(f"Failed to process {label}: {e}")
+                    logger.error(f"✗ Failed to process '{label}' after all retries: {e}")
                     logger.error(traceback.format_exc())
                     # Don't unblock parent — fill pass will handle gaps
                 finally:

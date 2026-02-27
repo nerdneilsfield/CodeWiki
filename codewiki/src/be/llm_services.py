@@ -1,6 +1,8 @@
 """
 LLM service factory for creating configured LLM clients.
 """
+import time
+import logging
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.models.openai import OpenAIModelSettings
@@ -9,6 +11,11 @@ from openai import OpenAI, AsyncOpenAI
 import httpx
 
 from codewiki.src.config import Config
+
+_logger = logging.getLogger(__name__)
+
+# Delays (seconds) between successive retries: 10 s, 30 s, 90 s
+_RETRY_DELAYS = [10, 30, 90]
 
 # Long-running LLM calls can take well over the default 5 s httpx timeout.
 _LLM_TIMEOUT = httpx.Timeout(180.0)
@@ -109,10 +116,22 @@ def call_llm(
         model = config.long_context_model
 
     client = create_openai_client(config)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-        max_tokens=config.max_tokens
-    )
-    return response.choices[0].message.content
+    last_exc: Exception = None
+    for attempt, delay in enumerate([0] + _RETRY_DELAYS):
+        if delay:
+            _logger.warning(
+                f"call_llm: retrying in {delay}s (attempt {attempt}/{len(_RETRY_DELAYS)}) "
+                f"after: {last_exc}"
+            )
+            time.sleep(delay)
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=config.max_tokens
+            )
+            return response.choices[0].message.content
+        except Exception as exc:
+            last_exc = exc
+    raise last_exc
