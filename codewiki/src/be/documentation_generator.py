@@ -7,6 +7,8 @@ from typing import Dict, List, Any, Optional
 from copy import deepcopy
 import traceback
 
+from tqdm import tqdm
+
 # Configure logging and monitoring
 logger = logging.getLogger(__name__)
 
@@ -290,6 +292,14 @@ class DocumentationGenerator:
             f"1 root overview (concurrency={max_concurrent})"
         )
 
+        progress = tqdm(
+            total=total_tasks,
+            desc="Generating docs",
+            unit="module",
+            dynamic_ncols=True,
+            leave=True,
+        )
+
         # ── Worker ───────────────────────────────────────────────────────
         async def _worker(worker_id: int):
             while True:
@@ -297,7 +307,9 @@ class DocumentationGenerator:
                     key = await queue.get()
                 except asyncio.CancelledError:
                     return
+                label = "overview" if key == ROOT_KEY else all_tasks[key][1]
                 try:
+                    progress.set_postfix_str(label, refresh=False)
                     if key == ROOT_KEY:
                         logger.info("📚 Generating repository overview")
                         await self.generate_parent_module_docs(
@@ -316,6 +328,8 @@ class DocumentationGenerator:
                                 path, working_dir, tree_manager
                             )
 
+                    progress.update(1)
+
                     # On success — check if parent is unblocked
                     parent_key = child_to_parent.get(key)
                     if parent_key is not None:
@@ -331,7 +345,7 @@ class DocumentationGenerator:
                             await queue.put(parent_key)
 
                 except Exception as e:
-                    label = key if key == ROOT_KEY else all_tasks[key][1]
+                    progress.update(1)
                     logger.error(f"Failed to process {label}: {e}")
                     logger.error(traceback.format_exc())
                     # Don't unblock parent — fill pass will handle gaps
@@ -343,6 +357,7 @@ class DocumentationGenerator:
         await queue.join()
         for w in workers:
             w.cancel()
+        progress.close()
 
         # ── Fill any sub-modules whose .md was not written ───────────────
         await self._fill_missing_module_docs(working_dir, components, tree_manager, max_retries)
@@ -376,9 +391,10 @@ class DocumentationGenerator:
                     result.extend(collect_missing(children, current_path))
             return result
 
-        async def _process_one(module_path, module_name, module_info):
+        async def _process_one(module_path, module_name, module_info, fill_bar: tqdm):
             async with semaphore:
                 try:
+                    fill_bar.set_postfix_str(module_name, refresh=False)
                     await self.agent_orchestrator.process_module(
                         module_name, components,
                         module_info.get("components", []),
@@ -387,6 +403,8 @@ class DocumentationGenerator:
                 except Exception as e:
                     logger.error(f"Fill retry failed for {module_name}: {e}")
                     logger.error(traceback.format_exc())
+                finally:
+                    fill_bar.update(1)
 
         for attempt in range(max_retries):
             module_tree = await tree_manager.get_snapshot()
@@ -399,8 +417,15 @@ class DocumentationGenerator:
                 f"{', '.join(mn for _, mn, _ in missing[:5])}"
                 f"{'...' if len(missing) > 5 else ''}"
             )
-            tasks = [_process_one(mp, mn, mi) for mp, mn, mi in missing]
-            await asyncio.gather(*tasks)
+            with tqdm(
+                total=len(missing),
+                desc=f"Fill pass {attempt + 1}/{max_retries}",
+                unit="module",
+                dynamic_ncols=True,
+                leave=True,
+            ) as fill_bar:
+                tasks = [_process_one(mp, mn, mi, fill_bar) for mp, mn, mi in missing]
+                await asyncio.gather(*tasks)
 
     # ── Parent / overview generation ─────────────────────────────────────
 
