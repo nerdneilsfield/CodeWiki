@@ -416,10 +416,14 @@ def cluster_modules(
             for cid in leaf_nodes
             if cid in components
         }
-        if len(unique_files) <= 1:
+        n_files = len(unique_files)
+        logger.info(
+            f"Sub-clustering '{current_module_name}' "
+            f"({len(leaf_nodes)} components, {n_files} file(s))"
+        )
+        if n_files <= 1:
             logger.info(
-                f"Skipping sub-clustering for '{current_module_name}' — "
-                f"single-file module ({len(leaf_nodes)} component(s))"
+                f"  → skipped (single-file module)"
             )
             return {}
     else:
@@ -492,6 +496,16 @@ def cluster_modules(
         logger.debug(f"Skipping clustering for {current_module_name} because the module tree is too small: {len(module_tree)} modules")
         return {}
 
+    # Log what the LLM produced
+    context = f"'{current_module_name}'" if current_module_name else "top-level"
+    logger.info(
+        f"LLM produced {len(module_tree)} modules for {context}: "
+        + ", ".join(
+            f"{name}({len(info.get('components', []))})"
+            for name, info in module_tree.items()
+        )
+    )
+
     if current_module_tree == {}:
         current_module_tree = module_tree
     else:
@@ -515,6 +529,30 @@ def cluster_modules(
             current_module_tree, module_name, current_module_path,
             _token_threshold=config.max_token_per_leaf_module,
         )
+        n_children = len(module_info["children"])
+        if n_children:
+            logger.info(
+                f"  → '{module_name}' split into {n_children} sub-modules: "
+                + ", ".join(module_info["children"].keys())
+            )
         current_module_path.pop()
 
+    # At the top level, print a summary tree
+    if not is_recursive_call:
+        _log_tree_summary(module_tree)
+
     return module_tree
+
+
+def _log_tree_summary(module_tree: Dict[str, Any], indent: int = 0) -> None:
+    """Recursively log the clustered module tree for visibility."""
+    prefix = "  " * indent
+    for name, info in module_tree.items():
+        children = info.get("children") or {}
+        n_comp = len(info.get("components", []))
+        suffix = f"  [{n_comp} components]"
+        if children:
+            logger.info(f"{prefix}├── {name}{suffix}")
+            _log_tree_summary(children, indent + 1)
+        else:
+            logger.info(f"{prefix}└── {name}{suffix}  [leaf]")
