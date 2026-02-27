@@ -1,5 +1,6 @@
 import os
 import json
+import tempfile
 from typing import Any, Optional, Dict
 
 
@@ -18,17 +19,32 @@ class FileManager:
     @staticmethod
     def save_json(data: Any, filepath: str) -> None:
         """Save data as JSON to file."""
-        with open(filepath, 'w') as f:
-            json.dump(data, f, indent=4)
+        parent_dir = os.path.dirname(os.path.abspath(filepath)) or "."
+        os.makedirs(parent_dir, exist_ok=True)
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", dir=parent_dir)
+        try:
+            with os.fdopen(tmp_fd, 'w') as f:
+                json.dump(data, f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, filepath)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
     
     @staticmethod
     def load_json(filepath: str) -> Optional[Dict[str, Any]]:
         """Load JSON from file, return None if file doesn't exist."""
         if not os.path.exists(filepath):
             return None
-        
-        with open(filepath, 'r') as f:
-            return json.load(f)
+        try:
+            with open(filepath, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return None
     
     @staticmethod
     def save_text(content: str, filepath: str) -> None:
