@@ -230,7 +230,11 @@ class CLIDocumentationGenerator:
                 if module_tree:
                     file_manager.save_json(module_tree, first_module_tree_path)
 
-            file_manager.save_json(module_tree, module_tree_path)
+            # Only initialise module_tree.json when it doesn't yet exist.
+            # Overwriting it would destroy _completed flags written by a
+            # previous run, causing every complex module to be re-processed.
+            if not os.path.exists(module_tree_path):
+                file_manager.save_json(module_tree, module_tree_path)
             self.job.module_count = len(module_tree)
 
             if self.verbose:
