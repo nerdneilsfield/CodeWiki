@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import Optional, Set, TYPE_CHECKING
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.config import Config
 
@@ -20,3 +20,6 @@ class CodeWikiDeps:
     config: Config  # LLM configuration
     custom_instructions: str = None
     module_tree_manager: Optional['ModuleTreeManager'] = None
+    # Tracks sub-module names already dispatched in this agent run to prevent
+    # the LLM from processing the same sub-module twice via repeated tool calls.
+    _dispatched_sub_modules: Set[str] = field(default_factory=set)

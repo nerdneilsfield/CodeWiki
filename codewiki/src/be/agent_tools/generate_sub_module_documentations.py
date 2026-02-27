@@ -101,6 +101,12 @@ async def generate_sub_module_documentation(
         indent = "  " * deps.current_depth
         arrow = "└─" if deps.current_depth > 0 else "→"
 
+        # ── Skip sub-modules already dispatched in this agent run ─────
+        if sub_module_name in deps._dispatched_sub_modules:
+            logger.info(f"{indent}{arrow} ✓ Sub-module {sub_module_name} already dispatched in this run, skipping")
+            continue
+        deps._dispatched_sub_modules.add(sub_module_name)
+
         # ── Skip sub-modules whose docs already exist ─────────────────
         docs_path = os.path.join(deps.absolute_docs_path, f"{sub_module_name}.md")
         if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
