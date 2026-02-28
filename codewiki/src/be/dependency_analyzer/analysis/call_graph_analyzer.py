@@ -163,6 +163,8 @@ class CallGraphAnalyzer:
                 self._analyze_cmake_file(file_path, content, repo_dir)
             elif language == "toml":
                 self._analyze_toml_file(file_path, content, repo_dir)
+            elif language == "vitis_cfg":
+                self._analyze_vitis_cfg_file(file_path, content, repo_dir)
 
         except Exception as e:
             logger.error(f"⚠️ Error analyzing {file_path}: {str(e)}")
@@ -318,6 +320,17 @@ class CallGraphAnalyzer:
             self.call_relationships.extend(relationships)
         except Exception as e:
             logger.error(f"Failed to analyze TOML file {file_path}: {e}", exc_info=True)
+
+    def _analyze_vitis_cfg_file(self, file_path: str, content: str, repo_dir: str):
+        """Analyze Vitis .cfg file for HLS top functions, stream connections, memory maps."""
+        from codewiki.src.be.dependency_analyzer.analyzers.vitis_cfg import analyze_vitis_cfg
+        try:
+            functions, relationships = analyze_vitis_cfg(file_path, content, repo_path=repo_dir)
+            for func in functions:
+                self.functions[func.id or f"{file_path}:{func.name}"] = func
+            self.call_relationships.extend(relationships)
+        except Exception as e:
+            logger.error(f"Failed to analyze Vitis cfg {file_path}: {e}", exc_info=True)
 
     def _analyze_data_flow(self) -> dict:
         """Run cross-file data flow analysis."""

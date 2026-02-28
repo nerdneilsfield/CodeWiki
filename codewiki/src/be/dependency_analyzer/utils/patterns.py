@@ -210,6 +210,8 @@ CODE_EXTENSIONS = {
     ".zsh": "bash",
     # Config formats (analyzed for structure, not call graphs)
     ".toml": "toml",
+    # Vitis/HLS configuration files
+    ".cfg": "vitis_cfg",
 }
 
 # Entry point file patterns for all supported languages
