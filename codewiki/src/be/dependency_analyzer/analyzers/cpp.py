@@ -70,6 +70,21 @@ class TreeSitterCppAnalyzer:
 		node_type = None
 		node_name = None
 		
+		if node.type == "preproc_include":
+			path_node = next((c for c in node.children
+							  if c.type in ("string_literal", "system_lib_string")), None)
+			if path_node:
+				include_path = path_node.text.decode().strip('"').strip('<').strip('>')
+				module_path = self._get_module_path()
+				self.call_relationships.append(CallRelationship(
+					caller=f"{module_path}.__file__",
+					callee=include_path,
+					call_line=node.start_point[0] + 1,
+					is_resolved=False,
+					relationship_type="include",
+				))
+			return  # preproc_include has no interesting children
+
 		if node.type == "class_specifier":
 			# "class" + type_identifier + { ... }
 			node_type = "class"
@@ -120,6 +135,24 @@ class TreeSitterCppAnalyzer:
 					elif child.type == "identifier":
 						node_name = child.text.decode()
 						break
+		elif node.type == "template_declaration":
+			# Find inner class or function
+			inner_class = next((c for c in node.children if c.type == "class_specifier"), None)
+			inner_func = next((c for c in node.children if c.type == "function_definition"), None)
+			if inner_class:
+				node_type = "template_class"
+				for child in inner_class.children:
+					if child.type == "type_identifier":
+						node_name = child.text.decode()
+						break
+			elif inner_func:
+				node_type = "template_function"
+				declarator = next((c for c in inner_func.children if c.type == "function_declarator"), None)
+				if declarator:
+					for child in declarator.children:
+						if child.type == "identifier":
+							node_name = child.text.decode()
+							break
 		elif node.type == "namespace_definition":
 			node_type = "namespace"
 			found_namespace_keyword = False
@@ -161,7 +194,7 @@ class TreeSitterCppAnalyzer:
 			
 			top_level_nodes[top_level_key] = node_obj
 			
-			if node_type in ["class", "struct", "function"]:
+			if node_type in ["class", "struct", "function", "template_class", "template_function"]:
 				self.nodes.append(node_obj)
 		
 		# Recursively process children
@@ -214,6 +247,32 @@ class TreeSitterCppAnalyzer:
 								break
 						if method_name:
 							called_function = method_name
+							break
+					elif child.type == "qualified_identifier":
+						# MyLib::func() or MyLib::func<T>()
+						# Last part may be identifier, template_function, or qualified_identifier
+						def _extract_from_qualified(qnode):
+							"""Recursively extract the final function name from a qualified_identifier."""
+							last_child = qnode.children[-1] if qnode.children else None
+							if last_child is None:
+								return None
+							if last_child.type == "identifier":
+								return last_child.text.decode()
+							if last_child.type == "template_function":
+								ident = next((c for c in last_child.children if c.type == "identifier"), None)
+								return ident.text.decode() if ident else None
+							if last_child.type == "qualified_identifier":
+								return _extract_from_qualified(last_child)
+							return None
+						qname = _extract_from_qualified(child)
+						if qname:
+							called_function = qname
+							break
+					elif child.type == "template_function":
+						# func<T>()
+						ident = next((c for c in child.children if c.type == "identifier"), None)
+						if ident:
+							called_function = ident.text.decode()
 							break
 				
 				if called_function and not self._is_system_function(called_function):
