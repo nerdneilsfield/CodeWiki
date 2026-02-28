@@ -27,7 +27,8 @@ from codewiki.src.config import (
     Config,
     FIRST_MODULE_TREE_FILENAME,
     MODULE_TREE_FILENAME,
-    OVERVIEW_FILENAME
+    OVERVIEW_FILENAME,
+    TREE_CACHE_META_FILENAME,
 )
 from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
@@ -641,23 +642,56 @@ class DocumentationGenerator:
             first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
 
-            # Load cached module tree; re-cluster if missing or empty (stale from a small-repo run)
+            # ── Module tree cache with commit-aware invalidation ──────────
+            # Meta file tracks the commit and a hash of component IDs so we
+            # can detect whether source files actually changed between runs.
+            cache_meta_path = os.path.join(working_dir, TREE_CACHE_META_FILENAME)
+            components_hash = hashlib.md5(
+                ",".join(sorted(components.keys())).encode()
+            ).hexdigest()
+
             cached_tree = file_manager.load_json(first_module_tree_path) if os.path.exists(first_module_tree_path) else None
+            cache_meta = file_manager.load_json(cache_meta_path) if os.path.exists(cache_meta_path) else {}
+
+            def _save_cache_meta():
+                file_manager.save_json(
+                    {"commit_id": self.commit_id, "components_hash": components_hash},
+                    cache_meta_path,
+                )
+
+            need_recluster = True
             if cached_tree:
-                logger.debug(f"Module tree found at {first_module_tree_path}")
+                if cache_meta.get("commit_id") == self.commit_id:
+                    # Same commit — definitely no file changes
+                    need_recluster = False
+                    logger.debug("Module tree cache hit (same commit)")
+                elif cache_meta.get("components_hash") == components_hash:
+                    # Different commit but source files unchanged — reuse tree,
+                    # update meta so next run takes the fast path
+                    need_recluster = False
+                    _save_cache_meta()
+                    logger.info(
+                        f"Module tree cache reused (commit changed but files unchanged,"
+                        f" {cache_meta.get('commit_id', '?')!r} → {self.commit_id!r})"
+                    )
+                else:
+                    logger.info(
+                        f"Module tree cache invalidated (files changed,"
+                        f" commit {cache_meta.get('commit_id', '?')!r} → {self.commit_id!r})"
+                    )
+
+            if not need_recluster:
                 module_tree = heal_module_tree_components(cached_tree, components)
                 file_manager.save_json(module_tree, first_module_tree_path)
-                # Do NOT overwrite module_tree.json here — it may already contain
-                # sub-module entries added dynamically during a previous run.
-                # Only initialise it when it doesn't exist yet.
                 if not os.path.exists(module_tree_path):
                     file_manager.save_json(module_tree, module_tree_path)
             else:
-                logger.debug(f"Module tree not found or empty at {first_module_tree_path}, clustering modules")
+                logger.debug(f"Clustering modules (no valid cache at {first_module_tree_path})")
                 module_tree = cluster_modules(leaf_nodes, components, self.config)
                 if module_tree:
                     file_manager.save_json(module_tree, first_module_tree_path)
                     file_manager.save_json(module_tree, module_tree_path)
+                    _save_cache_meta()
 
             logger.debug(f"Grouped components into {len(module_tree)} modules")
 
