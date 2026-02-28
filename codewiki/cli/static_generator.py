@@ -16,7 +16,7 @@ from pathlib import Path
 from string import Template
 from typing import Dict, Any, Optional
 
-from codewiki.src.utils import file_manager, module_doc_filename
+from codewiki.src.utils import file_manager, module_doc_filename, _normalize_for_match
 
 logger = logging.getLogger(__name__)
 
@@ -248,8 +248,8 @@ def _build_nav_html(
         module_path = base_path + [key]
         # Derive the HTML filename from the sanitised doc filename
         href = module_doc_filename(module_path).replace(".md", ".html")
-        has_page = known_pages is None or href in known_pages
-        active = ' on' if current_html == href else ''
+        has_page = known_pages is None or _normalize_for_match(href) in known_pages
+        active = ' on' if _normalize_for_match(current_html) == _normalize_for_match(href) else ''
         pl = depth * 12
         nav_key = f"{key}-d{depth}".replace('.', '-').replace('/', '-').replace(' ', '-')
         children = data.get("children") or {}
@@ -425,9 +425,10 @@ class StaticHTMLGenerator:
 
         # Pre-compute the set of HTML filenames that will actually be written,
         # so the sidebar can mark missing modules as unclickable.
+        # Normalise names so - vs _ differences don't break the lookup.
         known_pages: set[str] = set()
         for _p in md_files:
-            known_pages.add(f"{_p.stem}.html")
+            known_pages.add(_normalize_for_match(f"{_p.stem}.html"))
             if _p.stem == "overview":
                 known_pages.add("index.html")
 

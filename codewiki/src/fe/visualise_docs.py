@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Optional
@@ -23,7 +24,7 @@ from markdown_it import MarkdownIt
 
 from .template_utils import render_template
 from .templates import DOCS_VIEW_TEMPLATE
-from codewiki.src.utils import file_manager, module_doc_filename
+from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
 
 app = FastAPI(title="Documentation Server", description="Simple documentation server for hosting markdown documentation folders")
 
@@ -60,24 +61,30 @@ def load_module_tree(docs_folder: Path) -> Optional[Dict]:
     
     try:
         tree = file_manager.load_json(tree_file)
-        _attach_doc_filenames(tree)
+        _attach_doc_filenames(tree, str(docs_folder))
         return tree
     except Exception as e:
         print(f"Error loading module_tree.json: {e}")
         return None
 
 
-def _attach_doc_filenames(tree: Optional[Dict], path: Optional[list[str]] = None) -> None:
+def _attach_doc_filenames(tree: Optional[Dict], docs_dir: str, path: Optional[list[str]] = None) -> None:
     """Annotate module tree nodes with doc filenames based on module path."""
     if not tree:
         return
     base = path or []
     for name, info in tree.items():
         module_path = base + [name]
-        info["doc_filename"] = module_doc_filename(module_path)
+        found = find_module_doc(docs_dir, module_path)
+        if found:
+            info["doc_filename"] = os.path.basename(found)
+            info["doc_exists"] = True
+        else:
+            info["doc_filename"] = module_doc_filename(module_path)
+            info["doc_exists"] = False
         children = info.get("children")
         if isinstance(children, dict) and children:
-            _attach_doc_filenames(children, module_path)
+            _attach_doc_filenames(children, docs_dir, module_path)
 
 
 def _fix_markdown_links(content: str, base_url: str = None) -> str:
@@ -208,7 +215,12 @@ async def serve_doc(filename: str):
         raise HTTPException(status_code=403, detail="Invalid file path")
     
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail=f"File {filename} not found")
+        stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+        found = find_module_doc(DOCS_FOLDER, stem.split("-"))
+        if found:
+            file_path = Path(found)
+        else:
+            raise HTTPException(status_code=404, detail=f"File {filename} not found")
     
     try:
         content = file_manager.load_text(file_path)

@@ -3,6 +3,7 @@
 FastAPI route handlers for the CodeWiki web application.
 """
 
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import asdict
@@ -19,7 +20,7 @@ from .cache_manager import CacheManager
 from .templates import WEB_INTERFACE_TEMPLATE
 from .template_utils import render_template
 from .config import WebAppConfig
-from codewiki.src.utils import file_manager, module_doc_filename
+from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
 
 
 class WebRoutes:
@@ -225,7 +226,7 @@ class WebRoutes:
         if module_tree_file.exists():
             try:
                 module_tree = file_manager.load_json(module_tree_file)
-                self._attach_doc_filenames(module_tree)
+                self._attach_doc_filenames(module_tree, docs_path)
             except Exception:
                 pass
         
@@ -238,10 +239,16 @@ class WebRoutes:
             except Exception:
                 pass
         
-        # Serve the requested file
+        # Serve the requested file (fuzzy-match tolerates - vs _ differences)
         file_path = docs_path / filename
         if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"File {filename} not found")
+            # Strip extension, build a single-element path for fuzzy lookup
+            stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+            found = find_module_doc(str(docs_path), stem.split("-"))
+            if found:
+                file_path = Path(found)
+            else:
+                raise HTTPException(status_code=404, detail=f"File {filename} not found")
         
         try:
             content = file_manager.load_text(file_path)
@@ -286,16 +293,22 @@ class WebRoutes:
         """Convert job ID back to repo full name."""
         return job_id.replace('--', '/')
 
-    def _attach_doc_filenames(self, tree, path=None):
+    def _attach_doc_filenames(self, tree, docs_dir, path=None):
         if not tree:
             return
         base = path or []
         for name, info in tree.items():
             module_path = base + [name]
-            info["doc_filename"] = module_doc_filename(module_path)
+            found = find_module_doc(str(docs_dir), module_path)
+            if found:
+                info["doc_filename"] = os.path.basename(found)
+                info["doc_exists"] = True
+            else:
+                info["doc_filename"] = module_doc_filename(module_path)
+                info["doc_exists"] = False
             children = info.get("children")
             if isinstance(children, dict) and children:
-                self._attach_doc_filenames(children, module_path)
+                self._attach_doc_filenames(children, docs_dir, module_path)
     
     def cleanup_old_jobs(self):
         """Clean up old job status entries."""

@@ -392,6 +392,7 @@ article{flex:1;min-width:0;max-width:860px;}
 a.nv{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;padding:6px 10px;border-radius:var(--r);color:var(--text2);font-size:13.5px;transition:var(--tr);text-decoration:none;}
 a.nv:hover{background:var(--bg3);color:var(--primary);}
 a.nv.on{background:var(--primary-lt);color:var(--primary);font-weight:600;}
+.nv-missing{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;padding:6px 10px;border-radius:var(--r);color:var(--text3);font-size:13.5px;opacity:.5;cursor:default;}
 .nvcaret{width:24px;height:28px;display:flex;align-items:center;justify-content:center;border:none;background:none;color:var(--text3);cursor:pointer;font-size:12px;border-radius:4px;transition:transform var(--tr);flex-shrink:0;}
 .nvcaret:hover{color:var(--primary);}
 .nvcaret.open{transform:rotate(90deg);}
@@ -460,8 +461,12 @@ article img{max-width:100%;border-radius:var(--r);}
       {% set nk = (key ~ '-d' ~ depth) | replace('/', '-') | replace('.', '-') | replace(' ', '-') %}
       <div>
         <div class="nav-row" style="padding-left:{{ depth * 12 }}px;">
+          {% if data.doc_exists is not defined or data.doc_exists %}
           <a href="/static-docs/{{ job_id }}/{{ data.doc_filename }}"
              class="nv {% if current_page == data.doc_filename %}on{% endif %}">{{ key.replace('_', ' ').title() }}</a>
+          {% else %}
+          <span class="nv-missing" title="Documentation not yet generated">{{ key.replace('_', ' ').title() }}</span>
+          {% endif %}
           {% if has_ch %}<button class="nvcaret" data-nav="{{ nk }}" aria-label="Toggle">›</button>{% endif %}
         </div>
         {% if has_ch %}
