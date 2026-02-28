@@ -23,7 +23,7 @@ from markdown_it import MarkdownIt
 
 from .template_utils import render_template
 from .templates import DOCS_VIEW_TEMPLATE
-from codewiki.src.utils import file_manager
+from codewiki.src.utils import file_manager, module_doc_filename
 
 app = FastAPI(title="Documentation Server", description="Simple documentation server for hosting markdown documentation folders")
 
@@ -59,10 +59,25 @@ def load_module_tree(docs_folder: Path) -> Optional[Dict]:
         return None
     
     try:
-        return file_manager.load_json(tree_file)
+        tree = file_manager.load_json(tree_file)
+        _attach_doc_filenames(tree)
+        return tree
     except Exception as e:
         print(f"Error loading module_tree.json: {e}")
         return None
+
+
+def _attach_doc_filenames(tree: Optional[Dict], path: Optional[list[str]] = None) -> None:
+    """Annotate module tree nodes with doc filenames based on module path."""
+    if not tree:
+        return
+    base = path or []
+    for name, info in tree.items():
+        module_path = base + [name]
+        info["doc_filename"] = module_doc_filename(module_path)
+        children = info.get("children")
+        if isinstance(children, dict) and children:
+            _attach_doc_filenames(children, module_path)
 
 
 def _fix_markdown_links(content: str, base_url: str = None) -> str:

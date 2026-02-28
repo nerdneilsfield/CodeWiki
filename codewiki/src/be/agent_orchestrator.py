@@ -56,7 +56,7 @@ from codewiki.src.config import (
     Config,
     MODULE_TREE_FILENAME,
 )
-from codewiki.src.utils import file_manager
+from codewiki.src.utils import file_manager, module_doc_filename
 from codewiki.src.be.dependency_analyzer.models.core import Node
 
 
@@ -110,7 +110,8 @@ class AgentOrchestrator:
         logger.info(f"Processing module: {module_name}")
 
         # ── Cache check ──────────────────────────────────────────────────
-        docs_path = os.path.join(working_dir, f"{module_name}.md")
+        doc_path_parts = module_path if module_path else [module_name]
+        docs_path = os.path.join(working_dir, module_doc_filename(doc_path_parts))
         if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
             # For complex modules, only skip when the tree node is marked
             # _completed (meaning this module AND all its sub-modules finished

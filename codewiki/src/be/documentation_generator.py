@@ -28,7 +28,7 @@ from codewiki.src.config import (
     MODULE_TREE_FILENAME,
     OVERVIEW_FILENAME
 )
-from codewiki.src.utils import file_manager
+from codewiki.src.utils import file_manager, module_doc_filename
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
 from codewiki.src.be.module_tree_manager import ModuleTreeManager
 
@@ -187,10 +187,11 @@ class DocumentationGenerator:
             module_info = module_info["children"]
 
         for child_name, child_info in module_info.items():
-            if os.path.exists(os.path.join(working_dir, f"{child_name}.md")):
-                child_info["docs"] = file_manager.load_text(os.path.join(working_dir, f"{child_name}.md"))
+            child_filename = module_doc_filename(module_path + [child_name])
+            if os.path.exists(os.path.join(working_dir, child_filename)):
+                child_info["docs"] = file_manager.load_text(os.path.join(working_dir, child_filename))
             else:
-                logger.warning(f"Module docs not found at {os.path.join(working_dir, f"{child_name}.md")}")
+                logger.warning(f"Module docs not found at {os.path.join(working_dir, child_filename)}")
                 child_info["docs"] = ""
 
         return processed_module_tree
@@ -198,9 +199,9 @@ class DocumentationGenerator:
     # ── Main entry point ─────────────────────────────────────────────────
 
     @staticmethod
-    def _module_doc_exists(working_dir: str, module_name: str) -> bool:
-        """Return True if a non-trivial .md file already exists for *module_name*."""
-        docs_path = os.path.join(working_dir, f"{module_name}.md")
+    def _module_doc_exists(working_dir: str, module_path: List[str]) -> bool:
+        """Return True if a non-trivial .md file already exists for *module_path*."""
+        docs_path = os.path.join(working_dir, module_doc_filename(module_path))
         return os.path.exists(docs_path) and os.path.getsize(docs_path) > 100
 
     async def generate_module_documentation(self, components: Dict[str, Any], leaf_nodes: List[str]) -> str:
@@ -224,7 +225,7 @@ class DocumentationGenerator:
 
             file_manager.save_json(final_module_tree, module_tree_path)
 
-            repo_overview_path = os.path.join(working_dir, f"{repo_name}.md")
+            repo_overview_path = os.path.join(working_dir, module_doc_filename([repo_name]))
             if os.path.exists(repo_overview_path):
                 os.rename(repo_overview_path, os.path.join(working_dir, OVERVIEW_FILENAME))
 
@@ -432,32 +433,34 @@ class DocumentationGenerator:
         nodes whose .md already exists, so only truly missing modules are
         regenerated.
         """
-        def _count_missing(tree: Dict[str, Any]) -> int:
+        def _count_missing(tree: Dict[str, Any], path: List[str]) -> int:
             count = 0
             for name, info in tree.items():
-                if not self._module_doc_exists(working_dir, name):
+                module_path = path + [name]
+                if not self._module_doc_exists(working_dir, module_path):
                     count += 1
                 children = info.get("children") or {}
                 if children:
-                    count += _count_missing(children)
+                    count += _count_missing(children, module_path)
             return count
 
-        def _missing_names(tree: Dict[str, Any]) -> List[str]:
+        def _missing_names(tree: Dict[str, Any], path: List[str]) -> List[str]:
             names: List[str] = []
             for name, info in tree.items():
-                if not self._module_doc_exists(working_dir, name):
-                    names.append(name)
+                module_path = path + [name]
+                if not self._module_doc_exists(working_dir, module_path):
+                    names.append("-".join(module_path))
                 children = info.get("children") or {}
                 if children:
-                    names.extend(_missing_names(children))
+                    names.extend(_missing_names(children, module_path))
             return names
 
         for attempt in range(max_retries):
             module_tree = await tree_manager.get_snapshot()
-            missing_count = _count_missing(module_tree)
+            missing_count = _count_missing(module_tree, [])
             if missing_count == 0:
                 return
-            missing_names = _missing_names(module_tree)
+            missing_names = _missing_names(module_tree, [])
             logger.warning(
                 f"↩ Fill pass {attempt + 1}/{max_retries}: "
                 f"{missing_count} module(s) without docs — "
@@ -491,7 +494,7 @@ class DocumentationGenerator:
         if len(module_path) == 0:
             output_path = os.path.join(working_dir, OVERVIEW_FILENAME)
         else:
-            output_path = os.path.join(working_dir, f"{module_name}.md")
+            output_path = os.path.join(working_dir, module_doc_filename(module_path))
         if os.path.exists(output_path) and os.path.getsize(output_path) > 100:
             logger.debug(f"✓ Docs already exists at {output_path}")
             return module_tree

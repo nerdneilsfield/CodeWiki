@@ -33,7 +33,7 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
 </WRITING_APPROACH>
 
 <DOCUMENTATION_STRUCTURE>
-1. **Main Documentation File** (`{module_name}.md`):
+1. **Main Documentation File** (`{module_name}.md`; actual filename uses module path joined by `-`):
    - Opening paragraph: a vivid, jargon-light explanation of what this module does and why it matters — a reader should "get it" in 30 seconds
    - Architecture overview: a Mermaid diagram followed by a narrative walkthrough explaining each component's role and the data/control flow between them
    - Key design decisions: what patterns were adopted (and what alternatives exist), with tradeoff analysis
@@ -41,7 +41,7 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
    - Cross-module dependencies: how this module interacts with the rest of the system, with references to other module docs
 
 2. **Sub-module Documentation** (delegated via tool):
-   - Each sub-module gets its own `sub_module_name.md` with full component-level detail
+   - Each sub-module gets its own doc file; filename uses module path joined by `-`
    - Core components explained in narrative prose with analogies, not just bullet lists
    - Key functions/classes: purpose, internal mechanics, parameters, return values, side effects
    - Dependency analysis: what each component calls, what calls it, and the data contracts between them
@@ -63,9 +63,9 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
 
 <WORKFLOW>
 1. Analyze the provided code components, dependency graph, and module structure; explore additional dependencies if needed
-2. Create `{module_name}.md` with overview, architecture narrative, design decisions, and sub-module summaries
+2. Create the module doc file (module path joined by `-`) with overview, architecture narrative, design decisions, and sub-module summaries
 3. Use `generate_sub_module_documentation` to delegate sub-module docs for COMPLEX modules (more than 1 code file, clearly separable into sub-topics)
-4. After sub-modules are documented, make ONE final edit to `{module_name}.md` to ensure all sub-module pages are properly cross-referenced
+4. After sub-modules are documented, make ONE final edit to the module doc file to ensure all sub-module pages are properly cross-referenced
 </WORKFLOW>
 
 <AVAILABLE_TOOLS>
@@ -144,7 +144,7 @@ Good: "`Tokenizer.split()` exists because the downstream parser expects a flat t
 <WORKFLOW>
 1. Analyze provided code components, dependency graph, and module structure
 2. Explore additional dependencies between components if needed
-3. Generate complete `{module_name}.md` with architecture narrative, component deep-dives, dependency analysis, and design tradeoffs
+3. Generate the module doc file (module path joined by `-`) with architecture narrative, component deep-dives, dependency analysis, and design tradeoffs
 </WORKFLOW>
 
 <AVAILABLE_TOOLS>
@@ -167,7 +167,7 @@ Your documentation should answer these questions:
 <MODULE_TREE>
 {module_tree}
 </MODULE_TREE>
-* NOTE: Reference other modules via links based on dependency relationships. All docs are flat in the same folder: [Module Name](module_name.md)
+* NOTE: Reference other modules via links based on dependency relationships. All docs are flat in the same folder; filenames are built from the module path joined by '-' (e.g., [Child Module](parent-child.md)).
 
 <CORE_COMPONENT_CODES>
 {formatted_core_component_codes}

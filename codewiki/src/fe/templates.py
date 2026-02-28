@@ -460,8 +460,8 @@ article img{max-width:100%;border-radius:var(--r);}
       {% set nk = (key ~ '-d' ~ depth) | replace('/', '-') | replace('.', '-') | replace(' ', '-') %}
       <div>
         <div class="nav-row" style="padding-left:{{ depth * 12 }}px;">
-          <a href="/static-docs/{{ job_id }}/{{ key }}.md"
-             class="nv {% if current_page == key + '.md' %}on{% endif %}">{{ key.replace('_', ' ').title() }}</a>
+          <a href="/static-docs/{{ job_id }}/{{ data.doc_filename }}"
+             class="nv {% if current_page == data.doc_filename %}on{% endif %}">{{ key.replace('_', ' ').title() }}</a>
           {% if has_ch %}<button class="nvcaret" data-nav="{{ nk }}" aria-label="Toggle">›</button>{% endif %}
         </div>
         {% if has_ch %}

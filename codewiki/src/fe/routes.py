@@ -19,7 +19,7 @@ from .cache_manager import CacheManager
 from .templates import WEB_INTERFACE_TEMPLATE
 from .template_utils import render_template
 from .config import WebAppConfig
-from codewiki.src.utils import file_manager
+from codewiki.src.utils import file_manager, module_doc_filename
 
 
 class WebRoutes:
@@ -225,6 +225,7 @@ class WebRoutes:
         if module_tree_file.exists():
             try:
                 module_tree = file_manager.load_json(module_tree_file)
+                self._attach_doc_filenames(module_tree)
             except Exception:
                 pass
         
@@ -284,6 +285,17 @@ class WebRoutes:
     def _job_id_to_repo_full_name(self, job_id: str) -> str:
         """Convert job ID back to repo full name."""
         return job_id.replace('--', '/')
+
+    def _attach_doc_filenames(self, tree, path=None):
+        if not tree:
+            return
+        base = path or []
+        for name, info in tree.items():
+            module_path = base + [name]
+            info["doc_filename"] = module_doc_filename(module_path)
+            children = info.get("children")
+            if isinstance(children, dict) and children:
+                self._attach_doc_filenames(children, module_path)
     
     def cleanup_old_jobs(self):
         """Clean up old job status entries."""

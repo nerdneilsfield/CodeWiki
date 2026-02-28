@@ -14,7 +14,7 @@ from codewiki.src.be.prompt_template import format_system_prompt, format_leaf_sy
 from codewiki.src.be.utils import is_complex_module, count_tokens, agent_progress_handler
 from codewiki.src.be.cluster_modules import format_potential_core_components
 from codewiki.src.config import MODULE_TREE_FILENAME
-from codewiki.src.utils import file_manager
+from codewiki.src.utils import file_manager, module_doc_filename
 
 import logging
 logger = logging.getLogger(__name__)
@@ -112,7 +112,10 @@ async def generate_sub_module_documentation(
         deps._dispatched_sub_modules.add(sub_module_name)
 
         # ── Skip sub-modules whose docs already exist ─────────────────
-        docs_path = os.path.join(deps.absolute_docs_path, f"{sub_module_name}.md")
+        docs_path = os.path.join(
+            deps.absolute_docs_path,
+            module_doc_filename(deps.path_to_current_module + [sub_module_name]),
+        )
         if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
             logger.debug(f"{indent}{arrow} ✓ Sub-module {sub_module_name} already has docs, skipping")
             continue
@@ -208,7 +211,11 @@ async def generate_sub_module_documentation(
     # restore the previous module name
     deps.current_module_name = previous_module_name
 
-    return f"Generate successfully. Documentations: {', '.join([key + '.md' for key in sub_module_specs.keys()])} are saved in the working directory."
+    doc_files = [
+        module_doc_filename(deps.path_to_current_module + [name])
+        for name in sub_module_specs.keys()
+    ]
+    return f"Generate successfully. Documentations: {', '.join(doc_files)} are saved in the working directory."
 
 
 generate_sub_module_documentation_tool = Tool(function=generate_sub_module_documentation, name="generate_sub_module_documentation", description="Generate detailed description of a given sub-module specs to the sub-agents", takes_ctx=True, max_retries=3)

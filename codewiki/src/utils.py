@@ -1,7 +1,7 @@
 import os
 import json
 import tempfile
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, List
 
 
 # ------------------------------------------------------------
@@ -59,3 +59,15 @@ class FileManager:
             return f.read()
 
 file_manager = FileManager()
+
+
+def module_doc_filename(module_path: List[str]) -> str:
+    """Build a stable markdown filename for a module path."""
+    parts = [p for p in module_path if p]
+    if not parts:
+        return "overview.md"
+    safe_parts = [
+        p.strip().replace(" ", "_").replace("/", "_")
+        for p in parts
+    ]
+    return f"{'-'.join(safe_parts)}.md"
