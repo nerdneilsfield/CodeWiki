@@ -212,6 +212,9 @@ CODE_EXTENSIONS = {
     ".toml": "toml",
     # Vitis/HLS configuration files
     ".cfg": "vitis_cfg",
+    # Makefile (also detected by filename in extract_code_files)
+    ".mk": "makefile",
+    ".mak": "makefile",
 }
 
 # Entry point file patterns for all supported languages

@@ -87,9 +87,11 @@ class CallGraphAnalyzer:
             if tree["type"] == "file":
                 ext = tree.get("extension", "").lower()
                 file_name = tree.get("name", "")
-                # Detect by extension, with special-case for CMakeLists.txt
+                # Detect by extension, with special-case for CMakeLists.txt and Makefile
                 if file_name == "CMakeLists.txt":
                     language = "cmake"
+                elif file_name in ("Makefile", "GNUmakefile") or file_name.endswith(".mk") or file_name.endswith(".mak"):
+                    language = "makefile"
                 elif ext in CODE_EXTENSIONS:
                     language = CODE_EXTENSIONS[ext]
                 else:
@@ -165,6 +167,8 @@ class CallGraphAnalyzer:
                 self._analyze_toml_file(file_path, content, repo_dir)
             elif language == "vitis_cfg":
                 self._analyze_vitis_cfg_file(file_path, content, repo_dir)
+            elif language == "makefile":
+                self._analyze_makefile_file(file_path, content, repo_dir)
 
         except Exception as e:
             logger.error(f"⚠️ Error analyzing {file_path}: {str(e)}")
@@ -320,6 +324,17 @@ class CallGraphAnalyzer:
             self.call_relationships.extend(relationships)
         except Exception as e:
             logger.error(f"Failed to analyze TOML file {file_path}: {e}", exc_info=True)
+
+    def _analyze_makefile_file(self, file_path: str, content: str, repo_dir: str):
+        """Analyze Makefile using tree-sitter-make."""
+        from codewiki.src.be.dependency_analyzer.analyzers.makefile import analyze_makefile_file
+        try:
+            functions, relationships = analyze_makefile_file(file_path, content, repo_path=repo_dir)
+            for func in functions:
+                self.functions[func.id or f"{file_path}:{func.name}"] = func
+            self.call_relationships.extend(relationships)
+        except Exception as e:
+            logger.error(f"Failed to analyze Makefile {file_path}: {e}", exc_info=True)
 
     def _analyze_vitis_cfg_file(self, file_path: str, content: str, repo_dir: str):
         """Analyze Vitis .cfg file for HLS top functions, stream connections, memory maps."""
