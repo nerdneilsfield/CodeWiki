@@ -51,6 +51,7 @@ class CallGraphAnalyzer:
         logger.debug("Resolving call relationships")
         self._resolve_call_relationships()
         self._pair_header_source_files()
+        data_flow_result = self._analyze_data_flow()
         self._deduplicate_relationships()
         viz_data = self._generate_visualization_data()
 
@@ -65,6 +66,7 @@ class CallGraphAnalyzer:
             "functions": [func.model_dump() for func in self.functions.values()],
             "relationships": [rel.model_dump() for rel in self.call_relationships],
             "visualization": viz_data,
+            "data_flow": data_flow_result,
         }
 
     def extract_code_files(self, file_tree: Dict) -> List[Dict]:
@@ -316,6 +318,12 @@ class CallGraphAnalyzer:
             self.call_relationships.extend(relationships)
         except Exception as e:
             logger.error(f"Failed to analyze TOML file {file_path}: {e}", exc_info=True)
+
+    def _analyze_data_flow(self) -> dict:
+        """Run cross-file data flow analysis."""
+        from codewiki.src.be.dependency_analyzer.analysis.data_flow_analyzer import DataFlowAnalyzer
+        analyzer = DataFlowAnalyzer(self.functions, self.call_relationships)
+        return analyzer.analyze()
 
     def _pair_header_source_files(self):
         """Pair header files (.h/.hpp) with implementation files (.cpp/.cc/.c) by basename."""
