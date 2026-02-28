@@ -92,6 +92,10 @@ class CallGraphAnalyzer:
                     language = "cmake"
                 elif file_name in ("Makefile", "GNUmakefile") or file_name.endswith(".mk") or file_name.endswith(".mak"):
                     language = "makefile"
+                elif ext == ".cfg":
+                    # .cfg is a common extension — only route as vitis_cfg if content
+                    # contains Vitis-specific markers (detected later during analysis)
+                    language = "vitis_cfg"
                 elif ext in CODE_EXTENSIONS:
                     language = CODE_EXTENSIONS[ext]
                 else:
@@ -169,6 +173,8 @@ class CallGraphAnalyzer:
                 self._analyze_vitis_cfg_file(file_path, content, repo_dir)
             elif language == "makefile":
                 self._analyze_makefile_file(file_path, content, repo_dir)
+            elif language == "tcl":
+                self._analyze_tcl_file(file_path, content, repo_dir)
 
         except Exception as e:
             logger.error(f"⚠️ Error analyzing {file_path}: {str(e)}")
@@ -325,6 +331,17 @@ class CallGraphAnalyzer:
         except Exception as e:
             logger.error(f"Failed to analyze TOML file {file_path}: {e}", exc_info=True)
 
+    def _analyze_tcl_file(self, file_path: str, content: str, repo_dir: str):
+        """Analyze Vitis HLS TCL script."""
+        from codewiki.src.be.dependency_analyzer.analyzers.tcl import analyze_tcl_file
+        try:
+            functions, relationships = analyze_tcl_file(file_path, content, repo_path=repo_dir)
+            for func in functions:
+                self.functions[func.id or f"{file_path}:{func.name}"] = func
+            self.call_relationships.extend(relationships)
+        except Exception as e:
+            logger.error(f"Failed to analyze TCL file {file_path}: {e}", exc_info=True)
+
     def _analyze_makefile_file(self, file_path: str, content: str, repo_dir: str):
         """Analyze Makefile using tree-sitter-make."""
         from codewiki.src.be.dependency_analyzer.analyzers.makefile import analyze_makefile_file
@@ -336,8 +353,26 @@ class CallGraphAnalyzer:
         except Exception as e:
             logger.error(f"Failed to analyze Makefile {file_path}: {e}", exc_info=True)
 
+    # Vitis .cfg markers — must be present in file content for it to be treated as Vitis config.
+    # These are unique to Xilinx/AMD Vitis and would not appear in generic .cfg files.
+    _VITIS_CFG_SECTION_MARKERS = frozenset({"[hls]", "[connectivity]", "[clock]", "[profile]", "[advanced]"})
+    _VITIS_CFG_KEY_MARKERS = frozenset({"syn.top=", "syn.file=", "stream_connect=", "nk=", "flow_target=vitis"})
+
+    def _is_vitis_cfg(self, content: str) -> bool:
+        """Return True only if the file content looks like a Vitis/HLS .cfg file."""
+        lines = [l.strip().lower() for l in content.splitlines()]
+        for line in lines:
+            if line in self._VITIS_CFG_SECTION_MARKERS:
+                return True
+            if any(line.startswith(k) for k in self._VITIS_CFG_KEY_MARKERS):
+                return True
+        return False
+
     def _analyze_vitis_cfg_file(self, file_path: str, content: str, repo_dir: str):
         """Analyze Vitis .cfg file for HLS top functions, stream connections, memory maps."""
+        if not self._is_vitis_cfg(content):
+            logger.debug(f"Skipping {file_path}: does not look like a Vitis .cfg file")
+            return
         from codewiki.src.be.dependency_analyzer.analyzers.vitis_cfg import analyze_vitis_cfg
         try:
             functions, relationships = analyze_vitis_cfg(file_path, content, repo_path=repo_dir)

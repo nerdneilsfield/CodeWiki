@@ -210,11 +210,13 @@ CODE_EXTENSIONS = {
     ".zsh": "bash",
     # Config formats (analyzed for structure, not call graphs)
     ".toml": "toml",
-    # Vitis/HLS configuration files
-    ".cfg": "vitis_cfg",
     # Makefile (also detected by filename in extract_code_files)
     ".mk": "makefile",
     ".mak": "makefile",
+    # Vitis/HLS TCL scripts
+    ".tcl": "tcl",
+    # NOTE: .cfg is NOT here — Vitis .cfg files are detected by content sniffing
+    # in call_graph_analyzer._analyze_code_file to avoid misidentifying Python/app configs
 }
 
 # Entry point file patterns for all supported languages
