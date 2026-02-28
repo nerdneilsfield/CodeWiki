@@ -274,7 +274,8 @@ def graph_pre_cluster(
     # Run Louvain community detection; cap to MAX_CLUSTERS afterwards.
     # Resolution 1.0 produces coarser communities than the original 2.0,
     # reducing the initial count before the cap step.
-    MAX_CLUSTERS = 12
+    # Scale cap with repo size: ~1 cluster per 50 nodes, clamped [12, 32].
+    MAX_CLUSTERS = max(12, min(32, len(node_set) // 50))
     try:
         communities = louvain_communities(G, weight="weight", resolution=1.0, seed=42)
     except Exception as e:
