@@ -50,6 +50,7 @@ class CallGraphAnalyzer:
 
         logger.debug("Resolving call relationships")
         self._resolve_call_relationships()
+        self._pair_header_source_files()
         self._deduplicate_relationships()
         viz_data = self._generate_visualization_data()
 
@@ -315,6 +316,35 @@ class CallGraphAnalyzer:
             self.call_relationships.extend(relationships)
         except Exception as e:
             logger.error(f"Failed to analyze TOML file {file_path}: {e}", exc_info=True)
+
+    def _pair_header_source_files(self):
+        """Pair header files (.h/.hpp) with implementation files (.cpp/.cc/.c) by basename."""
+        from collections import defaultdict
+        header_exts = {".h", ".hpp", ".hxx"}
+        source_exts = {".c", ".cpp", ".cc", ".cxx", ".c++"}
+
+        # Group nodes by file stem (without extension)
+        stem_to_files = defaultdict(lambda: {"headers": [], "sources": []})
+        for func_id, func in self.functions.items():
+            p = Path(func.file_path)
+            stem = p.stem
+            if p.suffix in header_exts:
+                stem_to_files[stem]["headers"].append(func)
+            elif p.suffix in source_exts:
+                stem_to_files[stem]["sources"].append(func)
+
+        # Create header_impl relationships for matched pairs
+        for stem, files in stem_to_files.items():
+            if files["headers"] and files["sources"]:
+                header_rep = files["headers"][0]
+                source_rep = files["sources"][0]
+                self.call_relationships.append(CallRelationship(
+                    caller=source_rep.id,
+                    callee=header_rep.id,
+                    call_line=0,
+                    is_resolved=True,
+                    relationship_type="header_impl",
+                ))
 
     def _resolve_call_relationships(self):
         """
