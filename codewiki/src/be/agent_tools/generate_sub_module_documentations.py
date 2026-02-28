@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+from typing import Any
 from pydantic_ai import RunContext, Tool, Agent
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
@@ -44,60 +45,92 @@ async def generate_sub_module_documentation(
     deps = ctx.deps
     previous_module_name = deps.current_module_name
 
-    # ── Validate & filter out obviously wrong entries ────────────────────
-    _META_KEYS = {
-        'module_name', 'sub_modules', 'language', 'output_language',
-        'name', 'description', 'specs', 'components', 'children',
-    }
-    filtered: dict[str, list[str]] = {}
-    for sub_name, comp_ids in sub_module_specs.items():
-        if sub_name.lower() in _META_KEYS:
-            logger.warning(f"Skipping invalid sub-module name '{sub_name}' (looks like a metadata key, not a module name)")
-            continue
-        if sub_name == deps.current_module_name:
-            logger.warning(f"Skipping sub-module '{sub_name}' (same as parent module name)")
-            continue
-        if not isinstance(comp_ids, list) or not comp_ids:
-            logger.warning(f"Skipping sub-module '{sub_name}' — component list is empty or invalid")
-            continue
-        filtered[sub_name] = comp_ids
+    # ── Reuse existing children if the tree already has them ─────────────
+    # This ensures the tree structure is stable across re-runs: the first
+    # successful run establishes the sub-module split and subsequent runs
+    # reuse it rather than letting the LLM propose a different split.
+    existing_children: dict[str, Any] = {}
+    try:
+        node = deps.module_tree
+        for key in deps.path_to_current_module:
+            node = node[key]["children"]
+        existing_children = node  # children dict of the current module's parent level
+    except (KeyError, TypeError):
+        pass
 
-    if not filtered:
-        return (
-            "ERROR: All sub-module entries were invalid. Please call this tool again "
-            "with correct sub_module_specs: keys must be descriptive sub-module names "
-            "(NOT 'module_name', 'language', etc.) and values must be lists of "
-            "component IDs from the core_components list."
+    # Check if the current module already has children in the tree
+    current_node_children: dict[str, Any] = {}
+    try:
+        current_node = deps.module_tree
+        for key in deps.path_to_current_module[:-1]:
+            current_node = current_node[key]["children"]
+        current_node_children = current_node[deps.path_to_current_module[-1]].get("children", {})
+    except (KeyError, TypeError, IndexError):
+        pass
+
+    if current_node_children:
+        # Tree already has children for this module — use them instead of the
+        # agent's proposal.  This keeps the tree stable across re-runs.
+        logger.info(
+            f"Using cached sub-module tree for '{deps.current_module_name}' "
+            f"({len(current_node_children)} children) — ignoring agent proposal"
         )
-    sub_module_specs = filtered
-
-    # Create fallback models from config
-    fallback_models = create_fallback_models(deps.config)
-
-    # add the sub-module to the module tree (preserve existing entries)
-    value = deps.module_tree
-    for key in deps.path_to_current_module:
-        value = value[key]["children"]
-    for sub_module_name, core_component_ids in sub_module_specs.items():
-        if sub_module_name not in value:
-            value[sub_module_name] = {"components": core_component_ids, "children": {}}
-        else:
-            # Only refresh components; keep existing _completed / children
-            value[sub_module_name]["components"] = core_component_ids
-
-    # Persist the updated tree immediately so the sidebar stays accurate even if
-    # the agent fails later (after sub-module .md files have already been created).
-    if deps.module_tree_manager:
-        new_children = {
-            name: {"components": ids, "children": {}}
-            for name, ids in sub_module_specs.items()
+        sub_module_specs = {
+            name: info.get("components", [])
+            for name, info in current_node_children.items()
         }
-        await deps.module_tree_manager.update_children(
-            deps.path_to_current_module, new_children
-        )
     else:
-        module_tree_path = os.path.join(deps.absolute_docs_path, MODULE_TREE_FILENAME)
-        file_manager.save_json(deps.module_tree, module_tree_path)
+        # ── Validate & filter out obviously wrong entries ────────────────
+        _META_KEYS = {
+            'module_name', 'sub_modules', 'language', 'output_language',
+            'name', 'description', 'specs', 'components', 'children',
+        }
+        filtered: dict[str, list[str]] = {}
+        for sub_name, comp_ids in sub_module_specs.items():
+            if sub_name.lower() in _META_KEYS:
+                logger.warning(f"Skipping invalid sub-module name '{sub_name}' (looks like a metadata key, not a module name)")
+                continue
+            if sub_name == deps.current_module_name:
+                logger.warning(f"Skipping sub-module '{sub_name}' (same as parent module name)")
+                continue
+            if not isinstance(comp_ids, list) or not comp_ids:
+                logger.warning(f"Skipping sub-module '{sub_name}' — component list is empty or invalid")
+                continue
+            filtered[sub_name] = comp_ids
+
+        if not filtered:
+            return (
+                "ERROR: All sub-module entries were invalid. Please call this tool again "
+                "with correct sub_module_specs: keys must be descriptive sub-module names "
+                "(NOT 'module_name', 'language', etc.) and values must be lists of "
+                "component IDs from the core_components list."
+            )
+        sub_module_specs = filtered
+
+        # add the sub-module to the module tree (preserve existing entries)
+        value = deps.module_tree
+        for key in deps.path_to_current_module:
+            value = value[key]["children"]
+        for sub_module_name, core_component_ids in sub_module_specs.items():
+            if sub_module_name not in value:
+                value[sub_module_name] = {"components": core_component_ids, "children": {}}
+            else:
+                # Only refresh components; keep existing _completed / children
+                value[sub_module_name]["components"] = core_component_ids
+
+        # Persist the updated tree immediately so the sidebar stays accurate even if
+        # the agent fails later (after sub-module .md files have already been created).
+        if deps.module_tree_manager:
+            new_children = {
+                name: {"components": ids, "children": {}}
+                for name, ids in sub_module_specs.items()
+            }
+            await deps.module_tree_manager.update_children(
+                deps.path_to_current_module, new_children
+            )
+        else:
+            module_tree_path = os.path.join(deps.absolute_docs_path, MODULE_TREE_FILENAME)
+            file_manager.save_json(deps.module_tree, module_tree_path)
     
     for sub_module_name, core_component_ids in sub_module_specs.items():
 
