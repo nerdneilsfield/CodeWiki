@@ -62,6 +62,12 @@ def create_fallback_models(config: Config) -> FallbackModel:
         for name in fallback_names
     ]
 
+    # Append long-context model as last resort for oversized prompts
+    if config.long_context_model:
+        fallbacks.append(
+            OpenAIModel(model_name=config.long_context_model, provider=provider, settings=settings)
+        )
+
     return FallbackModel(main, *fallbacks)
 
 
