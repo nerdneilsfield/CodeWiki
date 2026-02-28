@@ -16,7 +16,7 @@ from pathlib import Path
 from string import Template
 from typing import Dict, Any, Optional
 
-from codewiki.src.utils import file_manager, module_doc_filename, _normalize_for_match
+from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc, _normalize_for_match
 
 logger = logging.getLogger(__name__)
 
@@ -232,11 +232,38 @@ themeBtn.addEventListener('click',function(){setTimeout(cwRenderMermaid,50);});
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _resolve_nav_hrefs(
+    module_tree: Dict[str, Any],
+    docs_dir: str,
+    parent_path: Optional[list[str]] = None,
+) -> Dict[str, Optional[str]]:
+    """Pre-compute ``module_key → actual_html_filename`` for every tree node.
+
+    Uses ``find_module_doc`` (with suffix fallback) so that modules whose
+    .md file was generated under a different tree prefix are still found.
+    Returns a flat dict keyed by ``"/".join(module_path)``.
+    """
+    result: Dict[str, Optional[str]] = {}
+    base = parent_path or []
+    for key, data in module_tree.items():
+        module_path = base + [key]
+        map_key = "/".join(module_path)
+        found = find_module_doc(docs_dir, module_path)
+        if found:
+            result[map_key] = os.path.basename(found).replace(".md", ".html")
+        else:
+            result[map_key] = None
+        children = data.get("children") or {}
+        if children:
+            result.update(_resolve_nav_hrefs(children, docs_dir, module_path))
+    return result
+
+
 def _build_nav_html(
     module_tree: Dict[str, Any],
     current_html: str,
     depth: int = 0,
-    known_pages: Optional[set] = None,
+    resolved_hrefs: Optional[Dict[str, Optional[str]]] = None,
     parent_path: Optional[list[str]] = None,
 ) -> str:
     """Recursively build sidebar nav HTML from the module tree."""
@@ -246,9 +273,11 @@ def _build_nav_html(
 
     for key, data in module_tree.items():
         module_path = base_path + [key]
-        # Derive the HTML filename from the sanitised doc filename
-        href = module_doc_filename(module_path).replace(".md", ".html")
-        has_page = known_pages is None or _normalize_for_match(href) in known_pages
+        map_key = "/".join(module_path)
+        href = (resolved_hrefs or {}).get(map_key)
+        has_page = href is not None
+        if not href:
+            href = module_doc_filename(module_path).replace(".md", ".html")
         active = ' on' if _normalize_for_match(current_html) == _normalize_for_match(href) else ''
         pl = depth * 12
         nav_key = f"{key}-d{depth}".replace('.', '-').replace('/', '-').replace(' ', '-')
@@ -273,7 +302,7 @@ def _build_nav_html(
 
         if children:
             lines.append(f'{indent}  <div class="nvsub" data-nav-sub="{nav_key}">')
-            lines.append(_build_nav_html(children, current_html, depth + 1, known_pages, module_path))
+            lines.append(_build_nav_html(children, current_html, depth + 1, resolved_hrefs, module_path))
             lines.append(f'{indent}  </div>')
 
         lines.append(f'{indent}</div>')
@@ -423,14 +452,10 @@ class StaticHTMLGenerator:
             logger.warning(f"No .md files found in {docs_dir}")
             return []
 
-        # Pre-compute the set of HTML filenames that will actually be written,
-        # so the sidebar can mark missing modules as unclickable.
-        # Normalise names so - vs _ differences don't break the lookup.
-        known_pages: set[str] = set()
-        for _p in md_files:
-            known_pages.add(_normalize_for_match(f"{_p.stem}.html"))
-            if _p.stem == "overview":
-                known_pages.add("index.html")
+        # Pre-compute module_path → actual HTML filename using fuzzy matching,
+        # so the sidebar links point to the right files even when the tree
+        # structure changed between runs (different path prefixes).
+        resolved_hrefs = _resolve_nav_hrefs(module_tree, str(docs_dir)) if module_tree else {}
 
         written: list[str] = []
 
@@ -464,7 +489,7 @@ class StaticHTMLGenerator:
                     f'    <a href="index.html" class="nv{ov_active}">Overview</a>\n'
                     f'  </div>\n'
                 )
-                nav_html += _build_nav_html(module_tree, html_name, known_pages=known_pages)
+                nav_html += _build_nav_html(module_tree, html_name, resolved_hrefs=resolved_hrefs)
 
             page = _PAGE_TEMPLATE.substitute(
                 title=title,
