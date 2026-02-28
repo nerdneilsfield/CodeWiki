@@ -180,6 +180,12 @@ class TreeSitterCppAnalyzer:
 			if node_type in ("function", "method", "template_function") and getattr(self, "_current_func_declarator", None):
 				_params = self._extract_parameters(self._current_func_declarator)
 				self._current_func_declarator = None
+			_hls_pragmas = None
+			_is_hls_kernel = False
+			if node_type in ("function", "method"):
+				_hls_pragmas = self._extract_hls_pragmas(node)
+				if _hls_pragmas and self._is_in_extern_c(node):
+					_is_hls_kernel = True
 			node_obj = Node(
 				id=component_id,
 				name=node_name,
@@ -196,7 +202,9 @@ class TreeSitterCppAnalyzer:
 				base_classes=None,
 				class_name=containing_class if node_type == "method" else None,
 				display_name=f"{node_type} {node_name}",
-				component_id=component_id
+				component_id=component_id,
+				hls_pragmas=_hls_pragmas,
+				is_hls_kernel=_is_hls_kernel,
 			)
 			
 			top_level_nodes[top_level_key] = node_obj
@@ -207,6 +215,88 @@ class TreeSitterCppAnalyzer:
 		# Recursively process children
 		for child in node.children:
 			self._extract_nodes(child, top_level_nodes, lines)
+
+
+	def _extract_hls_pragmas(self, func_node):
+		"""Extract HLS pragmas from within a function body."""
+		from codewiki.src.be.dependency_analyzer.models.core import HLSPragma
+		pragmas = []
+		self._collect_pragmas(func_node, pragmas)
+		return pragmas if pragmas else None
+
+	def _collect_pragmas(self, node, pragmas):
+		if node.type == "preproc_call":
+			text = node.text.decode().strip()
+			if "#pragma" in text.lower() and "HLS" in text.upper():
+				pragma = self._parse_hls_pragma(text, node.start_point[0] + 1)
+				if pragma:
+					pragmas.append(pragma)
+		for child in node.children:
+			self._collect_pragmas(child, pragmas)
+
+	def _parse_hls_pragma(self, text: str, line: int):
+		from codewiki.src.be.dependency_analyzer.models.core import HLSPragma
+		parts = text.split()
+		hls_idx = None
+		for i, p in enumerate(parts):
+			if p.upper() == "HLS":
+				hls_idx = i
+				break
+		if hls_idx is None or hls_idx + 1 >= len(parts):
+			return None
+		pragma_type = parts[hls_idx + 1].upper()
+		params = {}
+		for part in parts[hls_idx + 2:]:
+			if "=" in part:
+				k, v = part.split("=", 1)
+				params[k.lower()] = v
+			elif part not in ("#pragma", "HLS", pragma_type):
+				if "subtype" not in params:
+					params["subtype"] = part
+		target = params.get("port") or params.get("variable")
+		semantic = self._pragma_semantic(pragma_type, params)
+		return HLSPragma(
+			pragma_type=pragma_type,
+			params=params,
+			target=target,
+			line=line,
+			hardware_semantic=semantic,
+		)
+
+	def _pragma_semantic(self, pragma_type: str, params: dict) -> str:
+		subtype = params.get("subtype", "")
+		port = params.get("port", "")
+		bundle = params.get("bundle", "")
+		if pragma_type == "INTERFACE":
+			m = {
+				"m_axi": "AXI Master memory interface" + (", bundle " + bundle if bundle else ""),
+				"s_axilite": "AXI-Lite control/status register" + (" for " + port if port else ""),
+				"axis": "AXI-Stream data port" + (" " + port if port else ""),
+				"ap_none": "Wire port (no handshake)" + (" " + port if port else ""),
+			}
+			return m.get(subtype.lower(), "Hardware interface (" + subtype + ")")
+		m2 = {
+			"PIPELINE": "Pipelined with initiation interval " + params.get("ii", "auto") + " cycles",
+			"DATAFLOW": "Task-level pipelining with automatic FIFOs between functions",
+			"UNROLL": "Loop unrolled " + str(params.get("factor", "fully")) + "x for parallel execution",
+			"ARRAY_PARTITION": "Array partitioned for parallel memory access",
+			"INLINE": "Function inlined into caller (no separate hardware module)",
+			"STREAM": "Variable implemented as hardware FIFO",
+		}
+		return m2.get(pragma_type, "HLS " + pragma_type + " directive")
+
+	def _is_in_extern_c(self, node) -> bool:
+		"""Check if node is inside an extern C linkage specification."""
+		current = node.parent
+		while current:
+			if current.type == "linkage_specification":
+				for child in current.children:
+					if child.type == "string_literal":
+						raw = child.text.decode().replace('"', '').replace("'", "").strip()
+						if raw == "C":
+							return True
+			current = current.parent
+		return False
 
 	def _extract_parameters(self, func_declarator_node):
 		"""Extract parameter names from a C++ function declarator."""
