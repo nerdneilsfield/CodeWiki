@@ -613,7 +613,11 @@ class DocumentationGenerator:
             parent_docs = await asyncio.to_thread(call_llm, prompt, self.config)
 
             # Parse and save parent documentation
-            parent_content = parent_docs.split("<OVERVIEW>")[1].split("</OVERVIEW>")[0].strip()
+            if "<OVERVIEW>" in parent_docs and "</OVERVIEW>" in parent_docs:
+                parent_content = parent_docs.split("<OVERVIEW>")[1].split("</OVERVIEW>")[0].strip()
+            else:
+                # LLM didn't wrap in tags — use the full response as-is
+                parent_content = parent_docs.strip()
             file_manager.save_text(parent_content, output_path)
 
             # Persist child doc hashes for future skip checks
