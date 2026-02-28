@@ -45,6 +45,7 @@ def analyze_vitis_cfg(
 ) -> Tuple[List[Node], List[CallRelationship]]:
     nodes = []
     relationships = []
+    file_path = str(file_path)
     rel_path = os.path.relpath(file_path, repo_path) if repo_path else file_path
     module_path = rel_path.replace("/", ".").replace("\\", ".")
 
