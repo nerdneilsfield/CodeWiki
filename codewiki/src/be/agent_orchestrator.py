@@ -44,14 +44,14 @@ from codewiki.src.be.agent_tools.deps import CodeWikiDeps
 from codewiki.src.be.agent_tools.read_code_components import read_code_components_tool
 from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_tool
 from codewiki.src.be.agent_tools.generate_sub_module_documentations import generate_sub_module_documentation_tool
-from codewiki.src.be.llm_services import create_fallback_models
+from codewiki.src.be.llm_services import create_fallback_models, select_agent_model
 from codewiki.src.be.prompt_template import (
     format_user_prompt,
     format_system_prompt,
     format_leaf_system_prompt,
     format_overview_prompt,
 )
-from codewiki.src.be.utils import is_complex_module, agent_progress_handler
+from codewiki.src.be.utils import is_complex_module, count_tokens, agent_progress_handler
 from codewiki.src.config import (
     Config,
     MODULE_TREE_FILENAME,
@@ -69,25 +69,27 @@ class AgentOrchestrator:
         self.custom_instructions = config.get_prompt_addition() if config else None
         self.output_language = config.output_language if config else "en"
     
-    def create_agent(self, module_name: str, components: Dict[str, Any], 
-                    core_component_ids: List[str]) -> Agent:
+    def create_agent(self, module_name: str, components: Dict[str, Any],
+                    core_component_ids: List[str],
+                    estimated_tokens: int = 0) -> Agent:
         """Create an appropriate agent based on module complexity."""
-        
+        model = select_agent_model(self.config, estimated_tokens)
+
         if is_complex_module(components, core_component_ids):
             return Agent(
-                self.fallback_models,
+                model,
                 name=module_name,
                 deps_type=CodeWikiDeps,
                 tools=[
-                    read_code_components_tool, 
-                    str_replace_editor_tool, 
+                    read_code_components_tool,
+                    str_replace_editor_tool,
                     generate_sub_module_documentation_tool
                 ],
                 system_prompt=format_system_prompt(module_name, self.custom_instructions, self.output_language),
             )
         else:
             return Agent(
-                self.fallback_models,
+                model,
                 name=module_name,
                 deps_type=CodeWikiDeps,
                 tools=[read_code_components_tool, str_replace_editor_tool],
@@ -173,8 +175,17 @@ class AgentOrchestrator:
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
             module_tree = file_manager.load_json(module_tree_path)
 
+        # Estimate prompt tokens to pre-select long-context model if needed
+        user_prompt = format_user_prompt(
+            module_name=module_name,
+            core_component_ids=core_component_ids,
+            components=components,
+            module_tree=module_tree,
+        )
+        estimated_tokens = count_tokens(user_prompt)
+
         # Create agent
-        agent = self.create_agent(module_name, components, core_component_ids)
+        agent = self.create_agent(module_name, components, core_component_ids, estimated_tokens)
 
         # Create per-agent dependencies (each agent gets its own mutable copies)
         deps = CodeWikiDeps(
@@ -196,12 +207,7 @@ class AgentOrchestrator:
         try:
             t0 = time.time()
             result = await agent.run(
-                format_user_prompt(
-                    module_name=module_name,
-                    core_component_ids=core_component_ids,
-                    components=components,
-                    module_tree=deps.module_tree
-                ),
+                user_prompt,
                 deps=deps,
                 usage_limits=UsageLimits(request_limit=None),
                 event_stream_handler=agent_progress_handler,

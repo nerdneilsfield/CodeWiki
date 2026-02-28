@@ -71,6 +71,35 @@ def create_fallback_models(config: Config) -> FallbackModel:
     return FallbackModel(main, *fallbacks)
 
 
+def create_long_context_model(config: Config) -> OpenAIModel:
+    """Create a standalone long-context model."""
+    return OpenAIModel(
+        model_name=config.long_context_model,
+        provider=_make_provider(config),
+        settings=OpenAIModelSettings(temperature=0.0, max_tokens=config.max_tokens),
+    )
+
+
+def select_agent_model(config: Config, estimated_tokens: int = 0):
+    """Select agent model based on estimated prompt token count.
+
+    Returns the long-context model directly when *estimated_tokens* exceeds
+    ``config.long_context_threshold``, avoiding wasted retries on models
+    that will reject the oversized input.  Otherwise returns the standard
+    fallback model chain.
+    """
+    if (
+        config.long_context_model
+        and estimated_tokens > config.long_context_threshold
+    ):
+        _logger.info(
+            f"Pre-selecting long-context model {config.long_context_model} "
+            f"(estimated {estimated_tokens} tokens > threshold {config.long_context_threshold})"
+        )
+        return create_long_context_model(config)
+    return create_fallback_models(config)
+
+
 def create_openai_client(config: Config) -> OpenAI:
     """Create OpenAI client from configuration."""
     return OpenAI(

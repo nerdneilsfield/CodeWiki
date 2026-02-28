@@ -10,7 +10,7 @@ import openai
 from codewiki.src.be.agent_tools.deps import CodeWikiDeps
 from codewiki.src.be.agent_tools.read_code_components import read_code_components_tool
 from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_tool
-from codewiki.src.be.llm_services import create_fallback_models
+from codewiki.src.be.llm_services import select_agent_model
 from codewiki.src.be.prompt_template import format_system_prompt, format_leaf_system_prompt, format_user_prompt
 from codewiki.src.be.utils import is_complex_module, count_tokens, agent_progress_handler
 from codewiki.src.be.cluster_modules import format_potential_core_components
@@ -156,11 +156,11 @@ async def generate_sub_module_documentation(
         logger.info(f"{indent}{arrow} Generating documentation for sub-module: {sub_module_name}")
 
         num_tokens = count_tokens(format_potential_core_components(core_component_ids, ctx.deps.components)[-1])
-        fallback_models = create_fallback_models(ctx.deps.config)
+        model = select_agent_model(ctx.deps.config, num_tokens)
 
         if is_complex_module(ctx.deps.components, core_component_ids) and ctx.deps.current_depth < ctx.deps.max_depth and num_tokens >= ctx.deps.config.max_token_per_leaf_module:
             sub_agent = Agent(
-                model=fallback_models,
+                model=model,
                 name=sub_module_name,
                 deps_type=CodeWikiDeps,
                 system_prompt=format_system_prompt(sub_module_name, ctx.deps.custom_instructions, ctx.deps.config.output_language),
@@ -168,7 +168,7 @@ async def generate_sub_module_documentation(
             )
         else:
             sub_agent = Agent(
-                model=fallback_models,
+                model=model,
                 name=sub_module_name,
                 deps_type=CodeWikiDeps,
                 system_prompt=format_leaf_system_prompt(sub_module_name, ctx.deps.custom_instructions, ctx.deps.config.output_language),
