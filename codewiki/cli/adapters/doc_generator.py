@@ -79,8 +79,8 @@ class CLIDocumentationGenerator:
         """Configure backend logger for CLI use with colored output."""
         from codewiki.src.be.dependency_analyzer.utils.logging_config import ColoredFormatter
 
-        # Get backend logger (parent of all backend modules)
-        backend_logger = logging.getLogger('codewiki.src.be')
+        # Get project-wide logger (covers both backend and CLI modules)
+        backend_logger = logging.getLogger('codewiki')
 
         # Remove existing handlers to avoid duplicates
         backend_logger.handlers.clear()
