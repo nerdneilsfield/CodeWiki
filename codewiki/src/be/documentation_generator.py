@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import os
 import json
@@ -28,9 +29,20 @@ from codewiki.src.config import (
     MODULE_TREE_FILENAME,
     OVERVIEW_FILENAME
 )
-from codewiki.src.utils import file_manager, module_doc_filename
+from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
 from codewiki.src.be.module_tree_manager import ModuleTreeManager
+
+PARENT_DOC_HASHES_FILENAME = '_parent_doc_hashes.json'
+
+
+def _file_hash(path: str) -> str:
+    """Return hex MD5 of file contents, or empty string if missing."""
+    try:
+        with open(path, 'rb') as f:
+            return hashlib.md5(f.read()).hexdigest()
+    except OSError:
+        return ""
 
 
 class DocumentationGenerator:
@@ -201,12 +213,11 @@ class DocumentationGenerator:
                 children = info.get("children")
                 if isinstance(children, dict) and children:
                     entry["children"] = {cn: {} for cn in children}
-                child_filename = module_doc_filename([name])
-                child_path = os.path.join(working_dir, child_filename)
-                if os.path.exists(child_path):
+                child_path = find_module_doc(working_dir, [name])
+                if child_path:
                     entry["docs"] = file_manager.load_text(child_path)
                 else:
-                    logger.warning(f"Module docs not found at {child_path}")
+                    logger.warning(f"Module docs not found for [{name}]")
                     entry["docs"] = ""
                 result[name] = entry
             return result
@@ -231,14 +242,13 @@ class DocumentationGenerator:
         target_node = node[module_path[-1]]
         target_children = target_node.setdefault("children", {})
         for child_name in children:
-            child_filename = module_doc_filename(module_path + [child_name])
-            child_path = os.path.join(working_dir, child_filename)
             if child_name not in target_children:
                 target_children[child_name] = {}
-            if os.path.exists(child_path):
+            child_path = find_module_doc(working_dir, module_path + [child_name])
+            if child_path:
                 target_children[child_name]["docs"] = file_manager.load_text(child_path)
             else:
-                logger.warning(f"Module docs not found at {child_path}")
+                logger.warning(f"Module docs not found for {module_path + [child_name]}")
                 target_children[child_name]["docs"] = ""
 
         return result
@@ -247,9 +257,12 @@ class DocumentationGenerator:
 
     @staticmethod
     def _module_doc_exists(working_dir: str, module_path: List[str]) -> bool:
-        """Return True if a non-trivial .md file already exists for *module_path*."""
-        docs_path = os.path.join(working_dir, module_doc_filename(module_path))
-        return os.path.exists(docs_path) and os.path.getsize(docs_path) > 100
+        """Return True if a non-trivial .md file already exists for *module_path*.
+
+        Tolerates ``-`` vs ``_`` filename differences from older runs.
+        """
+        found = find_module_doc(working_dir, module_path)
+        return found is not None and os.path.getsize(found) > 100
 
     async def generate_module_documentation(self, components: Dict[str, Any], leaf_nodes: List[str]) -> str:
         """Generate documentation for all modules using level-based concurrency."""
@@ -287,11 +300,15 @@ class DocumentationGenerator:
         logger.info(f"📊 Running queue on {len(graph_tree)} top-level modules (concurrency={max_concurrent})")
         await self._run_module_queue(
             graph_tree, components, working_dir, tree_manager,
-            desc="Generating docs", include_root=True,
+            desc="Generating docs", include_root=False,
         )
 
         # ── Fill any modules whose .md was not written ────────────────────
         await self._fill_missing_module_docs(working_dir, components, tree_manager, max_retries)
+
+        # ── Generate repo-level overview after all modules are complete ───
+        logger.info("📚 Generating repository overview")
+        await self.generate_parent_module_docs([], working_dir, tree_manager)
 
         return working_dir
 
@@ -522,6 +539,27 @@ class DocumentationGenerator:
 
     # ── Parent / overview generation ─────────────────────────────────────
 
+    @staticmethod
+    def _collect_child_doc_hashes(
+        module_tree: Dict[str, Any],
+        module_path: List[str],
+        working_dir: str,
+    ) -> Dict[str, str]:
+        """Return ``{child_name: md5_hex}`` for every direct child's doc file."""
+        if not module_path:
+            # Root overview: direct children are top-level tree keys
+            children_dict = module_tree
+        else:
+            target = module_tree
+            for p in module_path:
+                target = target[p]
+            children_dict = target.get("children") or {}
+        hashes: Dict[str, str] = {}
+        for child_name in children_dict:
+            child_path = find_module_doc(working_dir, module_path + [child_name])
+            hashes[child_name] = _file_hash(child_path) if child_path else ""
+        return hashes
+
     async def generate_parent_module_docs(self, module_path: List[str],
                                         working_dir: str,
                                         tree_manager: Optional[ModuleTreeManager] = None) -> Dict[str, Any]:
@@ -537,14 +575,27 @@ class DocumentationGenerator:
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
             module_tree = file_manager.load_json(module_tree_path)
 
-        # Determine output path and skip if already exists
+        # Determine output path
         if len(module_path) == 0:
             output_path = os.path.join(working_dir, OVERVIEW_FILENAME)
         else:
             output_path = os.path.join(working_dir, module_doc_filename(module_path))
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 100:
-            logger.debug(f"✓ Docs already exists at {output_path}")
-            return module_tree
+
+        # Collect hashes of direct child docs to detect staleness
+        child_hashes = self._collect_child_doc_hashes(module_tree, module_path, working_dir)
+        hash_key = "/".join(module_path) if module_path else "__root__"
+        hashes_path = os.path.join(working_dir, PARENT_DOC_HASHES_FILENAME)
+        saved_hashes = file_manager.load_json(hashes_path) or {}
+
+        # Skip only when doc exists AND child docs haven't changed
+        existing = find_module_doc(working_dir, module_path) if module_path else (
+            output_path if os.path.exists(output_path) else None
+        )
+        if existing and os.path.getsize(existing) > 100:
+            if saved_hashes.get(hash_key) == child_hashes:
+                logger.debug(f"✓ Docs already exists at {existing} (children unchanged)")
+                return module_tree
+            logger.info(f"↻ Child docs changed for '{module_name}', regenerating")
 
         # Create repo structure with 1-depth children docs and target indicator
         repo_structure = self.build_overview_structure(module_tree, module_path, working_dir)
@@ -563,6 +614,10 @@ class DocumentationGenerator:
             # Parse and save parent documentation
             parent_content = parent_docs.split("<OVERVIEW>")[1].split("</OVERVIEW>")[0].strip()
             file_manager.save_text(parent_content, output_path)
+
+            # Persist child doc hashes for future skip checks
+            saved_hashes[hash_key] = child_hashes
+            file_manager.save_json(saved_hashes, hashes_path)
 
             logger.debug(f"Successfully generated parent documentation for: {module_name}")
             return module_tree
