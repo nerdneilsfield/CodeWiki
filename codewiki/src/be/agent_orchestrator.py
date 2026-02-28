@@ -56,7 +56,7 @@ from codewiki.src.config import (
     Config,
     MODULE_TREE_FILENAME,
 )
-from codewiki.src.utils import file_manager, module_doc_filename
+from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
 from codewiki.src.be.dependency_analyzer.models.core import Node
 
 
@@ -111,14 +111,15 @@ class AgentOrchestrator:
 
         # ── Cache check ──────────────────────────────────────────────────
         doc_path_parts = module_path if module_path else [module_name]
-        docs_path = os.path.join(working_dir, module_doc_filename(doc_path_parts))
-        if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
-            # For complex modules, only skip when the tree node is marked
-            # _completed (meaning this module AND all its sub-modules finished
-            # successfully in a previous run).  Without the flag the tree may
-            # have been corrupted/overwritten and sub-modules lost.
+        docs_path = find_module_doc(working_dir, doc_path_parts)
+        if docs_path and os.path.getsize(docs_path) > 100:
             if is_complex_module(components, core_component_ids) and module_path:
+                # Complex modules need _completed or auto-infer, but only if
+                # they actually have children in the tree.  A module whose
+                # components span multiple files but that the agent documented
+                # directly (no sub-modules) should be treated as done.
                 completed = False
+                children = {}
                 if tree_manager:
                     snapshot = await tree_manager.get_snapshot()
                     try:
@@ -126,37 +127,40 @@ class AgentOrchestrator:
                         for key in module_path[:-1]:
                             node = node[key]["children"]
                         completed = node.get(module_path[-1], {}).get("_completed", False)
+                        children = node.get(module_path[-1], {}).get("children", {})
                     except (KeyError, TypeError):
                         pass
-                if not completed and tree_manager:
-                    # Auto-infer: if all child modules also have docs, mark
-                    # completed and skip (handles modules from before the
-                    # _completed flag was introduced).
-                    children = {}
-                    try:
-                        info_node = snapshot
-                        for key in module_path[:-1]:
-                            info_node = info_node[key]["children"]
-                        children = info_node.get(module_path[-1], {}).get("children", {})
-                    except (KeyError, TypeError):
-                        pass
-                    if children and all(
-                        os.path.exists(os.path.join(working_dir, module_doc_filename(module_path + [cn])))
-                        and os.path.getsize(os.path.join(working_dir, module_doc_filename(module_path + [cn]))) > 100
-                        for cn in children
-                    ):
-                        logger.debug(
-                            f"✓ Module {module_name} and all children have docs — auto-marking complete"
-                        )
-                        await tree_manager.mark_completed(module_path)
-                        return {}, "cached"
-                if not completed:
-                    logger.debug(
-                        f"↩ Module {module_name} exists but is complex and not marked complete — re-processing"
-                    )
-                else:
+
+                if completed:
                     logger.debug(f"✓ Module docs already exists at {docs_path}")
                     return {}, "cached"
+
+                if not children:
+                    # No sub-modules in tree → agent wrote docs directly → done
+                    logger.debug(
+                        f"✓ Module {module_name} has docs and no children — marking complete"
+                    )
+                    if tree_manager:
+                        await tree_manager.mark_completed(module_path)
+                    return {}, "cached"
+
+                # Auto-infer: if all child modules also have docs, mark
+                # completed and skip.
+                if tree_manager and all(
+                    (lambda p: p is not None and os.path.getsize(p) > 100)(
+                        find_module_doc(working_dir, module_path + [cn])
+                    )
+                    for cn in children
+                ):
+                    logger.debug(
+                        f"✓ Module {module_name} and all children have docs — auto-marking complete"
+                    )
+                    await tree_manager.mark_completed(module_path)
+                    return {}, "cached"
+
+                logger.debug(
+                    f"↩ Module {module_name} exists but has children without docs — re-processing"
+                )
             else:
                 # Leaf / simple module — .md existence is sufficient
                 logger.debug(f"✓ Module docs already exists at {docs_path}")

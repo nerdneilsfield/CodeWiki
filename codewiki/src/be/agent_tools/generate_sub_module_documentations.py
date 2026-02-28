@@ -15,7 +15,7 @@ from codewiki.src.be.prompt_template import format_system_prompt, format_leaf_sy
 from codewiki.src.be.utils import is_complex_module, count_tokens, agent_progress_handler
 from codewiki.src.be.cluster_modules import format_potential_core_components
 from codewiki.src.config import MODULE_TREE_FILENAME
-from codewiki.src.utils import file_manager, module_doc_filename
+from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
 
 import logging
 logger = logging.getLogger(__name__)
@@ -145,11 +145,11 @@ async def generate_sub_module_documentation(
         deps._dispatched_sub_modules.add(sub_module_name)
 
         # ── Skip sub-modules whose docs already exist ─────────────────
-        docs_path = os.path.join(
+        docs_path = find_module_doc(
             deps.absolute_docs_path,
-            module_doc_filename(deps.path_to_current_module + [sub_module_name]),
+            deps.path_to_current_module + [sub_module_name],
         )
-        if os.path.exists(docs_path) and os.path.getsize(docs_path) > 100:
+        if docs_path and os.path.getsize(docs_path) > 100:
             logger.debug(f"{indent}{arrow} ✓ Sub-module {sub_module_name} already has docs, skipping")
             continue
 
