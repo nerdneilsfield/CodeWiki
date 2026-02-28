@@ -148,7 +148,44 @@ class TreeSitterCMakeAnalyzer:
                             call_line=node.start_point[0] + 1,
                             is_resolved=True,
                         ))
-                # Structural dependency (include, find_package, etc.)
+                # Specific source-file-aware commands
+                elif cmd_name in ("add_executable", "add_library"):
+                    args = next((c for c in node.children if c.type == "argument_list"), None)
+                    if args:
+                        arg_nodes = [c for c in args.children if c.type == "argument"]
+                        if arg_nodes:
+                            target_name = self._node_text(arg_nodes[0]).strip()
+                            target_id = self._get_component_id(target_name)
+                            skip_keywords = {"STATIC", "SHARED", "MODULE", "OBJECT", "INTERFACE", "IMPORTED", "ALIAS"}
+                            for arg in arg_nodes[1:]:
+                                val = self._node_text(arg).strip()
+                                if val and val not in skip_keywords and not val.startswith("$"):
+                                    self.call_relationships.append(CallRelationship(
+                                        caller=target_id,
+                                        callee=val,
+                                        call_line=node.start_point[0] + 1,
+                                        is_resolved=False,
+                                        relationship_type="compile_target",
+                                    ))
+                elif cmd_name == "target_link_libraries":
+                    args = next((c for c in node.children if c.type == "argument_list"), None)
+                    if args:
+                        arg_nodes = [c for c in args.children if c.type == "argument"]
+                        if len(arg_nodes) >= 2:
+                            target_name = self._node_text(arg_nodes[0]).strip()
+                            target_id = self._get_component_id(target_name)
+                            skip_keywords = {"PUBLIC", "PRIVATE", "INTERFACE"}
+                            for arg in arg_nodes[1:]:
+                                val = self._node_text(arg).strip()
+                                if val and val not in skip_keywords and not val.startswith("$"):
+                                    self.call_relationships.append(CallRelationship(
+                                        caller=target_id,
+                                        callee=val,
+                                        call_line=node.start_point[0] + 1,
+                                        is_resolved=False,
+                                        relationship_type="link_dependency",
+                                    ))
+                # Generic structural dependency (include, find_package, etc.)
                 elif cmd_name in _STRUCTURAL_COMMANDS:
                     args = next((c for c in node.children if c.type == "argument_list"), None)
                     if args:
@@ -156,7 +193,6 @@ class TreeSitterCMakeAnalyzer:
                         if first_arg:
                             target_name = self._node_text(first_arg).strip()
                             caller = self._find_containing_fn(node, top_level_nodes)
-                            module_path = self._get_module_path()
                             callee_ref = f"{cmd_name}:{target_name}"
                             if caller:
                                 self.call_relationships.append(CallRelationship(
