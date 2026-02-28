@@ -141,8 +141,8 @@ class AgentOrchestrator:
                     except (KeyError, TypeError):
                         pass
                     if children and all(
-                        os.path.exists(os.path.join(working_dir, f"{cn}.md"))
-                        and os.path.getsize(os.path.join(working_dir, f"{cn}.md")) > 100
+                        os.path.exists(os.path.join(working_dir, module_doc_filename(module_path + [cn])))
+                        and os.path.getsize(os.path.join(working_dir, module_doc_filename(module_path + [cn]))) > 100
                         for cn in children
                     ):
                         logger.debug(
