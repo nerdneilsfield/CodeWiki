@@ -170,31 +170,78 @@ class DocumentationGenerator:
         children = module_info.get("children", {})
         return not children or (isinstance(children, dict) and len(children) == 0)
 
+    @staticmethod
+    def _strip_tree_for_overview(tree: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a lightweight copy of *tree* with component lists and internal
+        flags removed — keeps only module names and hierarchy."""
+        light: Dict[str, Any] = {}
+        for name, info in tree.items():
+            entry: Dict[str, Any] = {}
+            children = info.get("children")
+            if isinstance(children, dict) and children:
+                entry["children"] = DocumentationGenerator._strip_tree_for_overview(children)
+            light[name] = entry
+        return light
+
     def build_overview_structure(self, module_tree: Dict[str, Any], module_path: List[str],
                                  working_dir: str) -> Dict[str, Any]:
-        """Build structure for overview generation with 1-depth children docs and target indicator."""
+        """Build a lightweight structure for overview generation.
 
-        processed_module_tree = deepcopy(module_tree)
-        module_info = processed_module_tree
-        for path_part in module_path:
-            module_info = module_info[path_part]
-            if path_part != module_path[-1]:
-                module_info = module_info.get("children", {})
+        Instead of deep-copying the entire module tree (which can be tens of
+        thousands of tokens), this builds a minimal structure containing only
+        the target module's direct children with their docs and a slim outline
+        of the rest of the tree.
+        """
+
+        if len(module_path) == 0:
+            # Repo-level overview — include top-level modules with their docs
+            result: Dict[str, Any] = {}
+            for name, info in module_tree.items():
+                entry: Dict[str, Any] = {"is_target_for_overview_generation": True}
+                children = info.get("children")
+                if isinstance(children, dict) and children:
+                    entry["children"] = {cn: {} for cn in children}
+                child_filename = module_doc_filename([name])
+                child_path = os.path.join(working_dir, child_filename)
+                if os.path.exists(child_path):
+                    entry["docs"] = file_manager.load_text(child_path)
+                else:
+                    logger.warning(f"Module docs not found at {child_path}")
+                    entry["docs"] = ""
+                result[name] = entry
+            return result
+
+        # Sub-module overview — navigate to target, include children docs
+        result = self._strip_tree_for_overview(module_tree)
+        # Navigate to the target node in the lightweight copy
+        node = result
+        for i, path_part in enumerate(module_path):
+            if path_part not in node:
+                node[path_part] = {}
+            if i < len(module_path) - 1:
+                node = node[path_part].setdefault("children", {})
             else:
-                module_info["is_target_for_overview_generation"] = True
+                node[path_part]["is_target_for_overview_generation"] = True
 
-        if "children" in module_info:
-            module_info = module_info["children"]
-
-        for child_name, child_info in module_info.items():
+        # Load children docs for the target module from the original tree
+        target_original = module_tree
+        for p in module_path:
+            target_original = target_original[p]
+        children = target_original.get("children") or {}
+        target_node = node[module_path[-1]]
+        target_children = target_node.setdefault("children", {})
+        for child_name in children:
             child_filename = module_doc_filename(module_path + [child_name])
-            if os.path.exists(os.path.join(working_dir, child_filename)):
-                child_info["docs"] = file_manager.load_text(os.path.join(working_dir, child_filename))
+            child_path = os.path.join(working_dir, child_filename)
+            if child_name not in target_children:
+                target_children[child_name] = {}
+            if os.path.exists(child_path):
+                target_children[child_name]["docs"] = file_manager.load_text(child_path)
             else:
-                logger.warning(f"Module docs not found at {os.path.join(working_dir, child_filename)}")
-                child_info["docs"] = ""
+                logger.warning(f"Module docs not found at {child_path}")
+                target_children[child_name]["docs"] = ""
 
-        return processed_module_tree
+        return result
 
     # ── Main entry point ─────────────────────────────────────────────────
 

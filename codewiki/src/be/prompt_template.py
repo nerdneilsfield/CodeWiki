@@ -370,21 +370,22 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
         Formatted user prompt string
     """
 
-    # format module tree
+    # format module tree — only show component lists for the current module
+    # to avoid sending the entire tree (thousands of component IDs) in every prompt
     lines = []
-    
+
     def _format_module_tree(module_tree: dict[str, any], indent: int = 0):
         for key, value in module_tree.items():
-            if key == module_name:
+            is_current = key == module_name
+            if is_current:
                 lines.append(f"{'  ' * indent}{key} (current module)")
+                lines.append(f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}")
             else:
                 lines.append(f"{'  ' * indent}{key}")
-            
-            lines.append(f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}")
             if isinstance(value["children"], dict) and len(value["children"]) > 0:
                 lines.append(f"{'  ' * (indent + 1)} Children:")
                 _format_module_tree(value["children"], indent + 2)
-    
+
     _format_module_tree(module_tree, 0)
     formatted_module_tree = "\n".join(lines)
 
@@ -497,17 +498,17 @@ def format_cluster_prompt(
     and optional graph-based pre-clustering hints.
     """
 
-    # format module tree
+    # format module tree — only show component lists for the current module
     lines = []
 
     def _format_module_tree(module_tree: dict[str, any], indent: int = 0):
         for key, value in module_tree.items():
-            if key == module_name:
+            is_current = key == module_name
+            if is_current:
                 lines.append(f"{'  ' * indent}{key} (current module)")
+                lines.append(f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}")
             else:
                 lines.append(f"{'  ' * indent}{key}")
-
-            lines.append(f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}")
             if ("children" in value) and isinstance(value["children"], dict) and len(value["children"]) > 0:
                 lines.append(f"{'  ' * (indent + 1)} Children:")
                 _format_module_tree(value["children"], indent + 2)
