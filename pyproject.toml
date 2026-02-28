@@ -50,7 +50,8 @@ dependencies = [
     "psutil>=7.0.0",
     "PyYAML>=6.0.2",
     "mermaid-parser-py>=0.0.2",
-    "mermaid-py>=0.8.0"
+    "mermaid-py>=0.8.0",
+    "markdown-it-py>=3.0.0",
 ]
 
 [external]

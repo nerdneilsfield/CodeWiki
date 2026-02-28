@@ -16,7 +16,7 @@ from pathlib import Path
 from string import Template
 from typing import Dict, Any, Optional
 
-from codewiki.src.utils import file_manager
+from codewiki.src.utils import file_manager, module_doc_filename
 
 logger = logging.getLogger(__name__)
 
@@ -237,13 +237,17 @@ def _build_nav_html(
     current_html: str,
     depth: int = 0,
     known_pages: Optional[set] = None,
+    parent_path: Optional[list[str]] = None,
 ) -> str:
     """Recursively build sidebar nav HTML from the module tree."""
     lines: list[str] = []
     indent = "  " * (depth + 1)
+    base_path = parent_path or []
 
     for key, data in module_tree.items():
-        href = f"{key}.html"
+        module_path = base_path + [key]
+        # Derive the HTML filename from the sanitised doc filename
+        href = module_doc_filename(module_path).replace(".md", ".html")
         has_page = known_pages is None or href in known_pages
         active = ' on' if current_html == href else ''
         pl = depth * 12
@@ -269,7 +273,7 @@ def _build_nav_html(
 
         if children:
             lines.append(f'{indent}  <div class="nvsub" data-nav-sub="{nav_key}">')
-            lines.append(_build_nav_html(children, current_html, depth + 1, known_pages))
+            lines.append(_build_nav_html(children, current_html, depth + 1, known_pages, module_path))
             lines.append(f'{indent}  </div>')
 
         lines.append(f'{indent}</div>')
@@ -330,13 +334,33 @@ def _rewrite_md_to_html_links(html: str) -> str:
     return re.sub(r'href="([^"]*)"', _replace, html)
 
 
+def _fix_markdown_links(content: str) -> str:
+    """Percent-encode spaces in markdown link URLs so the parser handles them."""
+    def _fix_url(m: re.Match) -> str:
+        text, url = m.group(1), m.group(2)
+        if " " in url:
+            url = url.replace(" ", "%20")
+        return f"[{text}]({url})"
+    return re.sub(r"\[([^\]]*)\]\(([^)]*)\)", _fix_url, content)
+
+
+# Lazy-initialised markdown parser (avoids top-level import of markdown_it
+# which may not be installed in every environment).
+_md_parser = None
+
+def _get_md_parser():
+    global _md_parser
+    if _md_parser is None:
+        from markdown_it import MarkdownIt
+        _md_parser = MarkdownIt().enable("table").enable("strikethrough")
+    return _md_parser
+
+
 def _markdown_to_static_html(content: str) -> str:
     """Convert markdown to HTML for static output (no base_url rewriting needed)."""
-    from codewiki.src.fe.visualise_docs import _fix_markdown_links, md
-
     # Fix spaces only (no base_url — links will be rewritten to .html afterwards)
     content = _fix_markdown_links(content)
-    html = md.render(content)
+    html = _get_md_parser().render(content)
 
     # Handle mermaid fences
     import html as html_module
@@ -371,6 +395,7 @@ class StaticHTMLGenerator:
         Returns a list of filenames that were written.
         """
         docs_dir = docs_dir.resolve()
+        logger.debug(f"Static HTML generator: docs_dir={docs_dir}")
 
         # Load shared data
         module_tree: Dict[str, Any] = {}
