@@ -111,6 +111,7 @@ class TreeSitterCppAnalyzer:
 			
 			declarator = next((c for c in node.children if c.type == "function_declarator"), None)
 			if declarator:
+				self._current_func_declarator = declarator
 				for child in declarator.children:
 					if child.type == "identifier":
 						node_name = child.text.decode()
@@ -123,6 +124,8 @@ class TreeSitterCppAnalyzer:
 						if identifiers:
 							node_name = identifiers[-1].text.decode()
 							break
+			else:
+				self._current_func_declarator = None
 		elif node.type == "declaration":
 			if self._is_global_variable(node):
 				node_type = "variable"
@@ -173,6 +176,10 @@ class TreeSitterCppAnalyzer:
 				
 			relative_path = self._get_relative_path()
 			
+			_params = None
+			if node_type in ("function", "method", "template_function") and getattr(self, "_current_func_declarator", None):
+				_params = self._extract_parameters(self._current_func_declarator)
+				self._current_func_declarator = None
 			node_obj = Node(
 				id=component_id,
 				name=node_name,
@@ -184,7 +191,7 @@ class TreeSitterCppAnalyzer:
 				end_line=node.end_point[0]+1,
 				has_docstring=False,
 				docstring="",
-				parameters=None,
+				parameters=_params,
 				node_type=node_type,
 				base_classes=None,
 				class_name=containing_class if node_type == "method" else None,
@@ -200,6 +207,40 @@ class TreeSitterCppAnalyzer:
 		# Recursively process children
 		for child in node.children:
 			self._extract_nodes(child, top_level_nodes, lines)
+
+	def _extract_parameters(self, func_declarator_node):
+		"""Extract parameter names from a C++ function declarator."""
+		params = []
+		param_list = next((c for c in func_declarator_node.children if c.type == "parameter_list"), None)
+		if not param_list:
+			return None
+
+		for child in param_list.children:
+			if child.type == "parameter_declaration":
+				# Try reference_declarator first (const int& ref)
+				ref = next((c for c in child.children if c.type == "reference_declarator"), None)
+				if ref:
+					ident = next((c for c in ref.children if c.type == "identifier"), None)
+					if ident:
+						params.append(ident.text.decode())
+						continue
+				# Try pointer_declarator (int* ptr)
+				ptr = next((c for c in child.children if c.type == "pointer_declarator"), None)
+				if ptr:
+					ident = next((c for c in ptr.children if c.type == "identifier"), None)
+					if ident:
+						params.append(ident.text.decode())
+						continue
+				# Direct identifier (e.g. last identifier in param)
+				idents = [c for c in child.children if c.type == "identifier"]
+				if idents:
+					params.append(idents[-1].text.decode())
+					continue
+				# Fallback: full text
+				text = child.text.decode().strip()
+				if text:
+					params.append(text)
+		return params if params else None
 
 	def _is_global_variable(self, node) -> bool:
 		"""Check if a declaration node is a global variable."""

@@ -91,6 +91,9 @@ class TreeSitterCAnalyzer:
 				identifier = next((c for c in declarator.children if c.type == "identifier"), None)
 				if identifier:
 					node_name = identifier.text.decode()
+					self._current_func_declarator = declarator
+			else:
+				self._current_func_declarator = None
 		elif node.type == "struct_specifier":
 			# Extract struct definitions: struct Name { ... }
 			node_type = "struct"
@@ -155,6 +158,10 @@ class TreeSitterCAnalyzer:
 		if node_type and node_name:
 			component_id = self._get_component_id(node_name)
 			relative_path = self._get_relative_path()
+			_params = None
+			if node_type == "function" and getattr(self, "_current_func_declarator", None):
+				_params = self._extract_parameters(self._current_func_declarator)
+				self._current_func_declarator = None
 			node_obj = Node(
 				id=component_id,
 				name=node_name,
@@ -166,7 +173,7 @@ class TreeSitterCAnalyzer:
 				end_line=node.end_point[0]+1,
 				has_docstring=False,
 				docstring="",
-				parameters=None,
+				parameters=_params,
 				node_type=node_type,
 				base_classes=None,
 				class_name=None,
@@ -181,6 +188,32 @@ class TreeSitterCAnalyzer:
 		for child in node.children:
 			self._extract_nodes(child, top_level_nodes, lines)
 	
+
+	def _extract_parameters(self, func_declarator_node):
+		"""Extract parameter names from a function declarator."""
+		params = []
+		param_list = next((c for c in func_declarator_node.children if c.type == "parameter_list"), None)
+		if not param_list:
+			return None
+
+		for child in param_list.children:
+			if child.type == "parameter_declaration":
+				# Try pointer_declarator first (int* data)
+				ptr = next((c for c in child.children if c.type == "pointer_declarator"), None)
+				if ptr:
+					ident = next((c for c in ptr.children if c.type == "identifier"), None)
+					if ident:
+						params.append(ident.text.decode())
+						continue
+				# Direct identifier (int count)
+				ident = next((c for c in child.children if c.type == "identifier"), None)
+				if ident:
+					params.append(ident.text.decode())
+					continue
+				# Fallback: use full text
+				params.append(child.text.decode().strip())
+		return params if params else None
+
 	def _is_global_variable(self, node) -> bool:
 		parent = node.parent
 		while parent:
