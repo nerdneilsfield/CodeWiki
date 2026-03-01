@@ -148,17 +148,25 @@ class GuideGenerator:
         slug = re.sub(r'-+', '-', slug).strip('-')
         return slug or f"part-{index}"
 
-    def _unique_slug(self, raw: str, index: int = 0) -> str:
-        """Sanitize slug and deduplicate against already-used slugs."""
+    def _unique_slug(self, raw: str, index: int = 0, used: Optional[set] = None) -> str:
+        """Sanitize slug and deduplicate.
+
+        Pass an explicit ``used`` set to keep deduplication scoped to one guide.
+        Each generate_* should create its own ``used: set = set()`` and pass it
+        here, so slugs from one guide cannot pollute another.
+        """
         base = self._sanitize_slug(raw, index)
-        if not hasattr(self, '_used_slugs'):
-            self._used_slugs: set = set()
+        if used is None:
+            # Fallback: use instance-level set (kept for backward compat only)
+            if not hasattr(self, '_used_slugs'):
+                self._used_slugs: set = set()
+            used = self._used_slugs
         slug = base
         counter = 2
-        while slug in self._used_slugs:
+        while slug in used:
             slug = f"{base}-{counter}"
             counter += 1
-        self._used_slugs.add(slug)
+        used.add(slug)
         return slug
 
     def _safe_output_path(self, filename: str) -> str:
@@ -179,7 +187,7 @@ class GuideGenerator:
             outputs = cached.get("output_files", [])
             return not all(
                 os.path.exists(os.path.join(self.working_dir, f))
-                and os.path.getsize(os.path.join(self.working_dir, f)) > 10
+                and os.path.getsize(os.path.join(self.working_dir, f)) > 100
                 for f in outputs
             )
         return True
@@ -767,12 +775,19 @@ class GuideGenerator:
         logger.info(f"📝 Beginner's Guide — Phase B: generating {len(sections)} sections")
 
         # ── Phase B: serial section generation ────────────────────────
+        # Pre-build slug map with a fresh local set so Phase C links are consistent
+        _used: set = set()
+        section_slugs = [
+            self._unique_slug(s.id, index=i, used=_used)
+            for i, s in enumerate(sections)
+        ]
+
         output_files = []
         carry_forward = ""
         lang_inst = format_language_instruction(self.config.output_language)
 
         for i, section in enumerate(sections):
-            section_id = self._unique_slug(section.id, index=i)
+            section_id = section_slugs[i]
             section_title = section.title or f"Part {i+1}"
             section_summary = section.summary
             focus_modules = section.focus_modules
@@ -817,8 +832,9 @@ class GuideGenerator:
 
         # ── Phase C: parent page ──────────────────────────────────────
         logger.info("📝 Beginner's Guide — Phase C: parent page")
+        # Reuse pre-built section_slugs — no second _unique_slug call here
         chapters_list = "\n".join(
-            f"- [{s.title}](guide-beginners-guide-{self._unique_slug(s.id, index=i)}.md): {s.summary}"
+            f"- [{s.title}](guide-beginners-guide-{section_slugs[i]}.md): {s.summary}"
             for i, s in enumerate(sections)
         )
         parent_prompt = BEGINNER_PARENT_PROMPT.format(
@@ -995,11 +1011,18 @@ class GuideGenerator:
         )
 
         # ── Phase B: per-algorithm deep-dives (parallel, Semaphore) ───
+        # Pre-build slug map with a fresh local set so Phase C links are consistent
+        _used: set = set()
+        algo_slugs = [
+            self._unique_slug(a.id, index=i, used=_used)
+            for i, a in enumerate(algorithms)
+        ]
+
         lang_inst = format_language_instruction(self.config.output_language)
         output_files: List[Optional[str]] = [None] * len(algorithms)  # preserve order
 
         async def _generate_one_algo(idx: int, algo: AlgorithmEntry):
-            algo_id = self._unique_slug(algo.id, index=idx)
+            algo_id = algo_slugs[idx]
             algo_title = algo.title or f"Algorithm {idx+1}"
             related = algo.related_components
 
@@ -1027,8 +1050,9 @@ class GuideGenerator:
 
         # ── Phase C: parent page ──────────────────────────────────────
         logger.info("📝 Core Algorithms — Phase C: parent page")
+        # Reuse pre-built algo_slugs — no second _unique_slug call here
         algos_list = "\n".join(
-            f"- [{a.title}](guide-core-algorithms-{self._unique_slug(a.id, index=i)}.md): {a.summary}"
+            f"- [{a.title}](guide-core-algorithms-{algo_slugs[i]}.md): {a.summary}"
             for i, a in enumerate(algorithms)
         )
         parent_prompt = ALGORITHM_PARENT_PROMPT.format(

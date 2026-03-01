@@ -43,7 +43,7 @@ def test_should_not_regenerate_when_hash_matches():
         inp = os.path.join(wd, "input.md")
         Path(inp).write_text("hello", encoding="utf-8")
         out = os.path.join(wd, "guide-getting-started.md")
-        Path(out).write_text("# Getting Started\nContent here.", encoding="utf-8")
+        Path(out).write_text("# Getting Started\n" + "Content here.\n" * 10, encoding="utf-8")
 
         gen = GuideGenerator(
             config=_minimal_config(),

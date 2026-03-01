@@ -433,10 +433,8 @@
         
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
-            if (MODULE_TREE) {
-                buildNavigation();
-            }
-            
+            buildNavigation();
+
             // Load overview by default
             loadDocument('overview.md');
         });
@@ -465,9 +463,11 @@
                 }
             }
 
-            // Module tree (existing)
-            for (const [key, data] of Object.entries(MODULE_TREE)) {
-                html += buildNavItem(key, data, 0);
+            // Module tree (only when present)
+            if (MODULE_TREE) {
+                for (const [key, data] of Object.entries(MODULE_TREE)) {
+                    html += buildNavItem(key, data, 0);
+                }
             }
             
             nav.innerHTML = html;
