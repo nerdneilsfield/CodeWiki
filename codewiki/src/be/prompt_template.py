@@ -319,6 +319,40 @@ Reasoning at first, then return the list of relative paths in JSON format.
 from typing import Dict, Any
 from codewiki.src.utils import file_manager
 
+# ── HLS / C / C++ specialised documentation guidance ──────────────────────────
+# Injected into the user prompt when HLS nodes are detected in the module,
+# instructing the LLM to cover the four pillars unique to hardware design.
+HLS_CPP_ANALYSIS_GUIDE = """
+<HLS_C_CPP_ANALYSIS_GUIDE>
+This module contains Vitis HLS / C++ / C components. When writing the documentation,
+explicitly address the following four pillars — they are the most important things a
+hardware engineer joining the project needs to understand:
+
+**1. Data Flow**
+- Identify every port and its interface protocol: AXI4-Stream (`hls::stream` / `#pragma HLS INTERFACE axis`), AXI4-Full memory-mapped (`m_axi`), AXI4-Lite control (`s_axilite`).
+- Trace how data moves end-to-end: from which source port/buffer → through which intermediate FIFOs or on-chip buffers → to which destination port, and in what order.
+- Note burst-vs-streaming access patterns and their throughput implications (e.g. a 512-bit wide m_axi burst amortises DRAM latency; a `hls::stream` decouples producer and consumer).
+
+**2. Parallelism (Spatial Concurrency — `#pragma HLS DATAFLOW`)**
+- Identify every `DATAFLOW` region: enumerate which sub-functions or loop bodies execute as independent concurrent pipeline stages.
+- Draw the producer-consumer topology in prose ("A fills FIFO₁, B drains FIFO₁ while writing FIFO₂, C drains FIFO₂").
+- Explain what concurrency buys: does it double throughput? Hide a memory-access bottleneck? Allow overlapping compute and I/O?
+- Note the depth of intermediate FIFOs / `hls::stream` channels and whether depth was chosen to prevent stalls.
+
+**3. Pipeline (Temporal Concurrency — `#pragma HLS PIPELINE`, `UNROLL`)**
+- For each pipelined loop, state the target Initiation Interval (II) and what sets the achieved II (e.g. a read-after-write dependency, a shared resource, or available bandwidth).
+- Explain throughput in concrete terms: "with II=1 and a 300 MHz clock this kernel processes one sample every 3.3 ns".
+- Describe any `#pragma HLS UNROLL` (full or factor-N) and how it trades area for a lower II.
+- Flag any `#pragma HLS ARRAY_PARTITION` or `ARRAY_RESHAPE` pragmas used specifically to eliminate memory-port bottlenecks that would increase II.
+
+**4. Memory Model and Ownership**
+- Classify every buffer by storage: off-chip DRAM (m_axi), on-chip BRAM/URAM (local array or `ARRAY_PARTITION`), or FIFO (`hls::stream`).
+- State who *owns* each buffer: which function allocates it, who writes, and who reads — and whether access is exclusive or shared across parallel tasks.
+- Explain the `#pragma HLS INTERFACE` assignment for each argument: what hardware interface it generates, why that choice was made (e.g. `m_axi` for large off-chip tensors, `s_axilite` for scalar configuration registers, `ap_none` for compile-time constants).
+- Highlight any pointer-aliasing constraints (`restrict` keywords), false-dependency annotations, or access patterns that had to be restructured for the HLS tool to infer parallelism.
+</HLS_C_CPP_ANALYSIS_GUIDE>
+"""
+
 EXTENSION_TO_LANGUAGE = {
     ".py": "python",
     ".md": "markdown",
@@ -496,11 +530,27 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
             + "\n</DEPENDENCY_GRAPH>\n"
         )
 
+    # Detect whether any component in this module is an HLS / C / C++ node.
+    # Criteria: has HLS pragmas, is marked as an HLS kernel, or is an hls_top / hls_project node.
+    _hls_types = {"hls_top", "hls_project", "kernel_instance"}
+    _cpp_langs = {".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx", ".tcl"}
+    _is_hls_module = any(
+        getattr(components.get(cid), "is_hls_kernel", False)
+        or getattr(components.get(cid), "hls_pragmas", None)
+        or (components.get(cid) and components[cid].component_type in _hls_types)
+        or any(
+            components.get(cid) and components[cid].relative_path.endswith(ext)
+            for ext in _cpp_langs
+        )
+        for cid in core_component_ids
+    )
+    hls_guide = HLS_CPP_ANALYSIS_GUIDE if _is_hls_module else ""
+
     return USER_PROMPT.format(
         module_name=module_name,
         formatted_core_component_codes=core_component_codes,
         module_tree=formatted_module_tree,
-    ) + dependency_section
+    ) + dependency_section + hls_guide
 
 
 
