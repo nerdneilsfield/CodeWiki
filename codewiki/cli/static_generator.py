@@ -483,12 +483,52 @@ class StaticHTMLGenerator:
             # Build sidebar for this page
             nav_html = ""
             if module_tree:
+                # 1. Overview (existing behavior)
                 ov_active = ' on' if html_name in ("overview.html", "index.html") else ''
                 nav_html = (
                     f'  <div class="nav-row">\n'
                     f'    <a href="index.html" class="nv{ov_active}">Overview</a>\n'
                     f'  </div>\n'
                 )
+
+                # 2. Guide pages (fixed order, only if files exist)
+                guide_pages = [
+                    ("guide-getting-started", "Get Started"),
+                    ("guide-beginners-guide", "Beginner's Guide"),
+                    ("guide-build-and-organization", "Build & Code Organization"),
+                    ("guide-core-algorithms", "Core Algorithms"),
+                ]
+                for slug, label in guide_pages:
+                    md_file = docs_dir / f"{slug}.md"
+                    if not md_file.exists():
+                        continue
+                    guide_html = slug + ".html"
+                    active = ' on' if html_name == guide_html else ''
+                    nav_html += (
+                        f'  <div class="nav-row">\n'
+                        f'    <a href="{guide_html}" class="nv{active}">{label}</a>\n'
+                        f'  </div>\n'
+                    )
+                    # Sub-pages for multi-page guides
+                    sub_prefix = slug + "-"
+                    sub_pages = sorted([
+                        f for f in os.listdir(str(docs_dir))
+                        if f.startswith(sub_prefix) and f.endswith(".md")
+                    ])
+                    if sub_pages:
+                        nav_html += f'  <div class="nvsub" style="display:block">\n'
+                        for sub_file in sub_pages:
+                            sub_html = sub_file.replace(".md", ".html")
+                            sub_label = sub_file[len(sub_prefix):-3].replace("-", " ").title()
+                            sub_active = ' on' if html_name == sub_html else ''
+                            nav_html += (
+                                f'    <div class="nav-row" style="padding-left:24px">\n'
+                                f'      <a href="{sub_html}" class="nv{sub_active}">{sub_label}</a>\n'
+                                f'    </div>\n'
+                            )
+                        nav_html += '  </div>\n'
+
+                # 3. Module tree (existing)
                 nav_html += _build_nav_html(module_tree, html_name, resolved_hrefs=resolved_hrefs)
 
             page = _PAGE_TEMPLATE.substitute(
