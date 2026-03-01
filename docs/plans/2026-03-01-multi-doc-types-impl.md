@@ -423,13 +423,16 @@ Called after MODULE docs are complete. Each guide type has:
 - Hash-based caching to avoid redundant LLM calls
 """
 
+import asyncio
 import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from codewiki.src.be.dependency_analyzer.utils.security import assert_safe_path
 from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.repo_docs_collector import RepoDocsCollector, DocsBundle
 from codewiki.src.config import Config
@@ -438,6 +441,7 @@ from codewiki.src.utils import file_manager
 logger = logging.getLogger(__name__)
 
 GUIDE_CACHE_FILENAME = "_guide_cache.json"
+_PROMPT_VERSION = "v1"  # bump on any prompt template change to force regeneration
 
 
 class GuideGenerator:
@@ -473,8 +477,10 @@ class GuideGenerator:
         file_manager.save_json(self.cache, self._cache_path())
 
     @staticmethod
-    def _compute_combined_hash(file_paths: List[str]) -> str:
+    def _compute_combined_hash(file_paths: List[str], extra: str = "") -> str:
         h = hashlib.md5()
+        if extra:
+            h.update(extra.encode())
         for fp in sorted(file_paths):
             try:
                 h.update(Path(fp).read_bytes())
@@ -482,13 +488,32 @@ class GuideGenerator:
                 h.update(fp.encode())
         return h.hexdigest()
 
+    @staticmethod
+    def _sanitize_slug(raw: str, index: int = 0) -> str:
+        """Sanitize an LLM-generated slug to [a-z0-9-] only.
+
+        Falls back to "part-{index}" when the slug becomes empty after
+        sanitization (e.g. pure Chinese titles), preventing filename collisions.
+        """
+        slug = re.sub(r'[^a-z0-9-]', '', raw.lower().strip())
+        slug = re.sub(r'-+', '-', slug).strip('-')
+        return slug or f"part-{index}"
+
+    def _safe_output_path(self, filename: str) -> str:
+        """Build output path and validate it doesn't escape working_dir."""
+        out = os.path.join(self.working_dir, filename)
+        assert_safe_path(self.working_dir, out)
+        return out
+
     def _should_regenerate(self, guide_type: str, input_files: List[str]) -> bool:
-        current_hash = self._compute_combined_hash(input_files)
+        current_hash = self._compute_combined_hash(input_files, extra=_PROMPT_VERSION)
         cached = self.cache.get(guide_type, {})
         if cached.get("input_hash") == current_hash:
+            # output_files are relative filenames — resolve against working_dir
             outputs = cached.get("output_files", [])
             return not all(
-                os.path.exists(f) and os.path.getsize(f) > 100
+                os.path.exists(os.path.join(self.working_dir, f))
+                and os.path.getsize(os.path.join(self.working_dir, f)) > 100
                 for f in outputs
             )
         return True
@@ -496,29 +521,168 @@ class GuideGenerator:
     def _update_cache(
         self, guide_type: str, input_files: List[str], output_files: List[str]
     ):
+        # Store relative filenames (not absolute paths) for cross-environment portability
+        rel_names = [os.path.basename(f) for f in output_files]
         self.cache[guide_type] = {
-            "input_hash": self._compute_combined_hash(input_files),
-            "output_files": output_files,
+            "input_hash": self._compute_combined_hash(input_files, extra=_PROMPT_VERSION),
+            "output_files": rel_names,
         }
+
+    # ── LLM calling with full resilience chain ─────────────────────────
+
+    async def _call_llm_with_fallback(self, prompt: str) -> str:
+        """Call LLM with: long-context pre-select → retry → fallback chain.
+
+        Mirrors the agent framework's resilience pattern:
+        1. Pre-select long-context model when prompt exceeds threshold
+        2. Otherwise try models in order: main → fallback(s) → long_context
+        3. Each call_llm() has its own 4-retry loop (10/30/90s backoff)
+        """
+        from codewiki.src.be.utils import count_tokens
+
+        prompt_tokens = count_tokens(prompt)
+
+        # Pre-select: skip straight to long-context model for oversized prompts
+        if (
+            self.config.long_context_model
+            and prompt_tokens > self.config.long_context_threshold
+        ):
+            logger.info(
+                f"Pre-selecting long-context model {self.config.long_context_model} "
+                f"(prompt {prompt_tokens} tokens > threshold {self.config.long_context_threshold})"
+            )
+            async with self._semaphore:
+                return await asyncio.to_thread(
+                    call_llm, prompt, self.config, model=self.config.long_context_model
+                )
+
+        # Build fallback chain: main → fallback(s) → long_context (last resort)
+        models = [self.config.main_model]
+        if self.config.fallback_model:
+            models.extend(
+                n.strip() for n in self.config.fallback_model.split(",") if n.strip()
+            )
+        if self.config.long_context_model and self.config.long_context_model not in models:
+            models.append(self.config.long_context_model)
+
+        last_exc = None
+        for model_name in models:
+            try:
+                async with self._semaphore:
+                    return await asyncio.to_thread(
+                        call_llm, prompt, self.config, model=model_name
+                    )
+            except Exception as e:
+                logger.warning(f"Guide LLM call failed with model {model_name}: {e}")
+                last_exc = e
+        raise last_exc
 
     # ── Main entry point ──────────────────────────────────────────────
 
     async def run(self):
-        """Generate all guide types in order."""
+        """Generate all guide types with phased concurrency.
+
+        Phase 1: Independent single-page guides (parallel)
+        Phase 2: Beginner's Guide (serial sections — carry-forward)
+        Phase 3: Core Algorithms (parallel deep-dives)
+        Phase 4: Regenerate overview
+        """
         logger.info("📖 Starting guide generation phase")
+
+        # Semaphore bounds concurrent LLM calls (same as MODULE doc pipeline)
+        self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+        self._results: Dict[str, str] = {}  # guide name → "success" | "FAILED: ...""
 
         # Collect all available documentation context
         self.docs_bundle = self.collector.collect(
             self.config.repo_path, self.working_dir, self.components
         )
 
-        await self.generate_getting_started()
-        await self.generate_beginner_guide()
-        await self.generate_build_analysis()
-        await self.generate_algorithm_deepdive()
+        # Phase 1: Independent single-page guides — run concurrently
+        phase1 = [
+            self._safe_generate(self.generate_getting_started),
+            self._safe_generate(self.generate_build_analysis),
+        ]
+        await asyncio.gather(*phase1)
 
+        # Phase 2: Beginner's Guide (sections are serial due to carry-forward)
+        await self._safe_generate(self.generate_beginner_guide)
+
+        # Phase 3: Core Algorithms (per-algorithm deep-dives are parallel)
+        await self._safe_generate(self.generate_algorithm_deepdive)
+
+        # Phase 4: Regenerate overview to reference new guide pages
+        await self._regenerate_overview()
+
+        self._report_results()
         self._save_cache()
         logger.info("📖 Guide generation phase complete")
+
+    async def _safe_generate(self, gen_fn):
+        """Wrap a guide generator in try/except — warn and continue on failure."""
+        name = gen_fn.__name__
+        try:
+            await gen_fn()
+            self._results[name] = "success"
+        except Exception as e:
+            logger.warning(f"Guide generation failed ({name}): {e}")
+            self._results[name] = f"FAILED: {e}"
+
+    def _report_results(self):
+        """Print a summary report of guide generation results."""
+        labels = {
+            "generate_getting_started": "Getting Started",
+            "generate_build_analysis": "Build & Code Org",
+            "generate_beginner_guide": "Beginner's Guide",
+            "generate_algorithm_deepdive": "Core Algorithms",
+        }
+        lines = ["📖 Guide generation report:"]
+        for fn_name, label in labels.items():
+            status = self._results.get(fn_name, "skipped")
+            icon = "✓" if status == "success" else "✗"
+            lines.append(f"  {icon} {label:25s} → {status}")
+        logger.info("\n".join(lines))
+
+    async def _regenerate_overview(self):
+        """Augment overview.md with guide navigation section."""
+        from codewiki.src.be.prompt_template import (
+            OVERVIEW_AUGMENT_PROMPT, format_language_instruction,
+        )
+        overview_path = os.path.join(self.working_dir, "overview.md")
+        existing = self._read_file_safe(overview_path)
+        if not existing:
+            logger.warning("No overview.md found, skipping augmentation")
+            return
+
+        # Build list of successfully generated guides
+        guides_list = []
+        guide_files = [
+            ("getting-started.md", "Get Started", "Quick installation and first-run tutorial"),
+            ("beginners-guide.md", "Beginner's Guide", "Accessible multi-chapter walkthrough"),
+            ("build-and-organization.md", "Build & Code Organization", "Build pipeline and project structure"),
+            ("core-algorithms.md", "Core Algorithms", "Formal algorithm deep-dives"),
+        ]
+        for fname, title, summary in guide_files:
+            fpath = os.path.join(self.working_dir, fname)
+            if os.path.exists(fpath) and os.path.getsize(fpath) > 100:
+                guides_list.append(f"- [{title}]({fname}): {summary}")
+
+        if not guides_list:
+            logger.info("No guide pages generated, skipping overview augmentation")
+            return
+
+        repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
+        prompt = OVERVIEW_AUGMENT_PROMPT.format(
+            repo_name=repo_name,
+            existing_overview=existing,
+            guides_list="\n".join(guides_list),
+            language_instruction=format_language_instruction(self.config.output_language),
+        )
+        response = await self._call_llm_with_fallback(prompt)
+        content = self._parse_guide_response(response)
+        if content:
+            file_manager.save_text(content, overview_path)
+            logger.info("✓ Overview augmented with guide navigation")
 
     # ── Guide generators (stubs — implemented in subsequent tasks) ────
 
@@ -899,7 +1063,39 @@ content
 """.strip()
 ```
 
-**Step 2: Add language_instruction helper**
+**Step 2: Add overview augmentation prompt**
+
+After `ALGORITHM_PARENT_PROMPT`, add:
+
+```python
+OVERVIEW_AUGMENT_PROMPT = """
+The following overview was previously generated for the `{repo_name}` project.
+New guide documents have been created alongside the existing module documentation.
+Your task: insert a "Documentation Guide" or equivalent navigation section near
+the top of the overview (after the first introductory paragraph) that introduces
+each guide with 1-2 sentences and a Markdown link.
+
+Do NOT remove or significantly alter the existing overview content — only add
+the guide navigation section.
+
+<EXISTING_OVERVIEW>
+{existing_overview}
+</EXISTING_OVERVIEW>
+
+<AVAILABLE_GUIDES>
+{guides_list}
+</AVAILABLE_GUIDES>
+
+{language_instruction}
+
+Return the full augmented overview wrapped in:
+<GUIDE>
+content
+</GUIDE>
+""".strip()
+```
+
+**Step 3: Add language_instruction helper**
 
 After the new constants, add a helper function:
 
@@ -1020,22 +1216,34 @@ Add these private methods to `GuideGenerator`:
 ```python
     async def generate_getting_started(self):
         """Generate getting-started.md."""
-        import asyncio
         from codewiki.src.be.prompt_template import (
             GETTING_STARTED_PROMPT, format_language_instruction,
         )
 
-        output_path = os.path.join(self.working_dir, "getting-started.md")
+        output_path = self._safe_output_path("getting-started.md")
         repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
 
-        # Gather input files for hash
+        # Gather ALL input files for hash (comprehensive per design §4.2)
         readme_path = None
         for name in ("README.md", "README", "readme.md"):
             p = os.path.join(self.config.repo_path, name)
             if os.path.exists(p):
                 readme_path = p
                 break
+        setup_file_names = [
+            "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg",
+            "package.json", "Cargo.toml", "go.mod", "pom.xml", "build.gradle",
+            "Makefile", "CMakeLists.txt", "Dockerfile",
+        ]
+        overview_path = os.path.join(self.working_dir, "overview.md")
         input_files = [p for p in [readme_path] if p]
+        input_files.extend(
+            os.path.join(self.config.repo_path, n)
+            for n in setup_file_names
+            if os.path.exists(os.path.join(self.config.repo_path, n))
+        )
+        if os.path.exists(overview_path):
+            input_files.append(overview_path)
 
         if not self._should_regenerate("getting_started", input_files):
             logger.info("✓ getting-started.md is up to date (cache hit)")
@@ -1054,7 +1262,7 @@ Add these private methods to `GuideGenerator`:
             language_instruction=format_language_instruction(self.config.output_language),
         )
 
-        response = await asyncio.to_thread(call_llm, prompt, self.config)
+        response = await self._call_llm_with_fallback(prompt)
         content = self._parse_guide_response(response)
         file_manager.save_text(content, output_path)
 
@@ -1128,11 +1336,21 @@ _GUIDE_PREFIXES = (
 ```python
     async def generate_beginner_guide(self):
         """Generate beginner's guide: outline → serial sections → parent page."""
-        import asyncio
+        from pydantic import BaseModel, Field, ValidationError
         from codewiki.src.be.prompt_template import (
             BEGINNER_OUTLINE_PROMPT, BEGINNER_SECTION_PROMPT,
             BEGINNER_PARENT_PROMPT, format_language_instruction,
         )
+
+        class OutlineSection(BaseModel):
+            id: str
+            title: str
+            focus_modules: list[str] = Field(default_factory=list)
+            summary: str = ""
+
+        class OutlineSchema(BaseModel):
+            title: str = ""
+            sections: list[OutlineSection] = Field(default_factory=list)
 
         repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
         module_tree_str = json.dumps(
@@ -1157,9 +1375,14 @@ _GUIDE_PREFIXES = (
             module_tree=module_tree_str,
             module_summaries=self._build_module_summaries(),
         )
-        outline_response = await asyncio.to_thread(call_llm, outline_prompt, self.config)
-        outline = self._parse_json_response(outline_response, "OUTLINE")
-        sections = outline.get("sections", [])
+        outline_response = await self._call_llm_with_fallback(outline_prompt)
+        raw_outline = self._parse_json_response(outline_response, "OUTLINE")
+        try:
+            outline = OutlineSchema(**raw_outline)
+        except ValidationError as e:
+            logger.warning(f"Beginner guide outline validation failed: {e}")
+            return
+        sections = outline.sections
         if not sections:
             logger.warning("LLM returned empty beginner guide outline, skipping")
             return
@@ -1172,10 +1395,10 @@ _GUIDE_PREFIXES = (
         lang_inst = format_language_instruction(self.config.output_language)
 
         for i, section in enumerate(sections):
-            section_id = section.get("id", f"part-{i+1}")
-            section_title = section.get("title", f"Part {i+1}")
-            section_summary = section.get("summary", "")
-            focus_modules = section.get("focus_modules", [])
+            section_id = self._sanitize_slug(section.id, index=i)
+            section_title = section.title or f"Part {i+1}"
+            section_summary = section.summary
+            focus_modules = section.focus_modules
 
             # Gather focus module docs
             focus_docs = "\n\n".join(
@@ -1189,7 +1412,7 @@ _GUIDE_PREFIXES = (
                 total_sections=len(sections),
                 section_title=section_title,
                 section_summary=section_summary,
-                outline_json=json.dumps(outline, indent=2),
+                outline_json=json.dumps(outline.model_dump(), indent=2),
                 carry_forward=carry_forward,
                 module_docs=focus_docs,
                 repo_docs=self._format_relevant_docs(section_title, max_tokens=3000),
@@ -1197,18 +1420,19 @@ _GUIDE_PREFIXES = (
                 language_instruction=lang_inst,
             )
 
-            response = await asyncio.to_thread(call_llm, section_prompt, self.config)
+            response = await self._call_llm_with_fallback(section_prompt)
             content = self._parse_guide_response(response)
 
-            out_path = os.path.join(
-                self.working_dir, f"beginners-guide-{section_id}.md"
-            )
+            out_path = self._safe_output_path(f"beginners-guide-{section_id}.md")
             file_manager.save_text(content, out_path)
             output_files.append(out_path)
 
-            # Build carry-forward summary (first 300 chars)
-            summary_line = content[:300].replace("\n", " ")
-            if len(content) > 300:
+            # Build carry-forward summary (first complete paragraph, max ~400 chars)
+            paras = content.split("\n\n")
+            summary_line = paras[0].replace("\n", " ")
+            if len(summary_line) > 400:
+                summary_line = summary_line[:400].rsplit(" ", 1)[0] + "..."
+            elif len(paras) > 1:
                 summary_line += "..."
             carry_forward += f"\n\n### Chapter {i+1}: {section_title}\n{summary_line}"
 
@@ -1217,8 +1441,8 @@ _GUIDE_PREFIXES = (
         # ── Phase C: parent page ──────────────────────────────────────
         logger.info("📝 Beginner's Guide — Phase C: parent page")
         chapters_list = "\n".join(
-            f"- [{s['title']}](beginners-guide-{s['id']}.md): {s.get('summary', '')}"
-            for s in sections
+            f"- [{s.title}](beginners-guide-{self._sanitize_slug(s.id, index=i)}.md): {s.summary}"
+            for i, s in enumerate(sections)
         )
         parent_prompt = BEGINNER_PARENT_PROMPT.format(
             repo_name=repo_name,
@@ -1226,7 +1450,7 @@ _GUIDE_PREFIXES = (
             chapters_list=chapters_list,
             language_instruction=lang_inst,
         )
-        parent_response = await asyncio.to_thread(call_llm, parent_prompt, self.config)
+        parent_response = await self._call_llm_with_fallback(parent_prompt)
         parent_content = self._parse_guide_response(parent_response)
         parent_path = os.path.join(self.working_dir, "beginners-guide.md")
         file_manager.save_text(parent_content, parent_path)
@@ -1343,12 +1567,11 @@ _LANG_BUILD_GUIDES = {
 ```python
     async def generate_build_analysis(self):
         """Generate build-and-organization.md (multi-language adaptive)."""
-        import asyncio
         from codewiki.src.be.prompt_template import (
             BUILD_ANALYSIS_PROMPT, format_language_instruction,
         )
 
-        output_path = os.path.join(self.working_dir, "build-and-organization.md")
+        output_path = self._safe_output_path("build-and-organization.md")
         repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
 
         # Collect build files
@@ -1417,7 +1640,7 @@ _LANG_BUILD_GUIDES = {
             language_instruction=format_language_instruction(self.config.output_language),
         )
 
-        response = await asyncio.to_thread(call_llm, prompt, self.config)
+        response = await self._call_llm_with_fallback(prompt)
         content = self._parse_guide_response(response)
         file_manager.save_text(content, output_path)
 
@@ -1562,11 +1785,20 @@ git commit -m "feat(guides): implement build & code organization analysis"
 ```python
     async def generate_algorithm_deepdive(self):
         """Generate core algorithm pages: identify → per-algorithm → parent."""
-        import asyncio
+        from pydantic import BaseModel, Field, ValidationError
         from codewiki.src.be.prompt_template import (
             ALGORITHM_IDENTIFY_PROMPT, ALGORITHM_DEEPDIVE_PROMPT,
             ALGORITHM_PARENT_PROMPT, format_language_instruction,
         )
+
+        class AlgorithmEntry(BaseModel):
+            id: str
+            title: str
+            related_components: list[str] = Field(default_factory=list)
+            summary: str = ""
+
+        class AlgorithmListSchema(BaseModel):
+            algorithms: list[AlgorithmEntry] = Field(default_factory=list)
 
         repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
 
@@ -1589,9 +1821,14 @@ git commit -m "feat(guides): implement build & code organization analysis"
             dependency_summary=self._build_dependency_summary(),
             module_summaries=self._build_module_summaries(max_chars_per_module=200),
         )
-        id_response = await asyncio.to_thread(call_llm, id_prompt, self.config)
-        algo_data = self._parse_json_response(id_response, "ALGORITHMS")
-        algorithms = algo_data.get("algorithms", [])
+        id_response = await self._call_llm_with_fallback(id_prompt)
+        raw_algo = self._parse_json_response(id_response, "ALGORITHMS")
+        try:
+            algo_data = AlgorithmListSchema(**raw_algo)
+        except ValidationError as e:
+            logger.warning(f"Algorithm list validation failed: {e}")
+            return
+        algorithms = algo_data.algorithms
         if not algorithms:
             logger.warning("No core algorithms identified, skipping")
             return
@@ -1600,14 +1837,14 @@ git commit -m "feat(guides): implement build & code organization analysis"
             f"📝 Core Algorithms — Phase B: generating {len(algorithms)} deep-dives"
         )
 
-        # ── Phase B: per-algorithm deep-dive ──────────────────────────
-        output_files = []
+        # ── Phase B: per-algorithm deep-dives (parallel, Semaphore) ───
         lang_inst = format_language_instruction(self.config.output_language)
+        output_files: List[str] = [None] * len(algorithms)  # preserve order
 
-        for i, algo in enumerate(algorithms):
-            algo_id = algo.get("id", f"algo-{i+1}")
-            algo_title = algo.get("title", f"Algorithm {i+1}")
-            related = algo.get("related_components", [])
+        async def _generate_one_algo(idx: int, algo: AlgorithmEntry):
+            algo_id = self._sanitize_slug(algo.id, index=idx)
+            algo_title = algo.title or f"Algorithm {idx+1}"
+            related = algo.related_components
 
             dd_prompt = ALGORITHM_DEEPDIVE_PROMPT.format(
                 repo_name=repo_name,
@@ -1619,29 +1856,30 @@ git commit -m "feat(guides): implement build & code organization analysis"
                 language_instruction=lang_inst,
             )
 
-            response = await asyncio.to_thread(call_llm, dd_prompt, self.config)
+            response = await self._call_llm_with_fallback(dd_prompt)
             content = self._parse_guide_response(response)
-
-            out_path = os.path.join(
-                self.working_dir, f"core-algorithms-{algo_id}.md"
-            )
+            out_path = self._safe_output_path(f"core-algorithms-{algo_id}.md")
             file_manager.save_text(content, out_path)
-            output_files.append(out_path)
+            output_files[idx] = out_path
+            logger.info(f"  ✓ Algorithm {idx+1}/{len(algorithms)}: {algo_title}")
 
-            logger.info(f"  ✓ Algorithm {i+1}/{len(algorithms)}: {algo_title}")
+        await asyncio.gather(
+            *[_generate_one_algo(i, algo) for i, algo in enumerate(algorithms)]
+        )
+        output_files = [p for p in output_files if p]  # filter None (shouldn't happen)
 
         # ── Phase C: parent page ──────────────────────────────────────
         logger.info("📝 Core Algorithms — Phase C: parent page")
         algos_list = "\n".join(
-            f"- [{a['title']}](core-algorithms-{a['id']}.md): {a.get('summary', '')}"
-            for a in algorithms
+            f"- [{a.title}](core-algorithms-{self._sanitize_slug(a.id, index=i)}.md): {a.summary}"
+            for i, a in enumerate(algorithms)
         )
         parent_prompt = ALGORITHM_PARENT_PROMPT.format(
             repo_name=repo_name,
             algorithms_list=algos_list,
             language_instruction=lang_inst,
         )
-        parent_response = await asyncio.to_thread(call_llm, parent_prompt, self.config)
+        parent_response = await self._call_llm_with_fallback(parent_prompt)
         parent_content = self._parse_guide_response(parent_response)
         parent_path = os.path.join(self.working_dir, "core-algorithms.md")
         file_manager.save_text(parent_content, parent_path)
@@ -1656,6 +1894,125 @@ git commit -m "feat(guides): implement build & code organization analysis"
 ```bash
 git add codewiki/src/be/guide_generator.py
 git commit -m "feat(guides): implement core algorithm deep-dive (identify → generate → parent)"
+```
+
+---
+
+### Task 7b: Add contract tests for guide generators
+
+**Files:**
+- Modify: `tests/test_guide_generator.py`
+
+**Step 1: Add contract tests**
+
+Append to `tests/test_guide_generator.py`:
+
+```python
+import json
+from unittest.mock import patch, AsyncMock
+
+import pytest
+
+from codewiki.src.be.guide_generator import GuideGenerator, _PROMPT_VERSION
+
+
+def test_sanitize_slug_strips_unsafe_chars():
+    assert GuideGenerator._sanitize_slug("hello-world") == "hello-world"
+    assert GuideGenerator._sanitize_slug("../../../etc/passwd") == "etcpasswd"
+    assert GuideGenerator._sanitize_slug("Hello World!") == "helloworld"
+    assert GuideGenerator._sanitize_slug("section_1:overview") == "section1overview"
+    assert GuideGenerator._sanitize_slug("") == "part-0"
+    assert GuideGenerator._sanitize_slug("---") == "part-0"
+    assert GuideGenerator._sanitize_slug("", index=3) == "part-3"
+
+
+def test_sanitize_slug_collapses_dashes():
+    assert GuideGenerator._sanitize_slug("a---b") == "a-b"
+    assert GuideGenerator._sanitize_slug("-leading-trailing-") == "leading-trailing"
+
+
+def test_safe_output_path_rejects_traversal():
+    with tempfile.TemporaryDirectory() as wd:
+        gen = GuideGenerator(
+            config=_minimal_config(),
+            components={},
+            module_tree={},
+            working_dir=wd,
+        )
+        # Normal filename should work
+        p = gen._safe_output_path("getting-started.md")
+        assert wd in p
+
+        # Path traversal should raise
+        with pytest.raises(Exception):
+            gen._safe_output_path("../../../etc/passwd")
+
+
+def test_prompt_version_affects_hash():
+    with tempfile.TemporaryDirectory() as wd:
+        inp = os.path.join(wd, "input.md")
+        Path(inp).write_text("content", encoding="utf-8")
+
+        h1 = GuideGenerator._compute_combined_hash([inp], extra="v1")
+        h2 = GuideGenerator._compute_combined_hash([inp], extra="v2")
+        assert h1 != h2
+
+
+def test_parse_json_response_fallback():
+    """Malformed JSON returns empty dict, not crash."""
+    result = GuideGenerator._parse_json_response("not json at all", "OUTLINE")
+    assert result == {}
+
+    # Valid JSON in tags
+    result = GuideGenerator._parse_json_response(
+        '<OUTLINE>{"sections": []}</OUTLINE>', "OUTLINE"
+    )
+    assert result == {"sections": []}
+
+
+@pytest.mark.asyncio
+async def test_run_continues_on_guide_failure():
+    """One guide failure should not prevent others from running."""
+    with tempfile.TemporaryDirectory() as wd:
+        gen = GuideGenerator(
+            config=_minimal_config(),
+            components={},
+            module_tree={},
+            working_dir=wd,
+        )
+        gen.docs_bundle = gen.collector.collect("/tmp", None, {})
+
+        call_count = {"value": 0}
+        original_build = gen.generate_build_analysis
+
+        async def failing_guide():
+            raise RuntimeError("LLM exploded")
+
+        async def counting_guide():
+            call_count["value"] += 1
+
+        gen.generate_getting_started = failing_guide
+        gen.generate_beginner_guide = counting_guide
+        gen.generate_build_analysis = counting_guide
+        gen.generate_algorithm_deepdive = counting_guide
+
+        with patch.object(gen, '_regenerate_overview', new_callable=AsyncMock):
+            await gen.run()
+
+        # 3 guides should have run despite the first one failing
+        assert call_count["value"] == 3
+```
+
+**Step 2: Run tests**
+
+Run: `cd /home/dengqi/Source/langs/python/CodeWiki && python -m pytest tests/test_guide_generator.py -v`
+Expected: All tests PASS (3 original + 6 new)
+
+**Step 3: Commit**
+
+```bash
+git add tests/test_guide_generator.py
+git commit -m "test(guides): add contract tests for slug sanitization, cache, error handling"
 ```
 
 ---
@@ -1775,16 +2132,90 @@ are included in the conversion loop. They should already be picked up by the
 existing `for md_file in ...` loop since they're in the same `docs_dir`, but
 verify no filtering excludes them.
 
-**Step 3: Run the static site generator manually to verify**
+**Step 3: Verify static site generator imports and guide nav logic**
 
-Run: `cd /home/dengqi/Source/langs/python/CodeWiki && python -c "print('static gen check passed')"`
-Expected: No import errors
+Run: `cd /home/dengqi/Source/langs/python/CodeWiki && python -c "from codewiki.cli.static_generator import StaticSiteGenerator; print('static gen import OK')"`
+Expected: `static gen import OK`
+
+Then run the full test suite to verify no regressions:
+
+Run: `cd /home/dengqi/Source/langs/python/CodeWiki && python -m pytest tests/ -v -k "static or generator"`
+Expected: All related tests PASS
 
 **Step 4: Commit**
 
 ```bash
 git add codewiki/cli/static_generator.py
 git commit -m "feat(guides): add guide pages to static site navigation"
+```
+
+---
+
+### Task 9b: Static site navigation integration test
+
+**Files:**
+- Modify: `tests/test_guide_generator.py`
+
+**Step 1: Add integration test for guide navigation HTML**
+
+Append to `tests/test_guide_generator.py`:
+
+```python
+def test_static_site_guide_navigation():
+    """Guide pages appear in static site navigation HTML."""
+    import importlib
+    static_gen = importlib.import_module("codewiki.cli.static_generator")
+
+    with tempfile.TemporaryDirectory() as docs_dir:
+        # Create a minimal module_tree
+        module_tree = {"name": "root", "children": []}
+
+        # Create guide .md stubs so navigation detects them
+        for slug in ("getting-started", "beginners-guide",
+                      "build-and-organization", "core-algorithms"):
+            Path(os.path.join(docs_dir, f"{slug}.md")).write_text(
+                f"# {slug}\nPlaceholder", encoding="utf-8"
+            )
+
+        # Create a beginner sub-page to test sub-nav
+        Path(os.path.join(docs_dir, "beginners-guide-setup.md")).write_text(
+            "# Setup\nPlaceholder", encoding="utf-8"
+        )
+
+        # Build navigation HTML for the overview page
+        gen = static_gen.StaticSiteGenerator(docs_dir)
+        nav_html = gen._build_page_nav(
+            module_tree=module_tree,
+            html_name="index.html",
+            docs_dir=docs_dir,
+            resolved_hrefs={},
+        )
+
+        # Guide links must appear
+        assert 'href="getting-started.html"' in nav_html
+        assert 'href="beginners-guide.html"' in nav_html
+        assert 'href="build-and-organization.html"' in nav_html
+        assert 'href="core-algorithms.html"' in nav_html
+
+        # Sub-page link must appear
+        assert 'href="beginners-guide-setup.html"' in nav_html
+
+        # Fixed ordering: getting-started before core-algorithms
+        gs_pos = nav_html.index("getting-started.html")
+        ca_pos = nav_html.index("core-algorithms.html")
+        assert gs_pos < ca_pos, "Guide navigation order must follow definition order"
+```
+
+**Step 2: Run**
+
+Run: `cd /home/dengqi/Source/langs/python/CodeWiki && python -m pytest tests/test_guide_generator.py::test_static_site_guide_navigation -v`
+Expected: PASS
+
+**Step 3: Commit**
+
+```bash
+git add tests/test_guide_generator.py
+git commit -m "test(guides): add static site navigation integration test"
 ```
 
 ---

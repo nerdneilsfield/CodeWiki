@@ -13,7 +13,7 @@ different audiences and purposes.
 ## 2. Final Navigation Structure
 
 ```
-Overview                          ← existing, regenerated to reference new pages
+Overview                          ← existing, augmented with guide entry links
 Get Started                       ← NEW single page
 Beginner's Guide                  ← NEW parent page
   ├── Part 1: ...                 ← NEW sub-pages (LLM-planned)
@@ -37,7 +37,7 @@ codewiki/src/be/
 ├── repo_docs_collector.py       ← NEW: 3-layer doc collection + relevance selection
 ├── prompt_template.py           ← MODIFIED: add 4 sets of prompt constants
 ├── documentation_generator.py   ← MODIFIED: call GuideGenerator.run() after MODULE docs
-└── agent_orchestrator.py        ← EXISTING: reused for LLM calls
+└── llm_services.py              ← EXISTING: call_llm for guide LLM calls (no agent tools needed)
 ```
 
 ### 3.2 Pipeline Integration
@@ -78,16 +78,17 @@ class GuideGenerator:
             self.config.repo_path, self.working_dir, self.components
         )
 
-        # 2. Generate guides in order
-        await self.generate_getting_started()
-        await self.generate_beginner_guide()
-        await self.generate_build_analysis()
-        await self.generate_algorithm_deepdive()
+        # 2. Generate guides (phased concurrency, warn-and-continue)
+        #    Phase 1: getting_started + build_analysis (parallel)
+        #    Phase 2: beginner_guide (serial sections)
+        #    Phase 3: algorithm_deepdive (parallel deep-dives)
+        ...  # see §4.5 for concurrency details
 
-        # 3. Regenerate overview to reference new pages
+        # 3. Regenerate overview with guide awareness
         await self._regenerate_overview()
 
-        # 4. Persist cache
+        # 4. Print generation report + persist cache
+        self._report_results()
         self._save_cache()
 ```
 
@@ -141,10 +142,11 @@ class RepoDocsCollector:
 ```python
 GUIDE_CACHE_FILENAME = "_guide_cache.json"
 
-# Cache structure:
+# Cache structure (output_files stores RELATIVE filenames, not absolute paths,
+# so the cache remains valid across directory moves and CI environments):
 {
     "getting_started": {
-        "input_hash": "abc123...",    # combined hash of all input files
+        "input_hash": "abc123...",    # combined hash of all input files + _PROMPT_VERSION
         "output_files": ["getting-started.md"]
     },
     "beginner_guide": {
@@ -162,12 +164,23 @@ GUIDE_CACHE_FILENAME = "_guide_cache.json"
 }
 ```
 
-Input hash includes: relevant repo docs + relevant generated module docs + components
-hash + module_tree hash. Any change triggers regeneration.
+Input hash includes per guide type:
+
+| Guide Type | Hash Inputs |
+|---|---|
+| **getting_started** | README, setup files, overview.md, prompt version |
+| **beginner_guide** | All generated module docs, module_tree hash, prompt version |
+| **build_analysis** | Build/config files, component source files, prompt version |
+| **algorithm_deepdive** | All component source files, test files, prompt version |
+
+A `_PROMPT_VERSION` constant (bumped on prompt edits) is mixed into every hash
+so that prompt changes force regeneration even if source data is unchanged.
 
 ```python
+_PROMPT_VERSION = "v1"   # bump on any prompt template change
+
 def _should_regenerate(self, guide_type: str, input_files: List[str]) -> bool:
-    current_hash = self._compute_combined_hash(input_files)
+    current_hash = self._compute_combined_hash(input_files, extra=_PROMPT_VERSION)
     cached = self.cache.get(guide_type, {})
     if cached.get("input_hash") == current_hash:
         return not all(
@@ -176,6 +189,169 @@ def _should_regenerate(self, guide_type: str, input_files: List[str]) -> bool:
         )
     return True
 ```
+
+### 4.3 Overview Augmentation
+
+After all guides are generated, the existing `overview.md` is augmented with a
+guide navigation section.  This does NOT reuse `generate_parent_module_docs()`
+(which knows nothing about guide pages).  Instead, `_regenerate_overview()` uses
+a dedicated prompt:
+
+```python
+OVERVIEW_AUGMENT_PROMPT = """
+The following overview was previously generated for {repo_name}.  New guide
+documents have been created.  Insert a "Documentation Guide" section near the
+top that introduces each guide with 1-2 sentences and a link.
+
+<EXISTING_OVERVIEW>
+{existing_overview}
+</EXISTING_OVERVIEW>
+
+<AVAILABLE_GUIDES>
+{guides_list}
+</AVAILABLE_GUIDES>
+
+Return the full augmented overview wrapped in <OVERVIEW>...</OVERVIEW>.
+"""
+```
+
+Input:
+- The current `overview.md` content (read from disk)
+- A list of successfully generated guide files with titles and summaries
+
+This approach avoids the fragile `DocumentationGenerator.__new__()` anti-pattern
+and ensures the LLM has explicit context about the guide pages it needs to link.
+
+### 4.4 Slug Sanitization (Path Safety)
+
+LLM-generated `id` fields (beginner section slugs, algorithm slugs) are used in
+filenames.  To prevent path traversal attacks:
+
+```python
+import re
+from codewiki.src.be.dependency_analyzer.utils.security import assert_safe_path
+
+def _sanitize_slug(raw: str, index: int = 0) -> str:
+    """Sanitize an LLM-generated slug to [a-z0-9-] only.
+
+    If the slug becomes empty after sanitization (e.g. pure Chinese title),
+    falls back to "part-{index}" to avoid filename collisions.
+    """
+    slug = re.sub(r'[^a-z0-9-]', '', raw.lower().strip())
+    slug = re.sub(r'-+', '-', slug).strip('-')
+    return slug or f"part-{index}"
+```
+
+Every filename constructed from an LLM slug MUST:
+1. Pass through `_sanitize_slug(raw, index=i)` with the loop index
+2. Be validated with `assert_safe_path(working_dir, output_path)`
+
+### 4.5 JSON Schema Validation
+
+LLM JSON outputs (beginner guide outline, algorithm identification) are validated
+with pydantic models.  On validation failure, log a warning and use a fallback
+empty list rather than crashing.
+
+```python
+from pydantic import BaseModel, Field
+
+class OutlineSection(BaseModel):
+    id: str
+    title: str
+    focus_modules: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+class OutlineSchema(BaseModel):
+    title: str = ""
+    sections: list[OutlineSection] = Field(default_factory=list)
+
+class AlgorithmEntry(BaseModel):
+    id: str
+    title: str
+    related_components: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+class AlgorithmListSchema(BaseModel):
+    algorithms: list[AlgorithmEntry] = Field(default_factory=list)
+```
+
+### 4.6 Concurrency
+
+Guide generation uses the same concurrency primitives as the MODULE doc pipeline
+(`asyncio.Semaphore` bounded by `config.max_concurrent`).
+
+```
+┌─ Phase 1: Independent single-page guides (parallel) ──────────┐
+│  getting_started ─┐                                            │
+│                   ├─ asyncio.gather (bounded by Semaphore)     │
+│  build_analysis  ─┘                                            │
+└────────────────────────────────────────────────────────────────┘
+
+┌─ Phase 2: Beginner's Guide ───────────────────────────────────┐
+│  Phase A: outline (1 LLM call)                                 │
+│  Phase B: sections (serial — carry-forward context dependency) │
+│  Phase C: parent page (1 LLM call)                             │
+└────────────────────────────────────────────────────────────────┘
+
+┌─ Phase 3: Core Algorithms ────────────────────────────────────┐
+│  Phase A: identify (1 LLM call)                                │
+│  Phase B: per-algorithm deep-dives (parallel, Semaphore)       │
+│  Phase C: parent page (1 LLM call)                             │
+└────────────────────────────────────────────────────────────────┘
+
+┌─ Phase 4: Regenerate overview ────────────────────────────────┐
+└────────────────────────────────────────────────────────────────┘
+```
+
+- **Single-page guides** (getting_started, build_analysis) are independent →
+  run concurrently via `asyncio.gather`
+- **Algorithm deep-dives** are independent per algorithm → run concurrently
+  via `asyncio.gather` bounded by `asyncio.Semaphore(config.max_concurrent)`
+- **Beginner sections** must remain serial (each section's carry-forward summary
+  feeds the next section's prompt)
+
+### 4.7 Failure Mode & Generation Report
+
+Individual guide generation failures do NOT abort the pipeline.  Each guide runs
+inside a try/except that logs a warning and continues to the next guide.  This
+ensures one bad LLM response doesn't prevent the other guides from generating.
+
+At the end of `run()`, a summary report is logged listing each guide's status:
+
+```
+📖 Guide generation report:
+  ✓ Getting Started       → getting-started.md
+  ✓ Beginner's Guide      → beginners-guide.md (4 sections)
+  ✗ Build & Code Org      → SKIPPED (LLM call failed: timeout)
+  ✓ Core Algorithms       → core-algorithms.md (3 deep-dives)
+```
+
+This ensures skipped/failed guides are immediately visible to the user, not
+silently lost in log noise.
+
+### 4.8 LLM Calling Convention
+
+Guides use `call_llm()` (from `llm_services.py`) wrapped in a
+`_call_llm_with_fallback()` method, NOT the `agent_orchestrator`.  Guides are
+single-prompt tasks with no tool use — the agent framework's tool loop adds
+unnecessary overhead.  This is intentional, not a design/impl mismatch.
+
+The wrapper mirrors the agent framework's full resilience chain:
+
+```python
+async def _call_llm_with_fallback(self, prompt: str) -> str:
+    """Call LLM with: long-context pre-select → retry → fallback chain."""
+    # 1. Pre-select: if prompt exceeds threshold → long-context model directly
+    #    (matches select_agent_model() pattern, avoids wasted retries)
+    # 2. Otherwise try models in order: main → fallback(s) → long_context
+    #    (matches create_fallback_models() chain)
+    # 3. Each call_llm() has its own 4-retry loop (10s/30s/90s backoff)
+```
+
+This provides the same resilience guarantees as the agent framework:
+- **Retry**: 4 attempts per model with exponential backoff (via `call_llm()`)
+- **Fallback**: main_model → fallback_model(s) → long_context_model
+- **Long-context**: auto-switch when prompt exceeds `long_context_threshold`
 
 ## 5. Guide Type Details
 
@@ -207,12 +383,13 @@ interaction.
 - module_tree structure
 - All generated module docs (first 500 chars as summaries; full text for focus modules)
 - README + repo existing docs
-- Carry-forward summaries from previous sections
+- Carry-forward summaries from previous sections (paragraph-boundary truncation)
 
 **Execution — three phases:**
 
 1. **Phase A — Outline generation:** LLM sees full module_tree + module summaries →
-   outputs JSON outline:
+   outputs JSON outline, validated with `OutlineSchema` (§4.4).  Section `id`
+   values are sanitized with `_sanitize_slug()` (§4.3):
    ```json
    {
      "title": "Beginner's Guide to {repo_name}",
@@ -253,7 +430,8 @@ interaction.
 ### 5.3 Build & Code Organization (Single Page, Multi-Language Adaptive)
 
 **Input context:**
-- Detected languages from `module_tree.summary.languages_found`
+- Detected languages via file extension inference from `components` (always
+  available; `module_tree.summary.languages_found` may not be populated)
 - Build/config files for each detected language
 - Directory structure
 - module_tree + relevant module docs
@@ -296,7 +474,9 @@ interaction.
 **Execution — three phases:**
 
 1. **Phase A — Algorithm identification:** LLM sees components + dependency graph +
-   module summaries → identifies N core algorithms:
+   module summaries → identifies N core algorithms, validated with
+   `AlgorithmListSchema` (§4.4).  Algorithm `id` values are sanitized with
+   `_sanitize_slug()` (§4.3):
    ```json
    {
      "algorithms": [
@@ -370,7 +550,7 @@ The static site generator (`cli/static_generator.py`) needs to be updated to:
 
 ```
 output/docs/{repo}-docs/
-├── overview.md                          ← regenerated
+├── overview.md                          ← augmented with guide links
 ├── getting-started.md                   ← NEW
 ├── beginners-guide.md                   ← NEW parent
 ├── beginners-guide-{section-id}.md      ← NEW sub-pages
