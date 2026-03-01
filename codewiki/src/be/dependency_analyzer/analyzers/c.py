@@ -67,7 +67,22 @@ class TreeSitterCAnalyzer:
 		"""Recursively extract top-level nodes (functions, structs, and global variables)."""
 		node_type = None
 		node_name = None
-		
+
+		if node.type == "preproc_include":
+			path_node = next((c for c in node.children
+							  if c.type in ("string_literal", "system_lib_string")), None)
+			if path_node:
+				include_path = path_node.text.decode().strip('"').strip('<').strip('>')
+				module_path = self._get_module_path()
+				self.call_relationships.append(CallRelationship(
+					caller=f"{module_path}.__file__",
+					callee=include_path,
+					call_line=node.start_point[0] + 1,
+					is_resolved=False,
+					relationship_type="include",
+				))
+			return  # preproc_include has no interesting children
+
 		if node.type == "function_definition":
 			node_type = "function"
 			# look for function_declarator
@@ -76,6 +91,9 @@ class TreeSitterCAnalyzer:
 				identifier = next((c for c in declarator.children if c.type == "identifier"), None)
 				if identifier:
 					node_name = identifier.text.decode()
+					self._current_func_declarator = declarator
+			else:
+				self._current_func_declarator = None
 		elif node.type == "struct_specifier":
 			# Extract struct definitions: struct Name { ... }
 			node_type = "struct"
@@ -112,10 +130,38 @@ class TreeSitterCAnalyzer:
 					elif child.type == "identifier":
 						node_name = child.text.decode()
 						break
-		
+		elif node.type == "enum_specifier":
+			node_type = "enum"
+			for child in node.children:
+				if child.type == "type_identifier":
+					node_name = child.text.decode()
+					break
+		elif node.type == "union_specifier":
+			node_type = "union"
+			for child in node.children:
+				if child.type == "type_identifier":
+					node_name = child.text.decode()
+					break
+		elif node.type == "preproc_def":
+			node_type = "macro"
+			for child in node.children:
+				if child.type == "identifier":
+					node_name = child.text.decode()
+					break
+		elif node.type == "preproc_function_def":
+			node_type = "macro"
+			for child in node.children:
+				if child.type == "identifier":
+					node_name = child.text.decode()
+					break
+
 		if node_type and node_name:
 			component_id = self._get_component_id(node_name)
 			relative_path = self._get_relative_path()
+			_params = None
+			if node_type == "function" and getattr(self, "_current_func_declarator", None):
+				_params = self._extract_parameters(self._current_func_declarator)
+				self._current_func_declarator = None
 			node_obj = Node(
 				id=component_id,
 				name=node_name,
@@ -127,7 +173,7 @@ class TreeSitterCAnalyzer:
 				end_line=node.end_point[0]+1,
 				has_docstring=False,
 				docstring="",
-				parameters=None,
+				parameters=_params,
 				node_type=node_type,
 				base_classes=None,
 				class_name=None,
@@ -135,13 +181,39 @@ class TreeSitterCAnalyzer:
 				component_id=component_id
 			)
 
-			if node_type in ["function", "struct"]:
+			if node_type in ["function", "struct", "enum", "union", "macro"]:
 				self.nodes.append(node_obj)
 			top_level_nodes[node_name] = node_obj
 		
 		for child in node.children:
 			self._extract_nodes(child, top_level_nodes, lines)
 	
+
+	def _extract_parameters(self, func_declarator_node):
+		"""Extract parameter names from a function declarator."""
+		params = []
+		param_list = next((c for c in func_declarator_node.children if c.type == "parameter_list"), None)
+		if not param_list:
+			return None
+
+		for child in param_list.children:
+			if child.type == "parameter_declaration":
+				# Try pointer_declarator first (int* data)
+				ptr = next((c for c in child.children if c.type == "pointer_declarator"), None)
+				if ptr:
+					ident = next((c for c in ptr.children if c.type == "identifier"), None)
+					if ident:
+						params.append(ident.text.decode())
+						continue
+				# Direct identifier (int count)
+				ident = next((c for c in child.children if c.type == "identifier"), None)
+				if ident:
+					params.append(ident.text.decode())
+					continue
+				# Fallback: use full text
+				params.append(child.text.decode().strip())
+		return params if params else None
+
 	def _is_global_variable(self, node) -> bool:
 		parent = node.parent
 		while parent:
@@ -166,10 +238,26 @@ class TreeSitterCAnalyzer:
 					if not self._is_system_function(called_function):
 						self.call_relationships.append(CallRelationship(
 							caller=containing_function_id,
-							callee=called_function,  # Use simple name for cross-file resolution
+							callee=called_function,
 							call_line=node.start_point[0]+1,
-							is_resolved=False  # Let CallGraphAnalyzer resolve
+							is_resolved=False,
+							relationship_type="call",
 						))
+				else:
+					# field_expression call: obj.method() or ptr->method()
+					field_expr = next((c for c in node.children if c.type == "field_expression"), None)
+					if field_expr:
+						field_id = next((c for c in field_expr.children if c.type == "field_identifier"), None)
+						if field_id:
+							called_function = field_id.text.decode()
+							if not self._is_system_function(called_function):
+								self.call_relationships.append(CallRelationship(
+									caller=containing_function_id,
+									callee=called_function,
+									call_line=node.start_point[0]+1,
+									is_resolved=False,
+									relationship_type="call",
+								))
 		
 		# 2. function uses global variables
 		if node.type == "identifier":

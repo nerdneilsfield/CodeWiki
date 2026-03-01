@@ -308,6 +308,10 @@ class AnalysisService:
         "bash",
         "cmake",
         "toml",
+        # HLS / compiled-language build system and config
+        "tcl",
+        "makefile",
+        "vitis_cfg",
     }
 
     def _filter_supported_languages(self, code_files: List[Dict]) -> List[Dict]:

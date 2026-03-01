@@ -81,19 +81,34 @@ class DependencyGraphBuilder:
             "enum",            # Rust, PHP, Java, C#, TypeScript
             "trait",           # Rust, PHP
             "type",            # Go (type aliases / named types)
+            # HLS / compiled-language types (always meaningful leaf nodes)
+            "hls_top",         # Vitis HLS top function (set_top / syn.top)
+            "kernel_instance", # Instantiated HLS kernel (nk= in connectivity)
         }
         SECONDARY_TYPES = {
             "function",        # Python, C, C++, Bash, CMake, Go
             "macro",           # CMake, Rust
             "table",           # TOML top-level tables
             "table_array",     # TOML arrays of tables
+            "hls_project",     # Vitis HLS project container (open_project)
         }
 
-        available_types = {comp.component_type for comp in components.values()}
+        # Check types among actual leaf nodes (not all components).
+        # Using all components would cause false-positives: e.g. an hls_top node
+        # exists in components but is never a leaf (it depends on C++ functions),
+        # so checking all components would incorrectly suppress including "function".
+        available_leaf_types = {
+            components[ln].component_type
+            for ln in leaf_nodes
+            if ln in components
+        }
 
         valid_types = PRIMARY_TYPES.copy()
-        # Fall back to secondary types only when no primary types exist at all
-        if not available_types & PRIMARY_TYPES:
+        # Fall back to secondary types when no OOP class-like primary types exist
+        # among the actual leaf nodes (hls_top / kernel_instance don't count here
+        # since HLS projects are function-based and need function leaves too).
+        OOP_PRIMARY = PRIMARY_TYPES - {"hls_top", "kernel_instance"}
+        if not available_leaf_types & OOP_PRIMARY:
             valid_types |= SECONDARY_TYPES
         
         keep_leaf_nodes = []

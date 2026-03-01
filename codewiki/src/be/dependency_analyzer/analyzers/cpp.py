@@ -70,6 +70,21 @@ class TreeSitterCppAnalyzer:
 		node_type = None
 		node_name = None
 		
+		if node.type == "preproc_include":
+			path_node = next((c for c in node.children
+							  if c.type in ("string_literal", "system_lib_string")), None)
+			if path_node:
+				include_path = path_node.text.decode().strip('"').strip('<').strip('>')
+				module_path = self._get_module_path()
+				self.call_relationships.append(CallRelationship(
+					caller=f"{module_path}.__file__",
+					callee=include_path,
+					call_line=node.start_point[0] + 1,
+					is_resolved=False,
+					relationship_type="include",
+				))
+			return  # preproc_include has no interesting children
+
 		if node.type == "class_specifier":
 			# "class" + type_identifier + { ... }
 			node_type = "class"
@@ -96,6 +111,7 @@ class TreeSitterCppAnalyzer:
 			
 			declarator = next((c for c in node.children if c.type == "function_declarator"), None)
 			if declarator:
+				self._current_func_declarator = declarator
 				for child in declarator.children:
 					if child.type == "identifier":
 						node_name = child.text.decode()
@@ -108,6 +124,8 @@ class TreeSitterCppAnalyzer:
 						if identifiers:
 							node_name = identifiers[-1].text.decode()
 							break
+			else:
+				self._current_func_declarator = None
 		elif node.type == "declaration":
 			if self._is_global_variable(node):
 				node_type = "variable"
@@ -120,6 +138,24 @@ class TreeSitterCppAnalyzer:
 					elif child.type == "identifier":
 						node_name = child.text.decode()
 						break
+		elif node.type == "template_declaration":
+			# Find inner class or function
+			inner_class = next((c for c in node.children if c.type == "class_specifier"), None)
+			inner_func = next((c for c in node.children if c.type == "function_definition"), None)
+			if inner_class:
+				node_type = "template_class"
+				for child in inner_class.children:
+					if child.type == "type_identifier":
+						node_name = child.text.decode()
+						break
+			elif inner_func:
+				node_type = "template_function"
+				declarator = next((c for c in inner_func.children if c.type == "function_declarator"), None)
+				if declarator:
+					for child in declarator.children:
+						if child.type == "identifier":
+							node_name = child.text.decode()
+							break
 		elif node.type == "namespace_definition":
 			node_type = "namespace"
 			found_namespace_keyword = False
@@ -140,6 +176,16 @@ class TreeSitterCppAnalyzer:
 				
 			relative_path = self._get_relative_path()
 			
+			_params = None
+			if node_type in ("function", "method", "template_function") and getattr(self, "_current_func_declarator", None):
+				_params = self._extract_parameters(self._current_func_declarator)
+				self._current_func_declarator = None
+			_hls_pragmas = None
+			_is_hls_kernel = False
+			if node_type in ("function", "method"):
+				_hls_pragmas = self._extract_hls_pragmas(node)
+				if _hls_pragmas and self._is_in_extern_c(node):
+					_is_hls_kernel = True
 			node_obj = Node(
 				id=component_id,
 				name=node_name,
@@ -151,22 +197,140 @@ class TreeSitterCppAnalyzer:
 				end_line=node.end_point[0]+1,
 				has_docstring=False,
 				docstring="",
-				parameters=None,
+				parameters=_params,
 				node_type=node_type,
 				base_classes=None,
 				class_name=containing_class if node_type == "method" else None,
 				display_name=f"{node_type} {node_name}",
-				component_id=component_id
+				component_id=component_id,
+				hls_pragmas=_hls_pragmas,
+				is_hls_kernel=_is_hls_kernel,
 			)
 			
 			top_level_nodes[top_level_key] = node_obj
 			
-			if node_type in ["class", "struct", "function"]:
+			if node_type in ["class", "struct", "function", "template_class", "template_function"]:
 				self.nodes.append(node_obj)
 		
 		# Recursively process children
 		for child in node.children:
 			self._extract_nodes(child, top_level_nodes, lines)
+
+
+	def _extract_hls_pragmas(self, func_node):
+		"""Extract HLS pragmas from within a function body."""
+		from codewiki.src.be.dependency_analyzer.models.core import HLSPragma
+		pragmas = []
+		self._collect_pragmas(func_node, pragmas)
+		return pragmas if pragmas else None
+
+	def _collect_pragmas(self, node, pragmas):
+		if node.type == "preproc_call":
+			text = node.text.decode().strip()
+			if "#pragma" in text.lower() and "HLS" in text.upper():
+				pragma = self._parse_hls_pragma(text, node.start_point[0] + 1)
+				if pragma:
+					pragmas.append(pragma)
+		for child in node.children:
+			self._collect_pragmas(child, pragmas)
+
+	def _parse_hls_pragma(self, text: str, line: int):
+		from codewiki.src.be.dependency_analyzer.models.core import HLSPragma
+		parts = text.split()
+		hls_idx = None
+		for i, p in enumerate(parts):
+			if p.upper() == "HLS":
+				hls_idx = i
+				break
+		if hls_idx is None or hls_idx + 1 >= len(parts):
+			return None
+		pragma_type = parts[hls_idx + 1].upper()
+		params = {}
+		for part in parts[hls_idx + 2:]:
+			if "=" in part:
+				k, v = part.split("=", 1)
+				params[k.lower()] = v
+			elif part not in ("#pragma", "HLS", pragma_type):
+				if "subtype" not in params:
+					params["subtype"] = part
+		target = params.get("port") or params.get("variable")
+		semantic = self._pragma_semantic(pragma_type, params)
+		return HLSPragma(
+			pragma_type=pragma_type,
+			params=params,
+			target=target,
+			line=line,
+			hardware_semantic=semantic,
+		)
+
+	def _pragma_semantic(self, pragma_type: str, params: dict) -> str:
+		subtype = params.get("subtype", "")
+		port = params.get("port", "")
+		bundle = params.get("bundle", "")
+		if pragma_type == "INTERFACE":
+			m = {
+				"m_axi": "AXI Master memory interface" + (", bundle " + bundle if bundle else ""),
+				"s_axilite": "AXI-Lite control/status register" + (" for " + port if port else ""),
+				"axis": "AXI-Stream data port" + (" " + port if port else ""),
+				"ap_none": "Wire port (no handshake)" + (" " + port if port else ""),
+			}
+			return m.get(subtype.lower(), "Hardware interface (" + subtype + ")")
+		m2 = {
+			"PIPELINE": "Pipelined with initiation interval " + params.get("ii", "auto") + " cycles",
+			"DATAFLOW": "Task-level pipelining with automatic FIFOs between functions",
+			"UNROLL": "Loop unrolled " + str(params.get("factor", "fully")) + "x for parallel execution",
+			"ARRAY_PARTITION": "Array partitioned for parallel memory access",
+			"INLINE": "Function inlined into caller (no separate hardware module)",
+			"STREAM": "Variable implemented as hardware FIFO",
+		}
+		return m2.get(pragma_type, "HLS " + pragma_type + " directive")
+
+	def _is_in_extern_c(self, node) -> bool:
+		"""Check if node is inside an extern C linkage specification."""
+		current = node.parent
+		while current:
+			if current.type == "linkage_specification":
+				for child in current.children:
+					if child.type == "string_literal":
+						raw = child.text.decode().replace('"', '').replace("'", "").strip()
+						if raw == "C":
+							return True
+			current = current.parent
+		return False
+
+	def _extract_parameters(self, func_declarator_node):
+		"""Extract parameter names from a C++ function declarator."""
+		params = []
+		param_list = next((c for c in func_declarator_node.children if c.type == "parameter_list"), None)
+		if not param_list:
+			return None
+
+		for child in param_list.children:
+			if child.type == "parameter_declaration":
+				# Try reference_declarator first (const int& ref)
+				ref = next((c for c in child.children if c.type == "reference_declarator"), None)
+				if ref:
+					ident = next((c for c in ref.children if c.type == "identifier"), None)
+					if ident:
+						params.append(ident.text.decode())
+						continue
+				# Try pointer_declarator (int* ptr)
+				ptr = next((c for c in child.children if c.type == "pointer_declarator"), None)
+				if ptr:
+					ident = next((c for c in ptr.children if c.type == "identifier"), None)
+					if ident:
+						params.append(ident.text.decode())
+						continue
+				# Direct identifier (e.g. last identifier in param)
+				idents = [c for c in child.children if c.type == "identifier"]
+				if idents:
+					params.append(idents[-1].text.decode())
+					continue
+				# Fallback: full text
+				text = child.text.decode().strip()
+				if text:
+					params.append(text)
+		return params if params else None
 
 	def _is_global_variable(self, node) -> bool:
 		"""Check if a declaration node is a global variable."""
@@ -214,6 +378,32 @@ class TreeSitterCppAnalyzer:
 								break
 						if method_name:
 							called_function = method_name
+							break
+					elif child.type == "qualified_identifier":
+						# MyLib::func() or MyLib::func<T>()
+						# Last part may be identifier, template_function, or qualified_identifier
+						def _extract_from_qualified(qnode):
+							"""Recursively extract the final function name from a qualified_identifier."""
+							last_child = qnode.children[-1] if qnode.children else None
+							if last_child is None:
+								return None
+							if last_child.type == "identifier":
+								return last_child.text.decode()
+							if last_child.type == "template_function":
+								ident = next((c for c in last_child.children if c.type == "identifier"), None)
+								return ident.text.decode() if ident else None
+							if last_child.type == "qualified_identifier":
+								return _extract_from_qualified(last_child)
+							return None
+						qname = _extract_from_qualified(child)
+						if qname:
+							called_function = qname
+							break
+					elif child.type == "template_function":
+						# func<T>()
+						ident = next((c for c in child.children if c.type == "identifier"), None)
+						if ident:
+							called_function = ident.text.decode()
 							break
 				
 				if called_function and not self._is_system_function(called_function):

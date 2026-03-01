@@ -309,11 +309,12 @@ def get_leaf_nodes(graph: Dict[str, Set[str]], components: Dict[str, Node]) -> L
         for comp in components.values():
             available_types.add(comp.component_type)
         
-        # Valid types for leaf nodes - include functions for C-based codebases
-        valid_types = {"class", "interface", "struct"}
-        # If no classes/interfaces/structs are found, include functions
-        if not available_types.intersection(valid_types):
-            valid_types.add("function")
+        # Valid types for leaf nodes — OOP types are primary, HLS types are also primary
+        primary_leaf_types = {"class", "interface", "struct", "hls_top", "kernel_instance"}
+        valid_types = set(primary_leaf_types)
+        # If no OOP class-like types are found, include functions and HLS container types
+        if not available_types.intersection({"class", "interface", "struct"}):
+            valid_types.update({"function", "hls_project"})
 
         for leaf_node in leaf_nodes:
             # Skip any leaf nodes that are clearly error strings or invalid identifiers
