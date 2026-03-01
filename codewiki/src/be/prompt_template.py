@@ -420,7 +420,24 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
             core_component_codes += "\n"
             # Signature
             if node.parameters:
-                core_component_codes += f"  Parameters: {', '.join(node.parameters)}\n"
+                params = [p if isinstance(p, str) else str(p) for p in node.parameters]
+                core_component_codes += f"  Parameters: {', '.join(params)}\n"
+            # HLS kernel hardware interface (only for compiled-language HLS nodes)
+            if getattr(node, "is_hls_kernel", False):
+                core_component_codes += f"  HLS Kernel: yes (extern \"C\" / Vitis top)\n"
+            hls_pragmas = getattr(node, "hls_pragmas", None)
+            if hls_pragmas:
+                for pragma in hls_pragmas:
+                    ptype = getattr(pragma, "pragma_type", "") or pragma.get("pragma_type", "")
+                    semantic = getattr(pragma, "hardware_semantic", "") or pragma.get("hardware_semantic", "") or ptype
+                    params_d = getattr(pragma, "params", {}) or pragma.get("params", {})
+                    param_str = ", ".join(f"{k}={v}" for k, v in params_d.items()) if params_d else ""
+                    core_component_codes += f"  #pragma HLS {ptype}"
+                    if param_str:
+                        core_component_codes += f" ({param_str})"
+                    if semantic and semantic != ptype:
+                        core_component_codes += f" → {semantic}"
+                    core_component_codes += "\n"
             # Docstring (truncated)
             if node.docstring:
                 doc = node.docstring.strip().split('\n')[0][:200]

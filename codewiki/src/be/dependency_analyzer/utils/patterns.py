@@ -176,6 +176,14 @@ DEFAULT_INCLUDE_PATTERNS = [
     "*.toml",
     "*.cfg",
     "*.ini",
+    # Build system and HLS scripts
+    "*.tcl",
+    "*.mk",
+    "*.mak",
+    "Makefile",
+    "GNUmakefile",
+    "makefile",
+    "CMakeLists.txt",
 ]
 
 CODE_EXTENSIONS = {

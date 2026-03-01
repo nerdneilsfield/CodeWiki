@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import argparse
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Tuple, Optional, Any, Union
 from pathlib import Path
@@ -87,7 +88,10 @@ class DependencyParser:
                 base_classes=func_dict.get("base_classes"),
                 class_name=func_dict.get("class_name"),
                 display_name=func_dict.get("display_name", ""),
-                component_id=component_id
+                component_id=component_id,
+                # HLS-specific fields — preserved from compiled-language analyzers
+                is_hls_kernel=func_dict.get("is_hls_kernel", False),
+                hls_pragmas=func_dict.get("hls_pragmas") or None,
             )
             
             self.components[component_id] = node
@@ -108,19 +112,45 @@ class DependencyParser:
             caller_id = rel_dict.get("caller", "")
             callee_id = rel_dict.get("callee", "")
             is_resolved = rel_dict.get("is_resolved", False)
-            
+
             caller_component_id = component_id_mapping.get(caller_id)
-            
+
             callee_component_id = component_id_mapping.get(callee_id)
             if not callee_component_id:
                 for comp_id, comp_node in self.components.items():
                     if comp_node.name == callee_id:
                         callee_component_id = comp_id
                         break
-            
+
             if caller_component_id and caller_component_id in self.components:
                 if callee_component_id:
                     self.components[caller_component_id].depends_on.add(callee_component_id)
+                    processed_relationships += 1
+
+        # Second pass: HLS file-based relationships.
+        # hls_source / hls_compile callees are file paths (e.g. "mm2s.cpp"), not
+        # node IDs, so they can't be resolved by the normal ID lookup above.
+        # Build a filename → [component_ids] index, then wire up HLS nodes.
+        _file_to_comps: Dict[str, List[str]] = defaultdict(list)
+        for comp_id, comp_node in self.components.items():
+            fname = os.path.basename(comp_node.relative_path or comp_node.file_path or "")
+            if fname:
+                _file_to_comps[fname].append(comp_id)
+
+        _HLS_FILE_REL_TYPES = {"hls_source", "hls_compile"}
+        for rel_dict in relationships:
+            if rel_dict.get("relationship_type") not in _HLS_FILE_REL_TYPES:
+                continue
+            caller_id = rel_dict.get("caller", "")
+            callee_id = rel_dict.get("callee", "")  # e.g. "mm2s.cpp" or "src/mm2s.cpp"
+            caller_comp_id = component_id_mapping.get(caller_id)
+            if not caller_comp_id or caller_comp_id not in self.components:
+                continue
+            # Match by filename basename (strip leading paths and "./" prefixes)
+            callee_fname = os.path.basename(callee_id.lstrip("./"))
+            for dep_comp_id in _file_to_comps.get(callee_fname, []):
+                if dep_comp_id != caller_comp_id:
+                    self.components[caller_comp_id].depends_on.add(dep_comp_id)
                     processed_relationships += 1
     
     def _determine_component_type(self, func_dict: Dict) -> str:
