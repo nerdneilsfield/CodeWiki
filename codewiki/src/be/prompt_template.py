@@ -466,6 +466,375 @@ analysis above, explicitly address the following hardware-design pillars:
 </HLS_KERNEL_ANALYSIS_GUIDE>
 """
 
+# ── Guide document prompt templates ──────────────────────────────────────────
+
+GETTING_STARTED_PROMPT = """
+You are a technical writer creating a **Getting Started** tutorial for the
+`{repo_name}` project.  Target reader: a developer who just discovered this
+project and wants to run it locally within 15 minutes.
+
+<REQUIREMENTS>
+1. **Prerequisites** — runtime version, required tools, API keys / env vars
+2. **Installation** — step-by-step with copy-paste shell commands
+3. **First Run** — a complete runnable example with expected terminal output
+4. **Configuration** — key settings table (name | required? | default | description)
+5. **Common Errors** — top 3-5 errors a newcomer will hit, with one-line fixes
+6. **Next Steps** — links to Beginner's Guide, Build & Code Org, and MODULE docs
+
+Every step MUST include:
+- The exact command to run
+- The expected output (or screenshot description)
+- The most likely error at that step and how to fix it
+</REQUIREMENTS>
+
+<MERMAID_REQUIREMENTS>
+- A `flowchart TD` showing the installation pipeline (clone → install deps → configure → run)
+- A `sequenceDiagram` showing the first-run interaction between user, CLI, and backend
+</MERMAID_REQUIREMENTS>
+
+<REPO_README>
+{readme}
+</REPO_README>
+
+<SETUP_FILES>
+{setup_files}
+</SETUP_FILES>
+
+<CLI_ENTRY>
+{cli_entry}
+</CLI_ENTRY>
+
+<CONFIG_SOURCE>
+{config_source}
+</CONFIG_SOURCE>
+
+<EXISTING_OVERVIEW>
+{overview}
+</EXISTING_OVERVIEW>
+
+{relevant_docs}
+
+{language_instruction}
+
+Generate the tutorial in Markdown.  Wrap the output in:
+<GUIDE>
+content
+</GUIDE>
+""".strip()
+
+BEGINNER_OUTLINE_PROMPT = """
+You are planning a multi-chapter beginner's guide for the `{repo_name}` project.
+Target reader: a developer who can write basic code but has never seen this
+codebase.  They need to build a mental model of what the project does and how
+its parts fit together.
+
+Examine the module tree and module documentation summaries below, then produce
+a JSON outline of 4-8 chapters.  Each chapter should teach ONE concept and
+build on the previous chapters.
+
+Rules:
+- Chapters must follow a progressive-disclosure arc: "What is this?" →
+  "How is it organized?" → "How does data flow?" → domain-specific deep-dives
+- Each chapter lists the 1-3 modules most relevant to its topic
+- Prefer fewer, meatier chapters over many thin ones
+
+<MODULE_TREE>
+{module_tree}
+</MODULE_TREE>
+
+<MODULE_SUMMARIES>
+{module_summaries}
+</MODULE_SUMMARIES>
+
+Return ONLY valid JSON wrapped in <OUTLINE>...</OUTLINE>:
+<OUTLINE>
+{{
+  "title": "Beginner's Guide to {repo_name}",
+  "sections": [
+    {{
+      "id": "kebab-case-slug",
+      "title": "Chapter title in plain language",
+      "focus_modules": ["module_name_1", "module_name_2"],
+      "summary": "One-sentence description of what the reader will learn"
+    }}
+  ]
+}}
+</OUTLINE>
+""".strip()
+
+BEGINNER_SECTION_PROMPT = """
+You are writing chapter {section_number}/{total_sections} of the beginner's
+guide for `{repo_name}`:
+
+**Chapter title:** {section_title}
+**Learning goal:** {section_summary}
+
+<WRITING_STYLE>
+- Use everyday analogies for every technical concept
+  GOOD: "模块就像乐高积木——每块有自己的形状和功能，组合起来才能搭出完整的城堡"
+  BAD:  "模块是封装了相关函数和类的命名空间"
+- Compare with well-known projects readers likely know
+  ("This module's role is similar to Express.js's Router" / "Think of it like
+   React's useState, but for …")
+- Every technical term MUST be explained in plain language on first use
+- Use "Imagine …", "Think of it as …", "You can picture this as …"
+- Short paragraphs — one concept per paragraph
+- Heavy Mermaid usage: architecture diagrams, data-flow charts, concept maps
+</WRITING_STYLE>
+
+<MERMAID_REQUIREMENTS>
+Every major concept or flow MUST have a companion Mermaid diagram:
+- `graph TD` for architecture / component relationships
+- `flowchart` for data flow and process steps
+- `sequenceDiagram` for request traces and interactions
+- `classDiagram` for concept relationship maps (even if not literally classes)
+Max ~15 nodes per diagram.  Every diagram must be followed by a prose walkthrough.
+</MERMAID_REQUIREMENTS>
+
+<FULL_OUTLINE>
+{outline_json}
+</FULL_OUTLINE>
+
+<PREVIOUS_CHAPTER_SUMMARIES>
+{carry_forward}
+</PREVIOUS_CHAPTER_SUMMARIES>
+
+<RELEVANT_MODULE_DOCS>
+{module_docs}
+</RELEVANT_MODULE_DOCS>
+
+<RELEVANT_REPO_DOCS>
+{repo_docs}
+</RELEVANT_REPO_DOCS>
+
+<MODULE_TREE>
+{module_tree}
+</MODULE_TREE>
+
+{language_instruction}
+
+Generate the chapter in Markdown.  Wrap in:
+<GUIDE>
+content
+</GUIDE>
+""".strip()
+
+BEGINNER_PARENT_PROMPT = """
+You are writing the landing page for the beginner's guide to `{repo_name}`.
+This page links to {num_sections} chapters and gives readers a roadmap.
+
+Write a short, welcoming introduction (2-3 paragraphs) explaining:
+1. Who this guide is for
+2. What they will learn
+3. A Mermaid `flowchart LR` showing the chapter progression
+
+Then list each chapter with its title, a 1-2 sentence teaser, and a link.
+
+<CHAPTERS>
+{chapters_list}
+</CHAPTERS>
+
+{language_instruction}
+
+Generate in Markdown.  Wrap in:
+<GUIDE>
+content
+</GUIDE>
+""".strip()
+
+BUILD_ANALYSIS_PROMPT = """
+You are a senior build engineer writing a **Build & Code Organization** analysis
+for the `{repo_name}` project.  Target reader: a developer who wants to
+understand how the project is built, how the source tree is organized, and how
+dependencies are managed.
+
+<REQUIREMENTS>
+1. **Project Directory Structure** — Mermaid `graph TD` of top-level directories
+   and their responsibilities
+2. **Build / Compilation Pipeline** — full path from source to runnable artifact,
+   as a Mermaid `flowchart TD`
+3. **Dependency Management** — how external deps are declared, version locking
+4. **Multi-Language Collaboration** (if applicable) — how parts in different
+   languages interoperate or co-build
+5. **Development Workflow** — common dev / test / build commands with examples
+
+Every section must include at least one Mermaid diagram.
+</REQUIREMENTS>
+
+{language_specific_guides}
+
+<DIRECTORY_STRUCTURE>
+{directory_tree}
+</DIRECTORY_STRUCTURE>
+
+<BUILD_FILES>
+{build_files}
+</BUILD_FILES>
+
+<MODULE_TREE>
+{module_tree}
+</MODULE_TREE>
+
+<RELEVANT_MODULE_DOCS>
+{module_docs}
+</RELEVANT_MODULE_DOCS>
+
+{language_instruction}
+
+Generate the document in Markdown.  Wrap in:
+<GUIDE>
+content
+</GUIDE>
+""".strip()
+
+ALGORITHM_IDENTIFY_PROMPT = """
+You are analyzing `{repo_name}` to identify its **core algorithms** — the
+non-trivial computational procedures that define the project's unique value.
+
+Examine the component list and dependency graph below.  Identify 2-8 core
+algorithms.  Exclude boilerplate, CRUD, and simple utility functions.
+
+An algorithm qualifies as "core" if it:
+- Implements a non-trivial computational procedure (sorting, graph traversal,
+  ML inference, signal processing, optimization, etc.)
+- Is central to the project's purpose (not a library wrapper)
+- Has interesting complexity or design tradeoffs worth explaining
+
+<COMPONENTS>
+{components_summary}
+</COMPONENTS>
+
+<DEPENDENCY_GRAPH>
+{dependency_summary}
+</DEPENDENCY_GRAPH>
+
+<MODULE_SUMMARIES>
+{module_summaries}
+</MODULE_SUMMARIES>
+
+Return ONLY valid JSON wrapped in <ALGORITHMS>...</ALGORITHMS>:
+<ALGORITHMS>
+{{
+  "algorithms": [
+    {{
+      "id": "kebab-case-slug",
+      "title": "Algorithm Name",
+      "related_components": ["file.py::FunctionName", ...],
+      "summary": "One-sentence description"
+    }}
+  ]
+}}
+</ALGORITHMS>
+""".strip()
+
+ALGORITHM_DEEPDIVE_PROMPT = """
+You are an algorithm researcher writing a formal deep-dive on the
+**{algorithm_title}** algorithm from `{repo_name}`.
+
+<WRITING_STYLE>
+- Formal, academic-quality writing
+- LaTeX math: `$inline$` and `$$block$$` for complexity, recurrences, constraints
+- Pseudocode in ```pseudocode blocks alongside actual implementation
+- Compare with classical algorithms or papers where applicable
+</WRITING_STYLE>
+
+<STRUCTURE>
+1. **Problem Statement** — formal definition of the problem this algorithm solves
+2. **Intuition** — why naive approaches fail; the key insight
+3. **Formal Definition** — mathematical specification ($$LaTeX$$)
+4. **Algorithm** — pseudocode + Mermaid `flowchart` of execution steps
+5. **Complexity Analysis** — time and space, best / worst / average case
+6. **Implementation Notes** — how the actual code diverges from theory;
+   engineering compromises
+7. **Comparison** — vs classical implementations or alternative approaches
+</STRUCTURE>
+
+<MERMAID_REQUIREMENTS>
+- `flowchart` for algorithm execution steps
+- `stateDiagram-v2` for state transitions (if applicable)
+- `graph` for data structure relationships
+</MERMAID_REQUIREMENTS>
+
+<ALGORITHM_SOURCE_CODE>
+{source_code}
+</ALGORITHM_SOURCE_CODE>
+
+<TEST_FILES>
+{test_code}
+</TEST_FILES>
+
+<RELATED_MODULE_DOCS>
+{module_docs}
+</RELATED_MODULE_DOCS>
+
+<DEPENDENCY_GRAPH>
+{dependency_edges}
+</DEPENDENCY_GRAPH>
+
+{language_instruction}
+
+Generate the deep-dive in Markdown.  Wrap in:
+<GUIDE>
+content
+</GUIDE>
+""".strip()
+
+ALGORITHM_PARENT_PROMPT = """
+You are writing the landing page for the **Core Algorithms** section of
+`{repo_name}`.  This page introduces the project's key algorithms, shows how
+they relate to each other, and links to individual deep-dives.
+
+Write:
+1. An introduction (2-3 paragraphs) explaining the project's computational core
+2. A Mermaid `graph TD` showing algorithm relationships and data flow between them
+3. For each algorithm: title, one-paragraph summary, link to its page
+
+<ALGORITHMS>
+{algorithms_list}
+</ALGORITHMS>
+
+{language_instruction}
+
+Generate in Markdown.  Wrap in:
+<GUIDE>
+content
+</GUIDE>
+""".strip()
+
+OVERVIEW_AUGMENT_PROMPT = """
+The following overview was previously generated for the `{repo_name}` project.
+New guide documents have been created alongside the existing module documentation.
+Your task: insert a "Documentation Guide" or equivalent navigation section near
+the top of the overview (after the first introductory paragraph) that introduces
+each guide with 1-2 sentences and a Markdown link.
+
+Do NOT remove or significantly alter the existing overview content — only add
+the guide navigation section.
+
+<EXISTING_OVERVIEW>
+{existing_overview}
+</EXISTING_OVERVIEW>
+
+<AVAILABLE_GUIDES>
+{guides_list}
+</AVAILABLE_GUIDES>
+
+{language_instruction}
+
+Return the full augmented overview wrapped in:
+<GUIDE>
+content
+</GUIDE>
+""".strip()
+
+
+def format_language_instruction(output_language: str) -> str:
+    """Return a language instruction string for guide prompts."""
+    if output_language and output_language.lower() != "en":
+        return f"\n<LANGUAGE_INSTRUCTION>\nWrite the documentation in {output_language}.\n</LANGUAGE_INSTRUCTION>"
+    return ""
+
+
 EXTENSION_TO_LANGUAGE = {
     ".py": "python",
     ".md": "markdown",
