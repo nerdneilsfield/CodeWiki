@@ -192,6 +192,35 @@ def test_static_site_guide_navigation():
         assert gs_pos < ca_pos, "Guide navigation order must follow definition order"
 
 
+def test_json_validation_failure_is_reported_as_failed():
+    """JSON validation failure must appear as FAILED, not success."""
+    import asyncio
+
+    async def _run():
+        with tempfile.TemporaryDirectory() as wd:
+            gen = GuideGenerator(
+                config=_minimal_config(),
+                components={},
+                module_tree={},
+                working_dir=wd,
+            )
+            gen.docs_bundle = gen.collector.collect("/tmp", None, {})
+
+            # Mock LLM to return invalid JSON for beginner outline
+            async def bad_llm(prompt):
+                return "this is not json"
+
+            gen._call_llm_with_fallback = bad_llm
+
+            with patch.object(gen, '_regenerate_overview', new_callable=AsyncMock):
+                await gen.run()
+
+            # Beginner guide should be FAILED, not success
+            assert "FAILED" in gen._results.get("generate_beginner_guide", "")
+
+    asyncio.run(_run())
+
+
 def test_run_continues_on_guide_failure():
     """One guide failure should not prevent others from running."""
     import asyncio
