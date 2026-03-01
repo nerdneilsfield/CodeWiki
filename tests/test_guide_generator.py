@@ -149,6 +149,49 @@ def test_parse_json_response_fallback():
     assert result == {"sections": []}
 
 
+def test_static_site_guide_navigation():
+    """Guide pages appear in generated static HTML navigation."""
+    from codewiki.cli.static_generator import StaticHTMLGenerator
+
+    with tempfile.TemporaryDirectory() as tmp:
+        docs_dir = Path(tmp)
+
+        # Minimal module_tree.json so nav is built
+        (docs_dir / "module_tree.json").write_text('{"main": {}}', encoding="utf-8")
+
+        # overview.md is required for index.html
+        (docs_dir / "overview.md").write_text("# Overview\nHello", encoding="utf-8")
+
+        # Guide .md stubs
+        for slug in ("guide-getting-started", "guide-beginners-guide",
+                      "guide-build-and-organization", "guide-core-algorithms"):
+            (docs_dir / f"{slug}.md").write_text(
+                f"# {slug}\nPlaceholder", encoding="utf-8"
+            )
+        # Sub-page
+        (docs_dir / "guide-beginners-guide-setup.md").write_text(
+            "# Setup\nPlaceholder", encoding="utf-8"
+        )
+
+        # Run static generation (writes .html files)
+        gen = StaticHTMLGenerator()
+        gen.generate(docs_dir)
+
+        # Read the generated index.html and verify guide nav
+        index_html = (docs_dir / "index.html").read_text(encoding="utf-8")
+
+        assert 'href="guide-getting-started.html"' in index_html
+        assert 'href="guide-beginners-guide.html"' in index_html
+        assert 'href="guide-build-and-organization.html"' in index_html
+        assert 'href="guide-core-algorithms.html"' in index_html
+        assert 'href="guide-beginners-guide-setup.html"' in index_html
+
+        # Fixed ordering: getting-started before core-algorithms
+        gs_pos = index_html.index("guide-getting-started.html")
+        ca_pos = index_html.index("guide-core-algorithms.html")
+        assert gs_pos < ca_pos, "Guide navigation order must follow definition order"
+
+
 def test_run_continues_on_guide_failure():
     """One guide failure should not prevent others from running."""
     import asyncio
