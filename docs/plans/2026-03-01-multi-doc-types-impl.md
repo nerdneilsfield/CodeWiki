@@ -155,9 +155,8 @@ _EXCLUDED_DIRS = {
 _DOC_EXTENSIONS = {".md", ".rst", ".txt"}
 # Internal guide files that should not be collected as "generated docs"
 _GUIDE_PREFIXES = (
-    "getting-started", "beginners-guide", "build-and-organization",
-    "core-algorithms", "_guide_cache", "_parent_doc_hashes",
-    "_tree_cache_meta",
+    "guide-",           # all guide output files
+    "_guide_cache", "_parent_doc_hashes", "_tree_cache_meta",
 )
 
 
@@ -354,7 +353,7 @@ def test_should_not_regenerate_when_hash_matches():
         # Create a fake input file
         inp = os.path.join(wd, "input.md")
         Path(inp).write_text("hello", encoding="utf-8")
-        out = os.path.join(wd, "getting-started.md")
+        out = os.path.join(wd, "guide-getting-started.md")
         Path(out).write_text("# Getting Started\nContent here.", encoding="utf-8")
 
         gen = GuideGenerator(
@@ -381,7 +380,7 @@ def test_should_regenerate_when_input_changes():
     with tempfile.TemporaryDirectory() as wd:
         inp = os.path.join(wd, "input.md")
         Path(inp).write_text("hello", encoding="utf-8")
-        out = os.path.join(wd, "getting-started.md")
+        out = os.path.join(wd, "guide-getting-started.md")
         Path(out).write_text("# Getting Started", encoding="utf-8")
 
         gen = GuideGenerator(
@@ -441,7 +440,13 @@ from codewiki.src.utils import file_manager
 logger = logging.getLogger(__name__)
 
 GUIDE_CACHE_FILENAME = "_guide_cache.json"
-_PROMPT_VERSION = "v1"  # bump on any prompt template change to force regeneration
+# Per-guide prompt versions — bump only the guide whose prompt changed
+_PROMPT_VERSIONS = {
+    "getting_started": "v1",
+    "beginner_guide": "v1",
+    "build_analysis": "v1",
+    "algorithm_deepdive": "v1",
+}
 
 
 class GuideGenerator:
@@ -499,32 +504,52 @@ class GuideGenerator:
         slug = re.sub(r'-+', '-', slug).strip('-')
         return slug or f"part-{index}"
 
+    def _unique_slug(self, raw: str, index: int = 0) -> str:
+        """Sanitize slug and deduplicate against already-used slugs."""
+        base = self._sanitize_slug(raw, index)
+        if not hasattr(self, '_used_slugs'):
+            self._used_slugs: set = set()
+        slug = base
+        counter = 2
+        while slug in self._used_slugs:
+            slug = f"{base}-{counter}"
+            counter += 1
+        self._used_slugs.add(slug)
+        return slug
+
     def _safe_output_path(self, filename: str) -> str:
         """Build output path and validate it doesn't escape working_dir."""
         out = os.path.join(self.working_dir, filename)
-        assert_safe_path(self.working_dir, out)
+        assert_safe_path(Path(self.working_dir), Path(out))
         return out
 
-    def _should_regenerate(self, guide_type: str, input_files: List[str]) -> bool:
-        current_hash = self._compute_combined_hash(input_files, extra=_PROMPT_VERSION)
+    def _should_regenerate(
+        self, guide_type: str, input_files: List[str], extra_salt: str = ""
+    ) -> bool:
+        version = _PROMPT_VERSIONS.get(guide_type, "v1")
+        extra = f"{version}:{extra_salt}" if extra_salt else version
+        current_hash = self._compute_combined_hash(input_files, extra=extra)
         cached = self.cache.get(guide_type, {})
         if cached.get("input_hash") == current_hash:
             # output_files are relative filenames — resolve against working_dir
             outputs = cached.get("output_files", [])
             return not all(
                 os.path.exists(os.path.join(self.working_dir, f))
-                and os.path.getsize(os.path.join(self.working_dir, f)) > 100
+                and os.path.getsize(os.path.join(self.working_dir, f)) > 10
                 for f in outputs
             )
         return True
 
     def _update_cache(
-        self, guide_type: str, input_files: List[str], output_files: List[str]
+        self, guide_type: str, input_files: List[str], output_files: List[str],
+        extra_salt: str = "",
     ):
+        version = _PROMPT_VERSIONS.get(guide_type, "v1")
+        extra = f"{version}:{extra_salt}" if extra_salt else version
         # Store relative filenames (not absolute paths) for cross-environment portability
         rel_names = [os.path.basename(f) for f in output_files]
         self.cache[guide_type] = {
-            "input_hash": self._compute_combined_hash(input_files, extra=_PROMPT_VERSION),
+            "input_hash": self._compute_combined_hash(input_files, extra=extra),
             "output_files": rel_names,
         }
 
@@ -598,6 +623,17 @@ class GuideGenerator:
             self.config.repo_path, self.working_dir, self.components
         )
 
+        # Layer 3 quality gate: warn if no MODULE docs were generated
+        gen_docs = [
+            f for f in os.listdir(self.working_dir)
+            if f.endswith(".md") and not f.startswith(_GUIDE_PREFIXES)
+        ]
+        if not gen_docs:
+            logger.warning(
+                "⚠ No MODULE docs found in working_dir — guide quality will be degraded. "
+                "Consider re-running MODULE generation first."
+            )
+
         # Phase 1: Independent single-page guides — run concurrently
         phase1 = [
             self._safe_generate(self.generate_getting_started),
@@ -657,10 +693,10 @@ class GuideGenerator:
         # Build list of successfully generated guides
         guides_list = []
         guide_files = [
-            ("getting-started.md", "Get Started", "Quick installation and first-run tutorial"),
-            ("beginners-guide.md", "Beginner's Guide", "Accessible multi-chapter walkthrough"),
-            ("build-and-organization.md", "Build & Code Organization", "Build pipeline and project structure"),
-            ("core-algorithms.md", "Core Algorithms", "Formal algorithm deep-dives"),
+            ("guide-getting-started.md", "Get Started", "Quick installation and first-run tutorial"),
+            ("guide-beginners-guide.md", "Beginner's Guide", "Accessible multi-chapter walkthrough"),
+            ("guide-build-and-organization.md", "Build & Code Organization", "Build pipeline and project structure"),
+            ("guide-core-algorithms.md", "Core Algorithms", "Formal algorithm deep-dives"),
         ]
         for fname, title, summary in guide_files:
             fpath = os.path.join(self.working_dir, fname)
@@ -1220,7 +1256,7 @@ Add these private methods to `GuideGenerator`:
             GETTING_STARTED_PROMPT, format_language_instruction,
         )
 
-        output_path = self._safe_output_path("getting-started.md")
+        output_path = self._safe_output_path("guide-getting-started.md")
         repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
 
         # Gather ALL input files for hash (comprehensive per design §4.2)
@@ -1325,9 +1361,8 @@ Also add at the top of the file:
 ```python
 # Filename prefixes for guide pages (excluded from "generated module docs" collection)
 _GUIDE_PREFIXES = (
-    "getting-started", "beginners-guide", "build-and-organization",
-    "core-algorithms", "_guide_cache", "_parent_doc_hashes",
-    "_tree_cache_meta",
+    "guide-",           # all guide output files
+    "_guide_cache", "_parent_doc_hashes", "_tree_cache_meta",
 )
 ```
 
@@ -1357,13 +1392,18 @@ _GUIDE_PREFIXES = (
             self._strip_tree_for_display(self.module_tree), indent=2
         )
 
-        # Hash check: use module_tree + all generated docs
+        # Hash check: generated docs + module_tree structure
         gen_doc_files = [
             os.path.join(self.working_dir, f)
             for f in sorted(os.listdir(self.working_dir))
             if f.endswith(".md") and not f.startswith(_GUIDE_PREFIXES)
         ]
-        if not self._should_regenerate("beginner_guide", gen_doc_files):
+        module_tree_hash = hashlib.sha256(
+            json.dumps(self.module_tree, sort_keys=True).encode()
+        ).hexdigest()[:16]
+        if not self._should_regenerate(
+            "beginner_guide", gen_doc_files, extra_salt=module_tree_hash
+        ):
             logger.info("✓ Beginner's guide is up to date (cache hit)")
             return
 
@@ -1380,12 +1420,10 @@ _GUIDE_PREFIXES = (
         try:
             outline = OutlineSchema(**raw_outline)
         except ValidationError as e:
-            logger.warning(f"Beginner guide outline validation failed: {e}")
-            return
+            raise ValueError(f"Beginner guide outline validation failed: {e}")
         sections = outline.sections
         if not sections:
-            logger.warning("LLM returned empty beginner guide outline, skipping")
-            return
+            raise ValueError("LLM returned empty beginner guide outline")
 
         logger.info(f"📝 Beginner's Guide — Phase B: generating {len(sections)} sections")
 
@@ -1395,7 +1433,7 @@ _GUIDE_PREFIXES = (
         lang_inst = format_language_instruction(self.config.output_language)
 
         for i, section in enumerate(sections):
-            section_id = self._sanitize_slug(section.id, index=i)
+            section_id = self._unique_slug(section.id, index=i)
             section_title = section.title or f"Part {i+1}"
             section_summary = section.summary
             focus_modules = section.focus_modules
@@ -1423,7 +1461,7 @@ _GUIDE_PREFIXES = (
             response = await self._call_llm_with_fallback(section_prompt)
             content = self._parse_guide_response(response)
 
-            out_path = self._safe_output_path(f"beginners-guide-{section_id}.md")
+            out_path = self._safe_output_path(f"guide-beginners-guide-{section_id}.md")
             file_manager.save_text(content, out_path)
             output_files.append(out_path)
 
@@ -1441,7 +1479,7 @@ _GUIDE_PREFIXES = (
         # ── Phase C: parent page ──────────────────────────────────────
         logger.info("📝 Beginner's Guide — Phase C: parent page")
         chapters_list = "\n".join(
-            f"- [{s.title}](beginners-guide-{self._sanitize_slug(s.id, index=i)}.md): {s.summary}"
+            f"- [{s.title}](beginners-guide-{self._unique_slug(s.id, index=i)}.md): {s.summary}"
             for i, s in enumerate(sections)
         )
         parent_prompt = BEGINNER_PARENT_PROMPT.format(
@@ -1452,11 +1490,14 @@ _GUIDE_PREFIXES = (
         )
         parent_response = await self._call_llm_with_fallback(parent_prompt)
         parent_content = self._parse_guide_response(parent_response)
-        parent_path = os.path.join(self.working_dir, "beginners-guide.md")
+        parent_path = os.path.join(self.working_dir, "guide-beginners-guide.md")
         file_manager.save_text(parent_content, parent_path)
         output_files.insert(0, parent_path)
 
-        self._update_cache("beginner_guide", gen_doc_files, output_files)
+        self._update_cache(
+            "beginner_guide", gen_doc_files, output_files,
+            extra_salt=module_tree_hash,
+        )
         logger.info(f"✓ Beginner's Guide complete: {len(sections)} sections")
 
     @staticmethod
@@ -1571,7 +1612,7 @@ _LANG_BUILD_GUIDES = {
             BUILD_ANALYSIS_PROMPT, format_language_instruction,
         )
 
-        output_path = self._safe_output_path("build-and-organization.md")
+        output_path = self._safe_output_path("guide-build-and-organization.md")
         repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
 
         # Collect build files
@@ -1579,20 +1620,37 @@ _LANG_BUILD_GUIDES = {
             "Makefile", "GNUmakefile", "makefile", "CMakeLists.txt",
             "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt",
             "package.json", "tsconfig.json", "webpack.config.js", "vite.config.ts",
-            "Cargo.toml", "go.mod", "go.sum",
+            "Cargo.toml", "go.mod",
             "pom.xml", "build.gradle", "build.gradle.kts",
             "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
             ".github/workflows/ci.yml", ".github/workflows/ci.yaml",
         ]
+        # Lock files are auto-generated and bloat the prompt — exclude them
+        _LOCK_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+                       "Cargo.lock", "poetry.lock", "Pipfile.lock", "go.sum"}
+        MAX_BUILD_FILE_CHARS = 20000  # per file
+
         build_files_content = []
         input_files = []
         for name in build_file_names:
+            if os.path.basename(name) in _LOCK_FILES:
+                continue
             p = os.path.join(self.config.repo_path, name)
             if os.path.exists(p):
                 content = self._read_file_safe(p)
                 if content:
+                    if len(content) > MAX_BUILD_FILE_CHARS:
+                        content = content[:MAX_BUILD_FILE_CHARS] + "\n... (truncated)"
                     build_files_content.append(f"--- {name} ---\n{content}")
                     input_files.append(p)
+
+        # Also hash component source files (design §4.2 requirement)
+        component_source_files = sorted({
+            getattr(n, "file_path", "")
+            for n in self.components.values()
+            if getattr(n, "file_path", "")
+        })
+        input_files.extend(f for f in component_source_files if f not in input_files)
 
         if not self._should_regenerate("build_analysis", input_files):
             logger.info("✓ build-and-organization.md is up to date (cache hit)")
@@ -1717,9 +1775,13 @@ git commit -m "feat(guides): implement build & code organization analysis"
                 lines.append(f"  {comp_id} → {', '.join(sorted(deps))}")
         return "\n".join(lines) if lines else "(no dependencies found)"
 
-    def _read_component_source(self, comp_ids: List[str]) -> str:
-        """Read full source code for given component IDs."""
+    def _read_component_source(
+        self, comp_ids: List[str], max_tokens: int = 30000
+    ) -> str:
+        """Read source code for given component IDs, truncated to max_tokens."""
+        from codewiki.src.be.utils import count_tokens
         parts = []
+        total = 0
         seen_files = set()
         for cid in comp_ids:
             node = self.components.get(cid)
@@ -1728,15 +1790,29 @@ git commit -m "feat(guides): implement build & code organization analysis"
             fp = getattr(node, "file_path", "")
             if fp and fp not in seen_files:
                 seen_files.add(fp)
-                content = self._read_file_safe(fp)
+                # Prefer node source_code (AST-extracted) over full file
+                content = getattr(node, "source_code", "") or self._read_file_safe(fp)
                 if content:
+                    chunk_tokens = count_tokens(content)
+                    if total + chunk_tokens > max_tokens:
+                        remaining = max_tokens - total
+                        if remaining > 500:
+                            # Truncate this file
+                            content = content[:remaining * 4] + "\n... (truncated)"
+                        else:
+                            logger.debug(
+                                f"Skipping {fp}: would exceed max_tokens ({total}/{max_tokens})"
+                            )
+                            continue
                     rel = getattr(node, "relative_path", fp)
                     parts.append(f"--- {rel} ---\n{content}")
+                    total += count_tokens(content)
         return "\n\n".join(parts)
 
-    def _find_test_files(self, comp_ids: List[str]) -> str:
-        """Find and read test files related to the given components."""
-        # Collect file stems from component paths
+    def _find_test_file_paths(self, comp_ids) -> List[str]:
+        """Return paths of test files related to comp_ids (for hashing)."""
+        if isinstance(comp_ids, str):
+            comp_ids = [comp_ids]
         stems = set()
         for cid in comp_ids:
             node = self.components.get(cid)
@@ -1745,25 +1821,35 @@ git commit -m "feat(guides): implement build & code organization analysis"
                 stem = Path(rel).stem
                 if stem:
                     stems.add(stem)
-
-        # Scan for test files matching those stems
-        test_dirs = ["tests", "test", "spec"]
-        parts = []
-        for td in test_dirs:
+        paths = []
+        for td in ("tests", "test", "spec"):
             test_dir = os.path.join(self.config.repo_path, td)
             if not os.path.isdir(test_dir):
                 continue
-            for fname in os.listdir(test_dir):
-                if not fname.endswith(".py"):
+            for fname in sorted(os.listdir(test_dir)):
+                if any(stem in fname for stem in stems):
+                    paths.append(os.path.join(test_dir, fname))
+        return paths
+
+    def _find_test_files(
+        self, comp_ids: List[str], max_tokens: int = 15000
+    ) -> str:
+        """Find and read test files, truncated to max_tokens."""
+        from codewiki.src.be.utils import count_tokens
+        paths = self._find_test_file_paths(comp_ids)
+        parts = []
+        total = 0
+        for full in paths:
+            content = self._read_file_safe(full)
+            if content:
+                chunk_tokens = count_tokens(content)
+                if total + chunk_tokens > max_tokens:
+                    logger.debug(f"Skipping test {full}: would exceed max_tokens")
                     continue
-                # Match test_<stem>.py or <stem>_test.py
-                for stem in stems:
-                    if stem in fname:
-                        full = os.path.join(test_dir, fname)
-                        content = self._read_file_safe(full)
-                        if content:
-                            parts.append(f"--- {td}/{fname} ---\n{content}")
-                        break
+                td = os.path.basename(os.path.dirname(full))
+                fname = os.path.basename(full)
+                parts.append(f"--- {td}/{fname} ---\n{content}")
+                total += chunk_tokens
         return "\n\n".join(parts)
 
     def _build_dependency_edges(self, comp_ids: List[str]) -> str:
@@ -1802,13 +1888,17 @@ git commit -m "feat(guides): implement build & code organization analysis"
 
         repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
 
-        # Hash check: use all component source files
-        source_files = list({
+        # Hash check: component source files + test files (design §4.2)
+        source_files = sorted({
             getattr(n, "file_path", "")
             for n in self.components.values()
             if getattr(n, "file_path", "")
         })
-        if not self._should_regenerate("algorithm_deepdive", source_files):
+        test_files = sorted({
+            t for comp_id in self.components
+            for t in self._find_test_file_paths(comp_id)
+        })
+        if not self._should_regenerate("algorithm_deepdive", source_files + test_files):
             logger.info("✓ Core Algorithms pages are up to date (cache hit)")
             return
 
@@ -1826,12 +1916,10 @@ git commit -m "feat(guides): implement build & code organization analysis"
         try:
             algo_data = AlgorithmListSchema(**raw_algo)
         except ValidationError as e:
-            logger.warning(f"Algorithm list validation failed: {e}")
-            return
+            raise ValueError(f"Algorithm list validation failed: {e}")
         algorithms = algo_data.algorithms
         if not algorithms:
-            logger.warning("No core algorithms identified, skipping")
-            return
+            raise ValueError("No core algorithms identified by LLM")
 
         logger.info(
             f"📝 Core Algorithms — Phase B: generating {len(algorithms)} deep-dives"
@@ -1842,7 +1930,7 @@ git commit -m "feat(guides): implement build & code organization analysis"
         output_files: List[str] = [None] * len(algorithms)  # preserve order
 
         async def _generate_one_algo(idx: int, algo: AlgorithmEntry):
-            algo_id = self._sanitize_slug(algo.id, index=idx)
+            algo_id = self._unique_slug(algo.id, index=idx)
             algo_title = algo.title or f"Algorithm {idx+1}"
             related = algo.related_components
 
@@ -1858,7 +1946,7 @@ git commit -m "feat(guides): implement build & code organization analysis"
 
             response = await self._call_llm_with_fallback(dd_prompt)
             content = self._parse_guide_response(response)
-            out_path = self._safe_output_path(f"core-algorithms-{algo_id}.md")
+            out_path = self._safe_output_path(f"guide-core-algorithms-{algo_id}.md")
             file_manager.save_text(content, out_path)
             output_files[idx] = out_path
             logger.info(f"  ✓ Algorithm {idx+1}/{len(algorithms)}: {algo_title}")
@@ -1871,7 +1959,7 @@ git commit -m "feat(guides): implement build & code organization analysis"
         # ── Phase C: parent page ──────────────────────────────────────
         logger.info("📝 Core Algorithms — Phase C: parent page")
         algos_list = "\n".join(
-            f"- [{a.title}](core-algorithms-{self._sanitize_slug(a.id, index=i)}.md): {a.summary}"
+            f"- [{a.title}](core-algorithms-{self._unique_slug(a.id, index=i)}.md): {a.summary}"
             for i, a in enumerate(algorithms)
         )
         parent_prompt = ALGORITHM_PARENT_PROMPT.format(
@@ -1881,11 +1969,11 @@ git commit -m "feat(guides): implement build & code organization analysis"
         )
         parent_response = await self._call_llm_with_fallback(parent_prompt)
         parent_content = self._parse_guide_response(parent_response)
-        parent_path = os.path.join(self.working_dir, "core-algorithms.md")
+        parent_path = os.path.join(self.working_dir, "guide-core-algorithms.md")
         file_manager.save_text(parent_content, parent_path)
         output_files.insert(0, parent_path)
 
-        self._update_cache("algorithm_deepdive", source_files, output_files)
+        self._update_cache("algorithm_deepdive", source_files + test_files, output_files)
         logger.info(f"✓ Core Algorithms complete: {len(algorithms)} deep-dives")
 ```
 
@@ -1913,7 +2001,7 @@ from unittest.mock import patch, AsyncMock
 
 import pytest
 
-from codewiki.src.be.guide_generator import GuideGenerator, _PROMPT_VERSION
+from codewiki.src.be.guide_generator import GuideGenerator, _PROMPT_VERSIONS
 
 
 def test_sanitize_slug_strips_unsafe_chars():
@@ -1940,7 +2028,7 @@ def test_safe_output_path_rejects_traversal():
             working_dir=wd,
         )
         # Normal filename should work
-        p = gen._safe_output_path("getting-started.md")
+        p = gen._safe_output_path("guide-getting-started.md")
         assert wd in p
 
         # Path traversal should raise
@@ -2084,10 +2172,10 @@ existing Overview + module_tree nav with a structured approach:
 
             # 2. Guide pages (fixed order, only if files exist)
             guide_pages = [
-                ("getting-started", "Get Started"),
-                ("beginners-guide", "Beginner's Guide"),
-                ("build-and-organization", "Build & Code Organization"),
-                ("core-algorithms", "Core Algorithms"),
+                ("guide-getting-started", "Get Started"),
+                ("guide-beginners-guide", "Beginner's Guide"),
+                ("guide-build-and-organization", "Build & Code Organization"),
+                ("guide-core-algorithms", "Core Algorithms"),
             ]
             for slug, label in guide_pages:
                 md_file = os.path.join(docs_dir, f"{slug}.md")
@@ -2162,47 +2250,45 @@ Append to `tests/test_guide_generator.py`:
 
 ```python
 def test_static_site_guide_navigation():
-    """Guide pages appear in static site navigation HTML."""
-    import importlib
-    static_gen = importlib.import_module("codewiki.cli.static_generator")
+    """Guide pages appear in generated static HTML navigation."""
+    from codewiki.cli.static_generator import StaticSiteGenerator
 
-    with tempfile.TemporaryDirectory() as docs_dir:
-        # Create a minimal module_tree
-        module_tree = {"name": "root", "children": []}
+    with tempfile.TemporaryDirectory() as tmp:
+        docs_dir = Path(tmp)
 
-        # Create guide .md stubs so navigation detects them
-        for slug in ("getting-started", "beginners-guide",
-                      "build-and-organization", "core-algorithms"):
-            Path(os.path.join(docs_dir, f"{slug}.md")).write_text(
+        # Minimal module_tree.json so nav is built
+        (docs_dir / "module_tree.json").write_text('{"main": {}}', encoding="utf-8")
+
+        # overview.md is required for index.html
+        (docs_dir / "overview.md").write_text("# Overview\nHello", encoding="utf-8")
+
+        # Guide .md stubs
+        for slug in ("guide-getting-started", "guide-beginners-guide",
+                      "guide-build-and-organization", "guide-core-algorithms"):
+            (docs_dir / f"{slug}.md").write_text(
                 f"# {slug}\nPlaceholder", encoding="utf-8"
             )
-
-        # Create a beginner sub-page to test sub-nav
-        Path(os.path.join(docs_dir, "beginners-guide-setup.md")).write_text(
+        # Sub-page
+        (docs_dir / "guide-beginners-guide-setup.md").write_text(
             "# Setup\nPlaceholder", encoding="utf-8"
         )
 
-        # Build navigation HTML for the overview page
-        gen = static_gen.StaticSiteGenerator(docs_dir)
-        nav_html = gen._build_page_nav(
-            module_tree=module_tree,
-            html_name="index.html",
-            docs_dir=docs_dir,
-            resolved_hrefs={},
-        )
+        # Run static generation (writes .html files)
+        gen = StaticSiteGenerator()
+        gen.generate(docs_dir)
 
-        # Guide links must appear
-        assert 'href="getting-started.html"' in nav_html
-        assert 'href="beginners-guide.html"' in nav_html
-        assert 'href="build-and-organization.html"' in nav_html
-        assert 'href="core-algorithms.html"' in nav_html
+        # Read the generated index.html and verify guide nav
+        index_html = (docs_dir / "index.html").read_text(encoding="utf-8")
 
-        # Sub-page link must appear
-        assert 'href="beginners-guide-setup.html"' in nav_html
+        assert 'href="guide-getting-started.html"' in index_html
+        assert 'href="guide-beginners-guide.html"' in index_html
+        assert 'href="guide-build-and-organization.html"' in index_html
+        assert 'href="guide-core-algorithms.html"' in index_html
+        assert 'href="guide-beginners-guide-setup.html"' in index_html
 
         # Fixed ordering: getting-started before core-algorithms
-        gs_pos = nav_html.index("getting-started.html")
-        ca_pos = nav_html.index("core-algorithms.html")
+        gs_pos = index_html.index("guide-getting-started.html")
+        ca_pos = index_html.index("guide-core-algorithms.html")
         assert gs_pos < ca_pos, "Guide navigation order must follow definition order"
 ```
 
@@ -2220,6 +2306,103 @@ git commit -m "test(guides): add static site navigation integration test"
 
 ---
 
+### Task 9c: Add guide navigation to `--github-pages` viewer template
+
+**Files:**
+- Modify: `codewiki/cli/html_generator.py`
+- Modify: `codewiki/templates/github_pages/viewer_template.html`
+
+**Step 1: Generate GUIDE_PAGES JSON in html_generator.py**
+
+In `html_generator.py`, in the `generate()` method, after computing `docs_base_path`
+and before building `replacements`, scan `docs_dir` for guide files and build a
+JSON structure:
+
+```python
+        # Build guide pages list for navigation
+        guide_pages_json = "[]"
+        if docs_dir:
+            guide_defs = [
+                ("guide-getting-started", "Get Started"),
+                ("guide-beginners-guide", "Beginner's Guide"),
+                ("guide-build-and-organization", "Build & Code Organization"),
+                ("guide-core-algorithms", "Core Algorithms"),
+            ]
+            guide_entries = []
+            for slug, label in guide_defs:
+                md_path = docs_dir / f"{slug}.md"
+                if not md_path.exists():
+                    continue
+                entry = {"slug": slug, "label": label, "subPages": []}
+                # Find sub-pages (e.g. guide-beginners-guide-setup.md)
+                sub_prefix = slug + "-"
+                for sub_file in sorted(docs_dir.glob(f"{sub_prefix}*.md")):
+                    sub_slug = sub_file.stem
+                    sub_label = sub_slug[len(sub_prefix):].replace("-", " ").title()
+                    entry["subPages"].append({"slug": sub_slug, "label": sub_label})
+                guide_entries.append(entry)
+            guide_pages_json = json.dumps(guide_entries, indent=2)
+```
+
+Add `"{{GUIDE_PAGES_JSON}}"`: `guide_pages_json` to the `replacements` dict.
+
+**Step 2: Update viewer_template.html**
+
+In the `<script>` section after `const MODULE_TREE = ...`, add:
+
+```javascript
+        const GUIDE_PAGES = {{GUIDE_PAGES_JSON}};
+```
+
+In the `buildNavigation()` function, insert guide nav items BEFORE the module tree
+loop (`for (const [key, data] of Object.entries(MODULE_TREE))`):
+
+```javascript
+        function buildNavigation() {
+            const nav = document.getElementById('navigation');
+            let html = '';
+
+            // Guide pages (fixed order, before module tree)
+            for (const guide of GUIDE_PAGES) {
+                html += `<div class="nav-section">`;
+                html += `<div class="nav-item" data-file="${guide.slug}.md">
+                    📖 ${guide.label}
+                </div>`;
+                if (guide.subPages && guide.subPages.length > 0) {
+                    for (const sub of guide.subPages) {
+                        html += `<div class="nav-subsection">
+                            <div class="nav-item" data-file="${sub.slug}.md">
+                                ${sub.label}
+                            </div>
+                        </div>`;
+                    }
+                }
+                html += `</div>`;
+            }
+
+            // Module tree (existing)
+            for (const [key, data] of Object.entries(MODULE_TREE)) {
+                html += buildNavItem(key, data, 0);
+            }
+
+            nav.innerHTML = html;
+            // ... existing click handlers unchanged
+```
+
+**Step 3: Verify**
+
+Run: `cd /home/dengqi/Source/langs/python/CodeWiki && python -c "from codewiki.cli.html_generator import HTMLGenerator; print('import OK')"`
+Expected: `import OK`
+
+**Step 4: Commit**
+
+```bash
+git add codewiki/cli/html_generator.py codewiki/templates/github_pages/viewer_template.html
+git commit -m "feat(guides): add guide navigation to --github-pages viewer"
+```
+
+---
+
 ### Task 10: Final integration test
 
 **Step 1: Run the full test suite**
@@ -2232,7 +2415,40 @@ Expected: All tests PASS (170+ existing + 9 new)
 Run: `cd /home/dengqi/Source/langs/python/CodeWiki && python -c "from codewiki.src.be.guide_generator import GuideGenerator; from codewiki.src.be.repo_docs_collector import RepoDocsCollector; print('imports OK')"`
 Expected: `imports OK`
 
-**Step 3: Commit any final fixups**
+**Step 3: Add acceptance test for JSON failure capture**
+
+Append to `tests/test_guide_generator.py`:
+
+```python
+@pytest.mark.asyncio
+async def test_json_validation_failure_is_reported_as_failed():
+    """JSON validation failure must appear as FAILED, not success."""
+    with tempfile.TemporaryDirectory() as wd:
+        gen = GuideGenerator(
+            config=_minimal_config(),
+            components={},
+            module_tree={},
+            working_dir=wd,
+        )
+        gen.docs_bundle = gen.collector.collect("/tmp", None, {})
+
+        # Mock LLM to return invalid JSON for beginner outline
+        async def bad_llm(prompt):
+            return "this is not json"
+
+        gen._call_llm_with_fallback = bad_llm
+
+        with patch.object(gen, '_regenerate_overview', new_callable=AsyncMock):
+            await gen.run()
+
+        # Beginner guide should be FAILED, not success
+        assert "FAILED" in gen._results.get("generate_beginner_guide", "")
+```
+
+Run: `cd /home/dengqi/Source/langs/python/CodeWiki && python -m pytest tests/test_guide_generator.py::test_json_validation_failure_is_reported_as_failed -v`
+Expected: PASS
+
+**Step 4: Commit any final fixups**
 
 ```bash
 git add -u

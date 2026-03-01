@@ -147,19 +147,19 @@ GUIDE_CACHE_FILENAME = "_guide_cache.json"
 {
     "getting_started": {
         "input_hash": "abc123...",    # combined hash of all input files + _PROMPT_VERSION
-        "output_files": ["getting-started.md"]
+        "output_files": ["guide-getting-started.md"]
     },
     "beginner_guide": {
         "input_hash": "def456...",
-        "output_files": ["beginners-guide.md", "beginners-guide-part1.md", ...]
+        "output_files": ["guide-beginners-guide.md", "guide-beginners-guide-part1.md", ...]
     },
     "build_analysis": {
         "input_hash": "ghi789...",
-        "output_files": ["build-and-organization.md"]
+        "output_files": ["guide-build-and-organization.md"]
     },
     "algorithm_deepdive": {
         "input_hash": "jkl012...",
-        "output_files": ["core-algorithms.md", "core-algorithms-louvain.md", ...]
+        "output_files": ["guide-core-algorithms.md", "guide-core-algorithms-louvain.md", ...]
     }
 }
 ```
@@ -173,14 +173,22 @@ Input hash includes per guide type:
 | **build_analysis** | Build/config files, component source files, prompt version |
 | **algorithm_deepdive** | All component source files, test files, prompt version |
 
-A `_PROMPT_VERSION` constant (bumped on prompt edits) is mixed into every hash
-so that prompt changes force regeneration even if source data is unchanged.
+Per-guide `_PROMPT_VERSIONS` dict (keyed by guide type) is mixed into each
+hash so that prompt changes force regeneration only for the affected guide.
 
 ```python
-_PROMPT_VERSION = "v1"   # bump on any prompt template change
+_PROMPT_VERSIONS = {
+    "getting_started": "v1",
+    "beginner_guide": "v1",
+    "build_analysis": "v1",
+    "algorithm_deepdive": "v1",
+}
 
-def _should_regenerate(self, guide_type: str, input_files: List[str]) -> bool:
-    current_hash = self._compute_combined_hash(input_files, extra=_PROMPT_VERSION)
+def _should_regenerate(self, guide_type: str, input_files: List[str],
+                       extra_salt: str = "") -> bool:
+    version = _PROMPT_VERSIONS.get(guide_type, "v1")
+    extra = f"{version}:{extra_salt}" if extra_salt else version
+    current_hash = self._compute_combined_hash(input_files, extra=extra)
     cached = self.cache.get(guide_type, {})
     if cached.get("input_hash") == current_hash:
         return not all(
@@ -243,14 +251,15 @@ def _sanitize_slug(raw: str, index: int = 0) -> str:
 ```
 
 Every filename constructed from an LLM slug MUST:
-1. Pass through `_sanitize_slug(raw, index=i)` with the loop index
-2. Be validated with `assert_safe_path(working_dir, output_path)`
+1. Pass through `_unique_slug(raw, index=i)` — which sanitizes AND deduplicates
+   against a `_used_slugs` set (appending `-2`, `-3` on collision)
+2. Be validated with `assert_safe_path(Path(working_dir), Path(output_path))`
 
 ### 4.5 JSON Schema Validation
 
 LLM JSON outputs (beginner guide outline, algorithm identification) are validated
-with pydantic models.  On validation failure, log a warning and use a fallback
-empty list rather than crashing.
+with pydantic models.  On validation failure, raise `ValueError` so
+`_safe_generate` records the guide as FAILED (see §4.7).
 
 ```python
 from pydantic import BaseModel, Field
@@ -313,17 +322,23 @@ Guide generation uses the same concurrency primitives as the MODULE doc pipeline
 ### 4.7 Failure Mode & Generation Report
 
 Individual guide generation failures do NOT abort the pipeline.  Each guide runs
-inside a try/except that logs a warning and continues to the next guide.  This
-ensures one bad LLM response doesn't prevent the other guides from generating.
+inside `_safe_generate()` (try/except) that logs a warning and continues to the
+next guide.  This ensures one bad LLM response doesn't prevent others from
+generating.
+
+**Important:** JSON validation / schema failures (empty outline, invalid JSON)
+MUST raise `ValueError` rather than silently return.  A silent return would be
+marked "success" by `_safe_generate`, producing a false-positive report.
+Only cache-hit early returns use `return` (these are legitimately successful).
 
 At the end of `run()`, a summary report is logged listing each guide's status:
 
 ```
 📖 Guide generation report:
-  ✓ Getting Started       → getting-started.md
-  ✓ Beginner's Guide      → beginners-guide.md (4 sections)
+  ✓ Getting Started       → guide-getting-started.md
+  ✓ Beginner's Guide      → guide-beginners-guide.md (4 sections)
   ✗ Build & Code Org      → SKIPPED (LLM call failed: timeout)
-  ✓ Core Algorithms       → core-algorithms.md (3 deep-dives)
+  ✓ Core Algorithms       → guide-core-algorithms.md (3 deep-dives)
 ```
 
 This ensures skipped/failed guides are immediately visible to the user, not
@@ -352,6 +367,11 @@ This provides the same resilience guarantees as the agent framework:
 - **Retry**: 4 attempts per model with exponential backoff (via `call_llm()`)
 - **Fallback**: main_model → fallback_model(s) → long_context_model
 - **Long-context**: auto-switch when prompt exceeds `long_context_threshold`
+- **Prompt size guards**: `_read_component_source(max_tokens=30000)` and
+  `_find_test_files(max_tokens=15000)` truncate per-file content when the
+  aggregate exceeds limits.  Build analysis filters lock files
+  (`package-lock.json`, `Cargo.lock`, etc.) and caps individual build files
+  at 20 000 characters.
 
 ## 5. Guide Type Details
 
@@ -362,7 +382,7 @@ This provides the same resilience guarantees as the agent framework:
 - CLI entry file content + Config class source
 - Generated overview.md
 
-**Execution:** Single LLM call → `getting-started.md`
+**Execution:** Single LLM call → `guide-getting-started.md`
 
 **Prompt requirements:**
 1. Prerequisites — runtime, tools, API keys
@@ -412,7 +432,7 @@ interaction.
    - Full text of focus_modules' generated docs
    - `select_relevant()` repo docs
 
-3. **Phase C — Parent page:** Generate `beginners-guide.md` with section links and intro.
+3. **Phase C — Parent page:** Generate `guide-beginners-guide.md` with section links and intro.
 
 **Writing style requirements:**
 - Everyday analogies for every technical concept
@@ -437,7 +457,7 @@ interaction.
 - module_tree + relevant module docs
 
 **Execution:** Single LLM call with dynamically-injected language-specific guides →
-`build-and-organization.md`
+`guide-build-and-organization.md`
 
 **Prompt requirements:**
 1. Project Directory Structure — Mermaid graph of top-level directory relationships
@@ -491,14 +511,14 @@ interaction.
    }
    ```
 
-2. **Phase B — Per-algorithm generation:** Serial generation, each prompt includes:
+2. **Phase B — Per-algorithm generation:** Parallel via `asyncio.gather` + `Semaphore`.  Each prompt includes:
    - Full algorithm list (global perspective)
    - Related components' full source code
    - Related test files
    - Related module docs
    - Dependency graph edges for those components
 
-3. **Phase C — Parent page:** `core-algorithms.md` with algorithm list, categories,
+3. **Phase C — Parent page:** `guide-core-algorithms.md` with algorithm list, categories,
    inter-relationships.
 
 **Writing style requirements:**
@@ -537,26 +557,67 @@ All guide types share these Mermaid rules:
 - Prefer `flowchart` / `sequenceDiagram`; use `graph TD` for complex architecture
 - Use `classDiagram` for concept relationships, `stateDiagram` for state machines
 
-## 8. Static Site Integration
+## 8. HTML Generation Integration
 
-The static site generator (`cli/static_generator.py`) needs to be updated to:
-1. Recognize guide pages by filename prefix (e.g. `getting-started`, `beginners-guide-*`,
-   `build-and-organization`, `core-algorithms-*`)
+Guide markdown files live in the same `output_dir` as MODULE docs.  Both
+`--static` and `--github-pages` run **after** all markdown (MODULE + guide) is
+generated (see `doc_generator.py:162-168`), so no extra invocation is needed.
+
+### 8.1 `--static` mode (`cli/static_generator.py`)
+
+The static site generator scans `output_dir/*.md` and converts each to HTML.
+Guide files are automatically picked up.  Navigation update:
+1. Recognize guide pages by `guide-` filename prefix (e.g. `guide-getting-started`,
+   `guide-beginners-guide-*`, `guide-build-and-organization`, `guide-core-algorithms-*`)
 2. Place them in the correct navigation order: Overview → Get Started → Beginner's Guide
    (with sub-pages) → Build & Code Org → Core Algorithms (with sub-pages) → MODULE docs
 3. Generate proper navigation hierarchy for multi-page guides
+
+### 8.2 `--github-pages` mode (`cli/html_generator.py` + `viewer_template.html`)
+
+The viewer template generates a single `index.html` that loads `.md` files via JS
+and builds navigation from `MODULE_TREE`.  Since guide files are NOT in
+`module_tree.json`, the template's `buildNavigation()` function must be extended:
+
+1. After the Overview nav item, inject guide links by scanning `docs_dir` for
+   `guide-*.md` files at generation time
+2. Embed a `GUIDE_PAGES` JSON array in the template (same approach as `MODULE_TREE`)
+3. `buildNavigation()` renders guide nav items before module tree items
+
+```javascript
+// Injected by html_generator.py
+const GUIDE_PAGES = {{GUIDE_PAGES_JSON}};
+// e.g. [{"slug":"guide-getting-started","label":"Get Started"}, ...]
+
+// In buildNavigation(), before module tree loop:
+for (const guide of GUIDE_PAGES) {
+    html += `<div class="nav-section">
+        <div class="nav-item" data-file="${guide.slug}.md">
+            📖 ${guide.label}
+        </div>`;
+    // Sub-pages
+    for (const sub of (guide.subPages || [])) {
+        html += `<div class="nav-subsection">
+            <div class="nav-item" data-file="${sub.slug}.md">
+                ${sub.label}
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+}
+```
 
 ## 9. Output Files
 
 ```
 output/docs/{repo}-docs/
 ├── overview.md                          ← augmented with guide links
-├── getting-started.md                   ← NEW
-├── beginners-guide.md                   ← NEW parent
-├── beginners-guide-{section-id}.md      ← NEW sub-pages
-├── build-and-organization.md            ← NEW
-├── core-algorithms.md                   ← NEW parent
-├── core-algorithms-{algorithm-id}.md    ← NEW sub-pages
+├── guide-getting-started.md                   ← NEW
+├── guide-beginners-guide.md                   ← NEW parent
+├── guide-beginners-guide-{section-id}.md ← NEW sub-pages
+├── guide-build-and-organization.md            ← NEW
+├── guide-core-algorithms.md                   ← NEW parent
+├── guide-core-algorithms-{algorithm-id}.md ← NEW sub-pages
 ├── _guide_cache.json                    ← NEW cache
 ├── module-a.md                          ← existing
 ├── module-b.md                          ← existing
