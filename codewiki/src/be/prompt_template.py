@@ -319,38 +319,151 @@ Reasoning at first, then return the list of relative paths in JSON format.
 from typing import Dict, Any
 from codewiki.src.utils import file_manager
 
-# ── HLS / C / C++ specialised documentation guidance ──────────────────────────
-# Injected into the user prompt when HLS nodes are detected in the module,
-# instructing the LLM to cover the four pillars unique to hardware design.
-HLS_CPP_ANALYSIS_GUIDE = """
-<HLS_C_CPP_ANALYSIS_GUIDE>
-This module contains Vitis HLS / C++ / C components. When writing the documentation,
-explicitly address the following four pillars — they are the most important things a
-hardware engineer joining the project needs to understand:
+# ── C / C++ documentation guide ───────────────────────────────────────────────
+# Injected whenever the module contains C or C++ source files.
+# Covers the pillars that experienced C/C++ engineers consider first when
+# reading unfamiliar code, and that are almost never documented well enough.
+CPP_ANALYSIS_GUIDE = """
+<C_CPP_ANALYSIS_GUIDE>
+This module contains C / C++ components. When writing the documentation,
+explicitly address the following points — these are the aspects most likely to be
+missing from code comments yet most critical for a new contributor to understand:
 
-**1. Data Flow**
-- Identify every port and its interface protocol: AXI4-Stream (`hls::stream` / `#pragma HLS INTERFACE axis`), AXI4-Full memory-mapped (`m_axi`), AXI4-Lite control (`s_axilite`).
-- Trace how data moves end-to-end: from which source port/buffer → through which intermediate FIFOs or on-chip buffers → to which destination port, and in what order.
-- Note burst-vs-streaming access patterns and their throughput implications (e.g. a 512-bit wide m_axi burst amortises DRAM latency; a `hls::stream` decouples producer and consumer).
+**1. Memory Ownership Model**
+- For each pointer, buffer, or resource handle: state who *allocates* it, who
+  *owns* it (responsible for freeing), and who *borrows* it (non-owning reference).
+- Explain the RAII strategy in use: raw `new`/`delete`, `unique_ptr` (exclusive
+  ownership), `shared_ptr` (shared ownership with reference counting), or arena /
+  pool allocation. Explain *why* that choice was made for this resource.
+- Call out any places where ownership is transferred (moved) vs. shared, and where
+  a caller must guarantee a pointer remains valid across a call.
+- Note buffer size contracts: how large a buffer is expected, who enforces bounds,
+  and where overrun would be silently undefined behaviour.
 
-**2. Parallelism (Spatial Concurrency — `#pragma HLS DATAFLOW`)**
-- Identify every `DATAFLOW` region: enumerate which sub-functions or loop bodies execute as independent concurrent pipeline stages.
-- Draw the producer-consumer topology in prose ("A fills FIFO₁, B drains FIFO₁ while writing FIFO₂, C drains FIFO₂").
-- Explain what concurrency buys: does it double throughput? Hide a memory-access bottleneck? Allow overlapping compute and I/O?
-- Note the depth of intermediate FIFOs / `hls::stream` channels and whether depth was chosen to prevent stalls.
+**2. Object Lifetime and Value Semantics (C++)**
+- Identify which types follow the Rule of Zero (compiler-generated specials are
+  correct), Rule of Three (destructor + copy), or Rule of Five (also move).
+- Explain copy vs. move semantics for key types: when is a deep copy made, and
+  when is ownership transferred cheaply with a move?
+- Flag any iterator, pointer, or reference invalidation risks — e.g. a `std::vector`
+  resize that silently invalidates all existing iterators / pointers into it.
+- Describe temporary lifetime and any extension via `const` references if relevant.
 
-**3. Pipeline (Temporal Concurrency — `#pragma HLS PIPELINE`, `UNROLL`)**
-- For each pipelined loop, state the target Initiation Interval (II) and what sets the achieved II (e.g. a read-after-write dependency, a shared resource, or available bandwidth).
-- Explain throughput in concrete terms: "with II=1 and a 300 MHz clock this kernel processes one sample every 3.3 ns".
-- Describe any `#pragma HLS UNROLL` (full or factor-N) and how it trades area for a lower II.
-- Flag any `#pragma HLS ARRAY_PARTITION` or `ARRAY_RESHAPE` pragmas used specifically to eliminate memory-port bottlenecks that would increase II.
+**3. Error Handling Strategy**
+- State the error signalling convention: return codes, `errno`, exceptions,
+  `std::expected`/`std::optional`, sentinel values, or `assert`/`abort`.
+- For exception-using code: what is the exception safety guarantee of each
+  key function — *basic* (no leak, but state may change), *strong* (rollback on
+  failure), or *noexcept* (guaranteed no throw)?
+- Trace the error propagation path: where are errors detected, where are they
+  logged or transformed, and where do they surface to the caller?
+- Highlight any places where errors are silently swallowed or where precondition
+  violations would produce silent undefined behaviour rather than a clear failure.
 
-**4. Memory Model and Ownership**
-- Classify every buffer by storage: off-chip DRAM (m_axi), on-chip BRAM/URAM (local array or `ARRAY_PARTITION`), or FIFO (`hls::stream`).
-- State who *owns* each buffer: which function allocates it, who writes, and who reads — and whether access is exclusive or shared across parallel tasks.
-- Explain the `#pragma HLS INTERFACE` assignment for each argument: what hardware interface it generates, why that choice was made (e.g. `m_axi` for large off-chip tensors, `s_axilite` for scalar configuration registers, `ap_none` for compile-time constants).
-- Highlight any pointer-aliasing constraints (`restrict` keywords), false-dependency annotations, or access patterns that had to be restructured for the HLS tool to infer parallelism.
-</HLS_C_CPP_ANALYSIS_GUIDE>
+**4. Const-Correctness and Mutability Model**
+- Identify what mutable state each class or function owns and can modify.
+- Explain the const boundary: which methods are `const` (observable state does not
+  change) and which are mutating — this tells readers the data-flow at a glance.
+- Note any `mutable` members and why they are logically const but physically mutable
+  (e.g. a lazily-computed cache).
+- For C code, identify which pointer parameters are input-only (`const T*`) vs.
+  output (`T*`) vs. in-out.
+
+**5. API Contracts and Preconditions**
+- For every public function, state what the *caller must guarantee* before calling:
+  non-null pointers, valid index ranges, object initialisation order, thread
+  ownership, etc. — C/C++ rarely enforces these at runtime.
+- Identify any implicit global or thread-local state that the function reads or
+  modifies (e.g. `errno`, a singleton, a global configuration flag).
+- Flag any cases where passing an unexpected value causes undefined behaviour
+  rather than a clean error — these are especially important to document.
+- Highlight any unsigned-vs-signed comparison pitfalls, integer overflow
+  assumptions, or strict-aliasing dependencies that are silently load-bearing.
+
+**6. Concurrency and Thread Safety**
+- State which data structures or objects are safe to access concurrently from
+  multiple threads without external synchronisation, and which are not.
+- For each synchronisation primitive (mutex, `std::atomic`, condition variable,
+  spinlock): explain what invariant it protects and the lock granularity.
+- Identify any lock-ordering rules to avoid deadlock, and any lock-free or
+  wait-free paths and why they are safe.
+- If the module is single-threaded by design, say so explicitly and explain any
+  re-entrancy constraints (e.g. signal handlers, recursive calls).
+
+**7. Performance Architecture**
+- Identify the hot paths: which functions are called at high frequency or on
+  large data, and what makes them fast (or what limits them).
+- Describe data layout decisions: struct field ordering for alignment / cache-line
+  packing, array-of-structs vs. struct-of-arrays, use of `__attribute__((packed))`
+  or alignment annotations.
+- Note any inlining strategy (`inline`, `__forceinline`, link-time optimisation),
+  branch-prediction hints (`[[likely]]`, `__builtin_expect`), or SIMD/vectorisation
+  requirements that callers or compilers must honour.
+- Explain any algorithmic complexity choices that are non-obvious (e.g. why O(n²)
+  is acceptable here but O(n log n) matters there).
+</C_CPP_ANALYSIS_GUIDE>
+"""
+
+# ── HLS-specific documentation guide (addendum to CPP_ANALYSIS_GUIDE) ─────────
+# Injected in addition to CPP_ANALYSIS_GUIDE when Vitis HLS nodes are detected.
+# Covers the four hardware-design pillars unique to HLS C++ kernels.
+HLS_EXTRA_GUIDE = """
+<HLS_KERNEL_ANALYSIS_GUIDE>
+This module also contains Vitis HLS kernel components. In addition to the C/C++
+analysis above, explicitly address the following hardware-design pillars:
+
+**8. Data Flow (Hardware Port Interfaces)**
+- Identify every kernel port and its AXI protocol: AXI4-Stream (`hls::stream` /
+  `axis`) for continuous data, AXI4-Full (`m_axi`) for random-access DRAM, AXI4-Lite
+  (`s_axilite`) for scalar control registers.
+- Trace the end-to-end data path: from which source port/buffer → through which
+  intermediate on-chip FIFOs or ping-pong buffers → to which destination port,
+  and in what order transfers occur.
+- Note burst vs. streaming access patterns: a wide `m_axi` burst amortises DRAM
+  latency; an `hls::stream` decouples producer and consumer without back-pressure
+  risk when sized correctly.
+
+**9. Spatial Parallelism (`#pragma HLS DATAFLOW`)**
+- Identify every `DATAFLOW` region: list which sub-functions or loop bodies execute
+  as independent concurrent pipeline stages.
+- Describe the producer-consumer topology in prose ("A fills FIFO₁; B drains FIFO₁
+  while writing FIFO₂; C drains FIFO₂ to the output port").
+- Explain what concurrency buys: does it double throughput? Overlap I/O and compute?
+  Hide a memory-access bottleneck behind a compute stage?
+- Note the depth of intermediate `hls::stream` channels and whether that depth was
+  chosen to prevent producer stalls or to bound on-chip FIFO resource cost.
+- Explain how `#pragma HLS INLINE` and `#pragma HLS DATAFLOW` boundaries interact —
+  inlining a function into a DATAFLOW region merges its pipeline stage.
+
+**10. Temporal Parallelism (`#pragma HLS PIPELINE`, `UNROLL`, `ARRAY_PARTITION`)**
+- For each pipelined loop: state the target Initiation Interval (II) and what
+  determines the achieved II — a read-after-write dependency, a shared memory port,
+  a DSP chain, or available bandwidth.
+- Express throughput concretely: "with II=1 at 300 MHz this kernel produces one
+  output sample every 3.3 ns, sustaining 300 MSamples/s."
+- Describe `#pragma HLS UNROLL` (full or factor-N): how it replicates loop body
+  hardware to reduce II at the cost of area.
+- Explain `#pragma HLS ARRAY_PARTITION` and `ARRAY_RESHAPE`: why the array was
+  partitioned (to provide enough memory ports so II is not port-limited) and what
+  BRAM duplication it implies.
+
+**11. On-Chip Memory Model and Resource Utilisation**
+- Classify every buffer: off-chip DRAM (`m_axi`), on-chip BRAM/URAM (local array
+  or partitioned array), register (scalar or fully unrolled), or FIFO (`hls::stream`).
+- State who owns each buffer: which function writes it and which reads it, and
+  whether access is exclusive (safe for pipelining) or shared (may cause false
+  dependencies that raise II).
+- Explain the `#pragma HLS INTERFACE` choice for each argument: why `m_axi` for
+  large tensors (burst efficiency), `s_axilite` for configuration scalars (no
+  timing overhead on the data path), `ap_none` / `ap_stable` for compile-time
+  constants.
+- Highlight `restrict` keywords or `#pragma HLS DEPENDENCE` annotations that tell
+  the HLS tool two pointers cannot alias — without these the tool assumes the worst
+  and serialises accesses, killing pipeline efficiency.
+- Discuss area-throughput tradeoffs: which pragmas increase resource usage (UNROLL,
+  ARRAY_PARTITION, large FIFO depths) and which reduce it (DATAFLOW allowing smaller
+  ping-pong buffers vs. one large flat buffer).
+</HLS_KERNEL_ANALYSIS_GUIDE>
 """
 
 EXTENSION_TO_LANGUAGE = {
@@ -530,27 +643,41 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
             + "\n</DEPENDENCY_GRAPH>\n"
         )
 
-    # Detect whether any component in this module is an HLS / C / C++ node.
-    # Criteria: has HLS pragmas, is marked as an HLS kernel, or is an hls_top / hls_project node.
-    _hls_types = {"hls_top", "hls_project", "kernel_instance"}
-    _cpp_langs = {".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx", ".tcl"}
-    _is_hls_module = any(
-        getattr(components.get(cid), "is_hls_kernel", False)
-        or getattr(components.get(cid), "hls_pragmas", None)
-        or (components.get(cid) and components[cid].component_type in _hls_types)
-        or any(
-            components.get(cid) and components[cid].relative_path.endswith(ext)
-            for ext in _cpp_langs
-        )
-        for cid in core_component_ids
-    )
-    hls_guide = HLS_CPP_ANALYSIS_GUIDE if _is_hls_module else ""
+    # ── Language-specific guide injection ────────────────────────────────────
+    # CPP_ANALYSIS_GUIDE: injected for any module with C / C++ source files.
+    # HLS_EXTRA_GUIDE: injected in addition when HLS kernel markers are present.
+    _C_CPP_EXTS = {".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx", ".c++", ".h++"}
+    _HLS_TYPES = {"hls_top", "hls_project", "kernel_instance"}
+
+    _is_cpp_module = False
+    _is_hls_module = False
+    for cid in core_component_ids:
+        node = components.get(cid)
+        if node is None:
+            continue
+        rel = node.relative_path or ""
+        ext = "." + rel.rsplit(".", 1)[-1].lower() if "." in rel else ""
+        if ext in _C_CPP_EXTS:
+            _is_cpp_module = True
+        if (
+            getattr(node, "is_hls_kernel", False)
+            or getattr(node, "hls_pragmas", None)
+            or node.component_type in _HLS_TYPES
+            or rel.endswith(".tcl")
+        ):
+            _is_hls_module = True
+
+    extra_guides = ""
+    if _is_cpp_module or _is_hls_module:
+        extra_guides += CPP_ANALYSIS_GUIDE
+    if _is_hls_module:
+        extra_guides += HLS_EXTRA_GUIDE
 
     return USER_PROMPT.format(
         module_name=module_name,
         formatted_core_component_codes=core_component_codes,
         module_tree=formatted_module_tree,
-    ) + dependency_section + hls_guide
+    ) + dependency_section + extra_guides
 
 
 
