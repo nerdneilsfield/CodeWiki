@@ -405,6 +405,7 @@
         const MODULE_TREE = {{MODULE_TREE_JSON}};
         const METADATA = {{METADATA_JSON}};
         const DOCS_BASE_PATH = '{{DOCS_BASE_PATH}}';
+        const GUIDE_PAGES = {{GUIDE_PAGES_JSON}};
         
         // Initialize marked with options
         marked.setOptions({
@@ -443,7 +444,28 @@
         function buildNavigation() {
             const nav = document.getElementById('navigation');
             let html = '';
-            
+
+            // Guide pages (fixed order, before module tree)
+            if (GUIDE_PAGES && GUIDE_PAGES.length > 0) {
+                for (const guide of GUIDE_PAGES) {
+                    html += `<div class="nav-section">`;
+                    html += `<div class="nav-item" data-file="${guide.slug}.md">
+                        📖 ${guide.label}
+                    </div>`;
+                    if (guide.subPages && guide.subPages.length > 0) {
+                        for (const sub of guide.subPages) {
+                            html += `<div class="nav-subsection">
+                                <div class="nav-item" data-file="${sub.slug}.md">
+                                    ${sub.label}
+                                </div>
+                            </div>`;
+                        }
+                    }
+                    html += `</div>`;
+                }
+            }
+
+            // Module tree (existing)
             for (const [key, data] of Object.entries(MODULE_TREE)) {
                 html += buildNavItem(key, data, 0);
             }

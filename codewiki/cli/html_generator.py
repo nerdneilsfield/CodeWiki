@@ -148,7 +148,31 @@ class HTMLGenerator:
         config_json = json.dumps(config, indent=2)
         module_tree_json = json.dumps(module_tree, indent=2)
         metadata_json = json.dumps(metadata, indent=2) if metadata else "null"
-        
+
+        # Build guide pages list for navigation
+        guide_pages_json = "[]"
+        if docs_dir:
+            guide_defs = [
+                ("guide-getting-started", "Get Started"),
+                ("guide-beginners-guide", "Beginner's Guide"),
+                ("guide-build-and-organization", "Build & Code Organization"),
+                ("guide-core-algorithms", "Core Algorithms"),
+            ]
+            guide_entries = []
+            for slug, label in guide_defs:
+                md_path = docs_dir / f"{slug}.md"
+                if not md_path.exists():
+                    continue
+                entry = {"slug": slug, "label": label, "subPages": []}
+                # Find sub-pages (e.g. guide-beginners-guide-setup.md)
+                sub_prefix = slug + "-"
+                for sub_file in sorted(docs_dir.glob(f"{sub_prefix}*.md")):
+                    sub_slug = sub_file.stem
+                    sub_label = sub_slug[len(sub_prefix):].replace("-", " ").title()
+                    entry["subPages"].append({"slug": sub_slug, "label": sub_label})
+                guide_entries.append(entry)
+            guide_pages_json = json.dumps(guide_entries, indent=2)
+
         # Replace placeholders
         html_content = template_content
         replacements = {
@@ -160,6 +184,7 @@ class HTMLGenerator:
             "{{MODULE_TREE_JSON}}": module_tree_json,
             "{{METADATA_JSON}}": metadata_json,
             "{{DOCS_BASE_PATH}}": docs_base_path,
+            "{{GUIDE_PAGES_JSON}}": guide_pages_json,
         }
         
         for placeholder, value in replacements.items():
