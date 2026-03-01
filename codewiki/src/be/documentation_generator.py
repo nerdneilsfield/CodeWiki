@@ -33,6 +33,7 @@ from codewiki.src.config import (
 from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
 from codewiki.src.be.module_tree_manager import ModuleTreeManager
+from codewiki.src.be.guide_generator import GuideGenerator
 
 PARENT_DOC_HASHES_FILENAME = '_parent_doc_hashes.json'
 
@@ -705,6 +706,16 @@ class DocumentationGenerator:
 
             # Create documentation metadata
             self.create_documentation_metadata(working_dir, components, len(leaf_nodes))
+
+            # Generate guide documents (Get Started, Beginner's Guide, etc.)
+            logger.info("📖 Starting guide document generation")
+            guide_gen = GuideGenerator(
+                config=self.config,
+                components=components,
+                module_tree=module_tree,
+                working_dir=working_dir,
+            )
+            await guide_gen.run()
 
             logger.debug(f"Documentation generation completed successfully using dynamic programming!")
             logger.debug(f"Processing order: leaf modules → parent modules → repository overview")
