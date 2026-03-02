@@ -546,7 +546,7 @@ class StaticHTMLGenerator:
             if module_tree:
                 nav_html += _build_nav_html(module_tree, html_name, resolved_hrefs=resolved_hrefs)
 
-            page = _PAGE_TEMPLATE.substitute(
+            page = _PAGE_TEMPLATE.safe_substitute(
                 title=title,
                 css=_CSS,
                 repo_name=repo_name,
