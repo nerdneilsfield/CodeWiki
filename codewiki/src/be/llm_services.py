@@ -109,6 +109,41 @@ def create_openai_client(config: Config) -> OpenAI:
     )
 
 
+def _is_cf_timeout(exc: Exception) -> bool:
+    """Return True when *exc* looks like a Cloudflare 524 proxy timeout.
+
+    CF 524 responses arrive as HTTP 524 bodies containing HTML; the OpenAI
+    client surfaces them as exceptions whose string representation contains
+    the raw HTML.  We sniff for the CF error code / wording so we can switch
+    to streaming on the next retry.
+    """
+    msg = str(exc)
+    return "524" in msg or "A timeout occurred" in msg or "cloudflare" in msg.lower()
+
+
+def _call_llm_streaming(client: OpenAI, model: str, prompt: str,
+                        temperature: float, config: Config) -> str:
+    """Call the LLM in streaming mode and reassemble the full response.
+
+    Streaming keeps the HTTP connection alive from the first token onward,
+    so a Cloudflare proxy sitting in front of the origin server will not
+    trigger a 524 timeout even for long-running requests.
+    """
+    chunks: list[str] = []
+    with client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        max_tokens=config.max_tokens,
+        stream=True,
+    ) as stream:
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                chunks.append(delta)
+    return "".join(chunks)
+
+
 def call_llm(
     prompt: str,
     config: Config,
@@ -121,6 +156,10 @@ def call_llm(
     Automatically switches to ``config.long_context_model`` when the prompt
     token count exceeds ``config.max_token_per_module`` and a long-context
     model is configured.
+
+    On retries after a Cloudflare 524 timeout, automatically switches to
+    streaming mode so the proxy does not cut the connection before the origin
+    finishes generating the response.
 
     Args:
         prompt: The prompt to send
@@ -153,28 +192,40 @@ def call_llm(
 
     client = create_openai_client(config)
     last_exc: Exception = None
+    use_streaming = False
     t0 = time.time()
     for attempt, delay in enumerate([0] + _RETRY_DELAYS):
         if delay:
             _logger.warning(
                 f"call_llm [model={model}]: retrying in {delay}s "
                 f"(attempt {attempt}/{len(_RETRY_DELAYS)}) after: {last_exc}"
+                + (" [streaming]" if use_streaming else "")
             )
             time.sleep(delay)
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                max_tokens=config.max_tokens
-            )
-            content = response.choices[0].message.content
+            if use_streaming:
+                content = _call_llm_streaming(client, model, prompt, temperature, config)
+            else:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    max_tokens=config.max_tokens
+                )
+                content = response.choices[0].message.content
             elapsed = time.time() - t0
             _logger.debug(
                 f"call_llm [model={model}]: success in {elapsed:.1f}s, "
                 f"response length={len(content)}"
+                + (" [streaming]" if use_streaming else "")
             )
             return content
         except Exception as exc:
             last_exc = exc
+            if _is_cf_timeout(exc):
+                use_streaming = True
+                _logger.info(
+                    f"call_llm [model={model}]: CF proxy timeout detected — "
+                    "switching to streaming for next retry"
+                )
     raise last_exc
