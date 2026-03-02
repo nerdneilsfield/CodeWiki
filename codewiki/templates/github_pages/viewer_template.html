@@ -549,19 +549,13 @@
                 await renderMermaidDiagrams();
 
                 // Render math (KaTeX)
+                // Delimiters already normalised by normalizeMathDelimiters() above.
                 if (typeof renderMathInElement !== 'undefined') {
-                    // preProcess skips $...$ blocks containing CJK so that
-                    // Chinese prose between dollar signs is not parsed as LaTeX.
                     renderMathInElement(content, {
                         delimiters: [
-                            {left: '$$', right: '$$', display: true},
-                            {left: '$', right: '$', display: false},
                             {left: '\\(', right: '\\)', display: false},
                             {left: '\\[', right: '\\]', display: true}
                         ],
-                        preProcess: function(math) {
-                            return /[\u4e00-\u9fff\u3400-\u4dbf]/.test(math) ? null : math;
-                        },
                         throwOnError: false
                     });
                 }
@@ -628,7 +622,24 @@
             content.addEventListener('click', listener);
         }
         
+        function normalizeMathDelimiters(text) {
+            // Convert $...$ and $$...$$ to \(...\) / \[...\] so KaTeX does not need
+            // dollar delimiters and cannot accidentally match Chinese prose.
+            // Segments containing CJK characters are left unchanged.
+            const CJK_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+            // Display math first to avoid partial matches with inline math
+            text = text.replace(/\$\$([^$]+?)\$\$/gs, function(match, inner) {
+                return CJK_RE.test(inner) ? match : '\\[' + inner + '\\]';
+            });
+            text = text.replace(/\$(?!\s)([^$\n]+?)\$(?!\$)/g, function(match, inner) {
+                return CJK_RE.test(inner) ? match : '\\(' + inner + '\\)';
+            });
+            return text;
+        }
+
         async function renderMarkdown(markdown) {
+            // Normalise math delimiters before parsing so KaTeX only needs \(...\) / \[...\]
+            markdown = normalizeMathDelimiters(markdown);
             // Convert markdown to HTML using marked
             let html = marked.parse(markdown);
             

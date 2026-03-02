@@ -226,22 +226,15 @@ async function cwRenderMermaid(){
 document.addEventListener('DOMContentLoaded',cwRenderMermaid);
 themeBtn.addEventListener('click',function(){setTimeout(cwRenderMermaid,50);});
 // KaTeX — render math in article content
-// preProcess skips $...$ blocks that contain CJK characters so that
-// Chinese prose accidentally enclosed by dollar signs is not parsed
-// as LaTeX (common in LLM-generated bilingual docs).
+// Math delimiters are normalised server-side ($$...$$→\[...\], $...$→\(...\))
+// so only the unambiguous LaTeX delimiters are needed here.
 document.addEventListener('DOMContentLoaded',function(){
   if(typeof renderMathInElement==='undefined')return;
   renderMathInElement(document.getElementById('mc')||document.body,{
     delimiters:[
-      {left:'$$$$',right:'$$$$',display:true},
-      {left:'$$',right:'$$',display:false},
       {left:'\\(',right:'\\)',display:false},
       {left:'\\[',right:'\\]',display:true}
     ],
-    preProcess:function(math){
-      // Return null to skip rendering if content contains CJK characters
-      return /[\u4e00-\u9fff\u3400-\u4dbf]/.test(math)?null:math;
-    },
     throwOnError:false
   });
 });
@@ -396,6 +389,37 @@ def _fix_markdown_links(content: str) -> str:
     return re.sub(r"\[([^\]]*)\]\(([^)]*)\)", _fix_url, content)
 
 
+# Pre-compiled regex for server-side math delimiter normalisation.
+_CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf]')
+_DISPLAY_MATH_RE = re.compile(r'\$\$([^$]+?)\$\$', re.DOTALL)
+_INLINE_MATH_RE = re.compile(r'\$(?!\s)([^$\n]+?)\$(?!\$)')
+
+
+def _normalize_math_delimiters(content: str) -> str:
+    """Convert $...$ and $$...$$ to \\(...\\) / \\[...\\] before markdown rendering.
+
+    Segments containing CJK characters are left unchanged so that Chinese
+    prose accidentally enclosed by dollar signs is not forwarded to KaTeX.
+
+    $$...$$ is processed first to avoid partial matches with $...$.
+    """
+    def _replace_display(m: re.Match) -> str:
+        inner = m.group(1)
+        if _CJK_RE.search(inner):
+            return m.group(0)
+        return f'\\[{inner}\\]'
+
+    def _replace_inline(m: re.Match) -> str:
+        inner = m.group(1)
+        if _CJK_RE.search(inner):
+            return m.group(0)
+        return f'\\({inner}\\)'
+
+    content = _DISPLAY_MATH_RE.sub(_replace_display, content)
+    content = _INLINE_MATH_RE.sub(_replace_inline, content)
+    return content
+
+
 # Lazy-initialised markdown parser (avoids top-level import of markdown_it
 # which may not be installed in every environment).
 _md_parser = None
@@ -412,6 +436,8 @@ def _markdown_to_static_html(content: str) -> str:
     """Convert markdown to HTML for static output (no base_url rewriting needed)."""
     # Fix spaces only (no base_url — links will be rewritten to .html afterwards)
     content = _fix_markdown_links(content)
+    # Normalise math delimiters before rendering so KaTeX only needs \(...\) / \[...\]
+    content = _normalize_math_delimiters(content)
     html = _get_md_parser().render(content)
 
     # Handle mermaid fences
