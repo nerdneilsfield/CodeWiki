@@ -296,18 +296,33 @@ class CLIDocumentationGenerator:
         try:
             # Run the actual documentation generation
             await doc_generator.generate_module_documentation(components, leaf_nodes)
-            
+
             if self.verbose:
                 self.progress_tracker.update_stage(0.9, "Creating repository overview...")
-            
+
             # Create metadata
             doc_generator.create_documentation_metadata(working_dir, components, len(leaf_nodes))
-            
+
+            # Generate guide documents (Get Started, Beginner's Guide, etc.)
+            # Reload module_tree from disk — the whole-repo path writes the real tree there
+            from codewiki.src.be.guide_generator import GuideGenerator
+            from codewiki.src.config import MODULE_TREE_FILENAME
+            saved_tree = file_manager.load_json(
+                os.path.join(working_dir, MODULE_TREE_FILENAME)
+            ) or module_tree
+            guide_gen = GuideGenerator(
+                config=backend_config,
+                components=components,
+                module_tree=saved_tree,
+                working_dir=working_dir,
+            )
+            await guide_gen.run()
+
             # Collect generated files
             for file_path in os.listdir(working_dir):
                 if file_path.endswith('.md') or file_path.endswith('.json'):
                     self.job.files_generated.append(file_path)
-            
+
         except Exception as e:
             raise APIError(f"Documentation generation failed: {e}")
         
