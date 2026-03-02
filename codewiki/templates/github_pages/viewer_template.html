@@ -549,15 +549,19 @@
                 await renderMermaidDiagrams();
 
                 // Render math (KaTeX)
-                // Single $...$ omitted: causes false positives with Chinese
-                // text and shell variables in LLM-generated docs.
                 if (typeof renderMathInElement !== 'undefined') {
+                    // preProcess skips $...$ blocks containing CJK so that
+                    // Chinese prose between dollar signs is not parsed as LaTeX.
                     renderMathInElement(content, {
                         delimiters: [
                             {left: '$$', right: '$$', display: true},
+                            {left: '$', right: '$', display: false},
                             {left: '\\(', right: '\\)', display: false},
                             {left: '\\[', right: '\\]', display: true}
                         ],
+                        preProcess: function(math) {
+                            return /[\u4e00-\u9fff\u3400-\u4dbf]/.test(math) ? null : math;
+                        },
                         throwOnError: false
                     });
                 }

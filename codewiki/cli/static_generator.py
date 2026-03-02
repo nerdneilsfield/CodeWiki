@@ -225,17 +225,23 @@ async function cwRenderMermaid(){
 }
 document.addEventListener('DOMContentLoaded',cwRenderMermaid);
 themeBtn.addEventListener('click',function(){setTimeout(cwRenderMermaid,50);});
-// KaTeX — render $$...$$, \(...\), \[...\] math in article content
-// Single $...$ is intentionally omitted: it causes false positives with
-// Chinese text, code snippets and shell variables in LLM-generated docs.
+// KaTeX — render math in article content
+// preProcess skips $...$ blocks that contain CJK characters so that
+// Chinese prose accidentally enclosed by dollar signs is not parsed
+// as LaTeX (common in LLM-generated bilingual docs).
 document.addEventListener('DOMContentLoaded',function(){
   if(typeof renderMathInElement==='undefined')return;
   renderMathInElement(document.getElementById('mc')||document.body,{
     delimiters:[
       {left:'$$$$',right:'$$$$',display:true},
+      {left:'$$',right:'$$',display:false},
       {left:'\\(',right:'\\)',display:false},
       {left:'\\[',right:'\\]',display:true}
     ],
+    preProcess:function(math){
+      // Return null to skip rendering if content contains CJK characters
+      return /[\u4e00-\u9fff\u3400-\u4dbf]/.test(math)?null:math;
+    },
     throwOnError:false
   });
 });
