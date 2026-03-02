@@ -225,13 +225,14 @@ async function cwRenderMermaid(){
 }
 document.addEventListener('DOMContentLoaded',cwRenderMermaid);
 themeBtn.addEventListener('click',function(){setTimeout(cwRenderMermaid,50);});
-// KaTeX — render $...$ and $$...$$ math in article content
+// KaTeX — render $$...$$, \(...\), \[...\] math in article content
+// Single $...$ is intentionally omitted: it causes false positives with
+// Chinese text, code snippets and shell variables in LLM-generated docs.
 document.addEventListener('DOMContentLoaded',function(){
   if(typeof renderMathInElement==='undefined')return;
   renderMathInElement(document.getElementById('mc')||document.body,{
     delimiters:[
-      {left:'$$',right:'$$',display:true},
-      {left:'$',right:'$',display:false},
+      {left:'$$$$',right:'$$$$',display:true},
       {left:'\\(',right:'\\)',display:false},
       {left:'\\[',right:'\\]',display:true}
     ],
