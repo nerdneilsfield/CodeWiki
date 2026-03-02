@@ -65,156 +65,155 @@ class TreeSitterCppAnalyzer:
 		# extract relationships between top-level nodes
 		self._extract_relationships(root, top_level_nodes)
 	
-	def _extract_nodes(self, node, top_level_nodes, lines):
-		"""Recursively extract top-level nodes (classes, functions, global variables)."""
-		node_type = None
-		node_name = None
-		
-		if node.type == "preproc_include":
-			path_node = next((c for c in node.children
-							  if c.type in ("string_literal", "system_lib_string")), None)
-			if path_node:
-				include_path = path_node.text.decode().strip('"').strip('<').strip('>')
-				module_path = self._get_module_path()
-				self.call_relationships.append(CallRelationship(
-					caller=f"{module_path}.__file__",
-					callee=include_path,
-					call_line=node.start_point[0] + 1,
-					is_resolved=False,
-					relationship_type="include",
-				))
-			return  # preproc_include has no interesting children
+	def _extract_nodes(self, root, top_level_nodes, lines):
+		"""Extract top-level nodes using an iterative DFS to avoid hitting Python's
+		recursion limit on deeply nested headers."""
+		stack = [root]
+		while stack:
+			node = stack.pop()
+			node_type = None
+			node_name = None
+			containing_class = None
 
-		if node.type == "class_specifier":
-			# "class" + type_identifier + { ... }
-			node_type = "class"
-			# Find type_identifier that represents the class name
-			for child in node.children:
-				if child.type == "type_identifier":
-					node_name = child.text.decode()
-					break
-		elif node.type == "struct_specifier":
-			# "struct" + type_identifier + { ... }
-			node_type = "struct"
-			# Find type_identifier that represents the struct name
-			for child in node.children:
-				if child.type == "type_identifier":
-					node_name = child.text.decode()
-					break
-		elif node.type == "function_definition":
-			# Check if this is inside a class or function
-			containing_class = self._find_containing_class_for_method(node)
-			if containing_class:
-				node_type = "method"
-			else:
-				node_type = "function"
-			
-			declarator = next((c for c in node.children if c.type == "function_declarator"), None)
-			if declarator:
-				self._current_func_declarator = declarator
-				for child in declarator.children:
-					if child.type == "identifier":
-						node_name = child.text.decode()
-						break
-					elif child.type == "field_identifier":
-						node_name = child.text.decode()
-						break
-					elif child.type == "qualified_identifier":
-						identifiers = [c for c in child.children if c.type == "identifier"]
-						if identifiers:
-							node_name = identifiers[-1].text.decode()
-							break
-			else:
-				self._current_func_declarator = None
-		elif node.type == "declaration":
-			if self._is_global_variable(node):
-				node_type = "variable"
+			if node.type == "preproc_include":
+				path_node = next((c for c in node.children
+								  if c.type in ("string_literal", "system_lib_string")), None)
+				if path_node:
+					include_path = path_node.text.decode().strip('"').strip('<').strip('>')
+					module_path = self._get_module_path()
+					self.call_relationships.append(CallRelationship(
+						caller=f"{module_path}.__file__",
+						callee=include_path,
+						call_line=node.start_point[0] + 1,
+						is_resolved=False,
+						relationship_type="include",
+					))
+				# preproc_include has no interesting children — skip them
+				continue
+
+			if node.type == "class_specifier":
+				node_type = "class"
 				for child in node.children:
-					if child.type == "init_declarator":
-						identifier = next((c for c in child.children if c.type == "identifier"), None)
-						if identifier:
-							node_name = identifier.text.decode()
-							break
-					elif child.type == "identifier":
-						node_name = child.text.decode()
-						break
-		elif node.type == "template_declaration":
-			# Find inner class or function
-			inner_class = next((c for c in node.children if c.type == "class_specifier"), None)
-			inner_func = next((c for c in node.children if c.type == "function_definition"), None)
-			if inner_class:
-				node_type = "template_class"
-				for child in inner_class.children:
 					if child.type == "type_identifier":
 						node_name = child.text.decode()
 						break
-			elif inner_func:
-				node_type = "template_function"
-				declarator = next((c for c in inner_func.children if c.type == "function_declarator"), None)
+			elif node.type == "struct_specifier":
+				node_type = "struct"
+				for child in node.children:
+					if child.type == "type_identifier":
+						node_name = child.text.decode()
+						break
+			elif node.type == "function_definition":
+				containing_class = self._find_containing_class_for_method(node)
+				if containing_class:
+					node_type = "method"
+				else:
+					node_type = "function"
+
+				declarator = next((c for c in node.children if c.type == "function_declarator"), None)
 				if declarator:
+					self._current_func_declarator = declarator
 					for child in declarator.children:
 						if child.type == "identifier":
 							node_name = child.text.decode()
 							break
-		elif node.type == "namespace_definition":
-			node_type = "namespace"
-			found_namespace_keyword = False
-			for child in node.children:
-				if child.type == "namespace":
-					found_namespace_keyword = True
-				elif found_namespace_keyword and child.type == "identifier":
-					node_name = child.text.decode()
-					break
-		
-		if node_type and node_name:
-			if node_type == "method":
-				component_id = self._get_component_id(node_name, containing_class)
-				top_level_key = component_id
-			else:
-				component_id = self._get_component_id(node_name)
-				top_level_key = node_name
-				
-			relative_path = self._get_relative_path()
-			
-			_params = None
-			if node_type in ("function", "method", "template_function") and getattr(self, "_current_func_declarator", None):
-				_params = self._extract_parameters(self._current_func_declarator)
-				self._current_func_declarator = None
-			_hls_pragmas = None
-			_is_hls_kernel = False
-			if node_type in ("function", "method"):
-				_hls_pragmas = self._extract_hls_pragmas(node)
-				if _hls_pragmas and self._is_in_extern_c(node):
-					_is_hls_kernel = True
-			node_obj = Node(
-				id=component_id,
-				name=node_name,
-				component_type=node_type,
-				file_path=str(self.file_path),
-				relative_path=relative_path,
-				source_code="\n".join(lines[node.start_point[0]:node.end_point[0]+1]),
-				start_line=node.start_point[0]+1,
-				end_line=node.end_point[0]+1,
-				has_docstring=False,
-				docstring="",
-				parameters=_params,
-				node_type=node_type,
-				base_classes=None,
-				class_name=containing_class if node_type == "method" else None,
-				display_name=f"{node_type} {node_name}",
-				component_id=component_id,
-				hls_pragmas=_hls_pragmas,
-				is_hls_kernel=_is_hls_kernel,
-			)
-			
-			top_level_nodes[top_level_key] = node_obj
-			
-			if node_type in ["class", "struct", "function", "template_class", "template_function"]:
-				self.nodes.append(node_obj)
-		
-		# Recursively process children
-		for child in node.children:
-			self._extract_nodes(child, top_level_nodes, lines)
+						elif child.type == "field_identifier":
+							node_name = child.text.decode()
+							break
+						elif child.type == "qualified_identifier":
+							identifiers = [c for c in child.children if c.type == "identifier"]
+							if identifiers:
+								node_name = identifiers[-1].text.decode()
+								break
+				else:
+					self._current_func_declarator = None
+			elif node.type == "declaration":
+				if self._is_global_variable(node):
+					node_type = "variable"
+					for child in node.children:
+						if child.type == "init_declarator":
+							identifier = next((c for c in child.children if c.type == "identifier"), None)
+							if identifier:
+								node_name = identifier.text.decode()
+								break
+						elif child.type == "identifier":
+							node_name = child.text.decode()
+							break
+			elif node.type == "template_declaration":
+				inner_class = next((c for c in node.children if c.type == "class_specifier"), None)
+				inner_func = next((c for c in node.children if c.type == "function_definition"), None)
+				if inner_class:
+					node_type = "template_class"
+					for child in inner_class.children:
+						if child.type == "type_identifier":
+							node_name = child.text.decode()
+							break
+				elif inner_func:
+					node_type = "template_function"
+					declarator = next((c for c in inner_func.children if c.type == "function_declarator"), None)
+					if declarator:
+						for child in declarator.children:
+							if child.type == "identifier":
+								node_name = child.text.decode()
+								break
+			elif node.type == "namespace_definition":
+				node_type = "namespace"
+				found_namespace_keyword = False
+				for child in node.children:
+					if child.type == "namespace":
+						found_namespace_keyword = True
+					elif found_namespace_keyword and child.type == "identifier":
+						node_name = child.text.decode()
+						break
+
+			if node_type and node_name:
+				if node_type == "method":
+					component_id = self._get_component_id(node_name, containing_class)
+					top_level_key = component_id
+				else:
+					component_id = self._get_component_id(node_name)
+					top_level_key = node_name
+
+				relative_path = self._get_relative_path()
+
+				_params = None
+				if node_type in ("function", "method", "template_function") and getattr(self, "_current_func_declarator", None):
+					_params = self._extract_parameters(self._current_func_declarator)
+					self._current_func_declarator = None
+				_hls_pragmas = None
+				_is_hls_kernel = False
+				if node_type in ("function", "method"):
+					_hls_pragmas = self._extract_hls_pragmas(node)
+					if _hls_pragmas and self._is_in_extern_c(node):
+						_is_hls_kernel = True
+				node_obj = Node(
+					id=component_id,
+					name=node_name,
+					component_type=node_type,
+					file_path=str(self.file_path),
+					relative_path=relative_path,
+					source_code="\n".join(lines[node.start_point[0]:node.end_point[0]+1]),
+					start_line=node.start_point[0]+1,
+					end_line=node.end_point[0]+1,
+					has_docstring=False,
+					docstring="",
+					parameters=_params,
+					node_type=node_type,
+					base_classes=None,
+					class_name=containing_class if node_type == "method" else None,
+					display_name=f"{node_type} {node_name}",
+					component_id=component_id,
+					hls_pragmas=_hls_pragmas,
+					is_hls_kernel=_is_hls_kernel,
+				)
+
+				top_level_nodes[top_level_key] = node_obj
+
+				if node_type in ["class", "struct", "function", "template_class", "template_function"]:
+					self.nodes.append(node_obj)
+
+			# Push children in reverse so left-to-right order is preserved
+			stack.extend(reversed(node.children))
 
 
 	def _extract_hls_pragmas(self, func_node):
@@ -358,127 +357,120 @@ class TreeSitterCppAnalyzer:
 			current = current.parent
 		return None
 
-	def _extract_relationships(self, node, top_level_nodes):
-		if node.type == "call_expression":
-			containing_function = self._find_containing_function_or_method(node, top_level_nodes)
-			if containing_function:
-				containing_function_id = self._get_component_id_for_function(containing_function, top_level_nodes)
-				
-				# Get called function name 
-				called_function = None
-				for child in node.children:
-					if child.type == "identifier":
-						called_function = child.text.decode()
-						break
-					elif child.type == "field_expression":
-						method_name = None
-						for field_child in child.children:
-							if field_child.type == "field_identifier":
-								method_name = field_child.text.decode()
+	def _extract_relationships(self, root, top_level_nodes):
+		"""Extract relationships using an iterative DFS to avoid recursion limits."""
+		stack = [root]
+		while stack:
+			node = stack.pop()
+
+			if node.type == "call_expression":
+				containing_function = self._find_containing_function_or_method(node, top_level_nodes)
+				if containing_function:
+					containing_function_id = self._get_component_id_for_function(containing_function, top_level_nodes)
+
+					called_function = None
+					for child in node.children:
+						if child.type == "identifier":
+							called_function = child.text.decode()
+							break
+						elif child.type == "field_expression":
+							method_name = None
+							for field_child in child.children:
+								if field_child.type == "field_identifier":
+									method_name = field_child.text.decode()
+									break
+							if method_name:
+								called_function = method_name
 								break
-						if method_name:
-							called_function = method_name
-							break
-					elif child.type == "qualified_identifier":
-						# MyLib::func() or MyLib::func<T>()
-						# Last part may be identifier, template_function, or qualified_identifier
-						def _extract_from_qualified(qnode):
-							"""Recursively extract the final function name from a qualified_identifier."""
-							last_child = qnode.children[-1] if qnode.children else None
-							if last_child is None:
+						elif child.type == "qualified_identifier":
+							def _extract_from_qualified(qnode):
+								last_child = qnode.children[-1] if qnode.children else None
+								if last_child is None:
+									return None
+								if last_child.type == "identifier":
+									return last_child.text.decode()
+								if last_child.type == "template_function":
+									ident = next((c for c in last_child.children if c.type == "identifier"), None)
+									return ident.text.decode() if ident else None
+								if last_child.type == "qualified_identifier":
+									return _extract_from_qualified(last_child)
 								return None
-							if last_child.type == "identifier":
-								return last_child.text.decode()
-							if last_child.type == "template_function":
-								ident = next((c for c in last_child.children if c.type == "identifier"), None)
-								return ident.text.decode() if ident else None
-							if last_child.type == "qualified_identifier":
-								return _extract_from_qualified(last_child)
-							return None
-						qname = _extract_from_qualified(child)
-						if qname:
-							called_function = qname
-							break
-					elif child.type == "template_function":
-						# func<T>()
-						ident = next((c for c in child.children if c.type == "identifier"), None)
-						if ident:
-							called_function = ident.text.decode()
-							break
-				
-				if called_function and not self._is_system_function(called_function):
-					target_class = self._find_class_containing_method(called_function, top_level_nodes)
-					
-					if target_class:
-						target_class_id = self._get_component_id(target_class)
-						self.call_relationships.append(CallRelationship(
-							caller=containing_function_id,
-							callee=target_class_id,
-							call_line=node.start_point[0]+1,
-							relationship_type="calls"
-						))
-					elif called_function in top_level_nodes:
-						called_function_id = self._get_component_id(called_function)
-						self.call_relationships.append(CallRelationship(
-							caller=containing_function_id,
-							callee=called_function_id,
-							call_line=node.start_point[0]+1,
-							relationship_type="calls"
-						))
-		
-		elif node.type == "base_class_clause":
-			# Find the containing class
-			containing_class = self._find_containing_class(node)
-			if containing_class:
-				# Extract base class names
-				for child in node.children:
-					if child.type == "type_identifier":
-						base_class = child.text.decode()
-						containing_class_id = self._get_component_id(containing_class)
-						self.call_relationships.append(CallRelationship(
-							caller=containing_class_id,
-							callee=base_class,
-							call_line=node.start_point[0]+1,
-							relationship_type="inherits"
-						))
-		
-		elif node.type == "new_expression":
-			containing_function = self._find_containing_function_or_method(node, top_level_nodes)
-			if containing_function:
-				containing_function_id = self._get_component_id_for_function(containing_function, top_level_nodes)
-				
-				# Get the class being instantiated
-				for child in node.children:
-					if child.type == "type_identifier":
-						class_name = child.text.decode()
-						if class_name in top_level_nodes:
-							class_id = self._get_component_id(class_name)
+							qname = _extract_from_qualified(child)
+							if qname:
+								called_function = qname
+								break
+						elif child.type == "template_function":
+							ident = next((c for c in child.children if c.type == "identifier"), None)
+							if ident:
+								called_function = ident.text.decode()
+								break
+
+					if called_function and not self._is_system_function(called_function):
+						target_class = self._find_class_containing_method(called_function, top_level_nodes)
+						if target_class:
+							target_class_id = self._get_component_id(target_class)
 							self.call_relationships.append(CallRelationship(
 								caller=containing_function_id,
-								callee=class_id,
+								callee=target_class_id,
 								call_line=node.start_point[0]+1,
-								relationship_type="creates"
+								relationship_type="calls"
 							))
-						break
-		
-		elif node.type == "identifier":
-			parent = node.parent
-			if parent and parent.type not in ["function_definition", "class_specifier", "declaration", "function_declarator"]:
-				var_name = node.text.decode()
-				if var_name in top_level_nodes and top_level_nodes[var_name].component_type == "variable":
-					containing_function = self._find_containing_function_or_method(node, top_level_nodes)
-					if containing_function and containing_function != var_name:
-						containing_function_id = self._get_component_id_for_function(containing_function, top_level_nodes)
-						self.call_relationships.append(CallRelationship(
-							caller=containing_function_id,
-							callee=var_name,
-							call_line=node.start_point[0]+1,
-							relationship_type="uses"
-						))
-		
-		# Recursively process children
-		for child in node.children:
-			self._extract_relationships(child, top_level_nodes)
+						elif called_function in top_level_nodes:
+							called_function_id = self._get_component_id(called_function)
+							self.call_relationships.append(CallRelationship(
+								caller=containing_function_id,
+								callee=called_function_id,
+								call_line=node.start_point[0]+1,
+								relationship_type="calls"
+							))
+
+			elif node.type == "base_class_clause":
+				containing_class = self._find_containing_class(node)
+				if containing_class:
+					for child in node.children:
+						if child.type == "type_identifier":
+							base_class = child.text.decode()
+							containing_class_id = self._get_component_id(containing_class)
+							self.call_relationships.append(CallRelationship(
+								caller=containing_class_id,
+								callee=base_class,
+								call_line=node.start_point[0]+1,
+								relationship_type="inherits"
+							))
+
+			elif node.type == "new_expression":
+				containing_function = self._find_containing_function_or_method(node, top_level_nodes)
+				if containing_function:
+					containing_function_id = self._get_component_id_for_function(containing_function, top_level_nodes)
+					for child in node.children:
+						if child.type == "type_identifier":
+							class_name = child.text.decode()
+							if class_name in top_level_nodes:
+								class_id = self._get_component_id(class_name)
+								self.call_relationships.append(CallRelationship(
+									caller=containing_function_id,
+									callee=class_id,
+									call_line=node.start_point[0]+1,
+									relationship_type="creates"
+								))
+							break
+
+			elif node.type == "identifier":
+				parent = node.parent
+				if parent and parent.type not in ["function_definition", "class_specifier", "declaration", "function_declarator"]:
+					var_name = node.text.decode()
+					if var_name in top_level_nodes and top_level_nodes[var_name].component_type == "variable":
+						containing_function = self._find_containing_function_or_method(node, top_level_nodes)
+						if containing_function and containing_function != var_name:
+							containing_function_id = self._get_component_id_for_function(containing_function, top_level_nodes)
+							self.call_relationships.append(CallRelationship(
+								caller=containing_function_id,
+								callee=var_name,
+								call_line=node.start_point[0]+1,
+								relationship_type="uses"
+							))
+
+			stack.extend(reversed(node.children))
 
 	def _find_containing_function(self, node, top_level_nodes):
 		"""Find the function that contains this node."""
