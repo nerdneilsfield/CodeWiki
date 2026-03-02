@@ -3,6 +3,29 @@ import time
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
+
+# ── pydantic_ai compatibility patch ─────────────────────────────────────────
+# Some OpenAI-compatible providers (e.g. GLM API) send streaming chunks where
+# usage is present but individual token counts are None.  pydantic_ai 1.0.x
+# assumes int values and crashes with "int += NoneType" inside
+# _incr_usage_tokens.  Patch it to treat None as 0.
+try:
+    import pydantic_ai.usage as _pai_usage
+
+    def _safe_incr_usage_tokens(slf, incr_usage):  # type: ignore[no-untyped-def]
+        slf.input_tokens += incr_usage.input_tokens or 0
+        slf.cache_write_tokens += incr_usage.cache_write_tokens or 0
+        slf.cache_read_tokens += incr_usage.cache_read_tokens or 0
+        slf.input_audio_tokens += incr_usage.input_audio_tokens or 0
+        slf.cache_audio_read_tokens += incr_usage.cache_audio_read_tokens or 0
+        slf.output_tokens += incr_usage.output_tokens or 0
+        for key, value in incr_usage.details.items():
+            slf.details[key] = slf.details.get(key, 0) + value
+
+    _pai_usage._incr_usage_tokens = _safe_incr_usage_tokens
+except Exception:
+    pass  # silently skip if pydantic_ai changes its internals
+# ─────────────────────────────────────────────────────────────────────────────
 # import logfire
 import logging
 import os
