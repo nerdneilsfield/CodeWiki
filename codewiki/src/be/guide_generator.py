@@ -689,8 +689,10 @@ class GuideGenerator:
             for n in setup_file_names
             if os.path.exists(os.path.join(self.config.repo_path, n))
         )
-        if os.path.exists(overview_path):
-            input_files.append(overview_path)
+        # overview.md is excluded from the hash: it is modified by
+        # _regenerate_overview() *after* guides are cached, which would cause
+        # a hash mismatch on every subsequent run (circular dependency).
+        # README + setup files are the real invalidation signals.
 
         if not self._should_regenerate("getting_started", input_files):
             logger.info("✓ getting-started.md is up to date (cache hit)")
@@ -739,11 +741,15 @@ class GuideGenerator:
             self._strip_tree_for_display(self.module_tree), indent=2
         )
 
-        # Hash check: generated docs + module_tree structure
+        # Hash check: generated module docs + module_tree structure.
+        # overview.md is excluded: it is rewritten by _regenerate_overview()
+        # after guides are cached, causing a spurious hash mismatch next run.
+        # Individual module .md files already cover the same signal.
         gen_doc_files = [
             os.path.join(self.working_dir, f)
             for f in sorted(os.listdir(self.working_dir))
             if f.endswith(".md") and not f.startswith(_GUIDE_PREFIXES)
+            and f != "overview.md"
         ]
         module_tree_hash = hashlib.sha256(
             json.dumps(self.module_tree, sort_keys=True).encode()
