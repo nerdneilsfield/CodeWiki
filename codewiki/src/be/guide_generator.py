@@ -27,10 +27,10 @@ logger = logging.getLogger(__name__)
 GUIDE_CACHE_FILENAME = "_guide_cache.json"
 # Per-guide prompt versions — bump only the guide whose prompt changed
 _PROMPT_VERSIONS = {
-    "getting_started": "v2",   # Added Mermaid syntax safety rules
-    "beginner_guide": "v2",    # Added Mermaid syntax safety rules
+    "getting_started": "v1",
+    "beginner_guide": "v1",
     "build_analysis": "v1",
-    "algorithm_deepdive": "v2",  # Added Mermaid syntax safety rules (critical)
+    "algorithm_deepdive": "v1",
 }
 _GUIDE_PREFIXES = (
     "guide-",
