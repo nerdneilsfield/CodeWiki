@@ -741,6 +741,22 @@ class DocumentationGenerator:
             )
             await guide_gen.run()
 
+            # Phase: fix Mermaid syntax errors in generated docs
+            from codewiki.src.be.docs_fixer import fix_docs
+            fix_stats = fix_docs(working_dir, self.config)
+            if fix_stats.diagrams_invalid == 0:
+                logger.info(f"🔧 Mermaid fix phase — no issues found ({fix_stats.diagrams_total} diagram(s) checked)")
+            elif fix_stats.diagrams_repaired > 0:
+                logger.info(
+                    f"🔧 Mermaid fix phase — repaired {fix_stats.diagrams_repaired}/"
+                    f"{fix_stats.diagrams_invalid} broken diagram(s) in "
+                    f"{fix_stats.files_with_issues} file(s)"
+                )
+            else:
+                logger.warning(
+                    f"🔧 Mermaid fix phase — {fix_stats.diagrams_failed} broken diagram(s) could not be repaired"
+                )
+
             logger.debug(f"Documentation generation completed successfully using dynamic programming!")
             logger.debug(f"Processing order: leaf modules → parent modules → repository overview")
             logger.debug(f"Documentation saved to: {working_dir}")
