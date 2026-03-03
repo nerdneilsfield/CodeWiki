@@ -110,15 +110,25 @@ def create_openai_client(config: Config) -> OpenAI:
 
 
 def _is_cf_timeout(exc: Exception) -> bool:
-    """Return True when *exc* looks like a Cloudflare 524 proxy timeout.
+    """Return True when *exc* is a connection-level timeout that streaming fixes.
 
-    CF 524 responses arrive as HTTP 524 bodies containing HTML; the OpenAI
-    client surfaces them as exceptions whose string representation contains
-    the raw HTML.  We sniff for the CF error code / wording so we can switch
-    to streaming on the next retry.
+    Two known cases:
+    - Cloudflare 524: proxy cuts the connection after 100 s; streaming keeps it
+      alive with incremental tokens so the proxy never sees silence long enough
+      to trigger a 524.
+    - 408 "stream disconnected": the origin server closes the stream mid-response
+      (often because the non-streaming endpoint has a shorter server-side timeout
+      than the streaming one).  Switching to streaming lets the server send tokens
+      incrementally and avoids the cut-off.
     """
     msg = str(exc)
-    return "524" in msg or "A timeout occurred" in msg or "cloudflare" in msg.lower()
+    return (
+        "524" in msg
+        or "A timeout occurred" in msg
+        or "cloudflare" in msg.lower()
+        or "stream disconnected" in msg.lower()
+        or "stream closed before" in msg.lower()
+    )
 
 
 def _call_llm_streaming(client: OpenAI, model: str, prompt: str,
@@ -225,7 +235,7 @@ def call_llm(
             if _is_cf_timeout(exc):
                 use_streaming = True
                 _logger.info(
-                    f"call_llm [model={model}]: CF proxy timeout detected — "
+                    f"call_llm [model={model}]: connection timeout detected — "
                     "switching to streaming for next retry"
                 )
     raise last_exc
