@@ -716,6 +716,20 @@
                 blocks.push([ph, '<span class="math-inline">\\(' + escape(inner) + '\\)</span>']);
                 return ph;
             });
+            // Also extract backslash-delimited math (\[...\] and \(...\)) that
+            // LLMs may emit directly — marked.js escapes \[ → [ per CommonMark.
+            text = text.replace(/\\\[([\s\S]+?)\\\]/g, function(match, inner) {
+                if (CJK_RE.test(inner)) return match;
+                const ph = 'CWIKIMD' + String(blocks.length).padStart(6, '0');
+                blocks.push([ph, '<div class="math-block">\\[' + escape(inner) + '\\]</div>']);
+                return ph;
+            });
+            text = text.replace(/\\\((.+?)\\\)/g, function(match, inner) {
+                if (CJK_RE.test(inner)) return match;
+                const ph = 'CWIKIMI' + String(blocks.length).padStart(6, '0');
+                blocks.push([ph, '<span class="math-inline">\\(' + escape(inner) + '\\)</span>']);
+                return ph;
+            });
             return [text, blocks];
         }
 

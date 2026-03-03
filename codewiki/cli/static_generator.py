@@ -252,7 +252,9 @@ function _loadMathJax(){
 }
 async function cwRenderMath(root){
   if(typeof katex==='undefined')return;
-  root=root||document.getElementById('mc')||document.body;
+  // Guard: DOMContentLoaded passes an Event object — fall back to DOM lookup
+  if(!root||typeof root.querySelectorAll!=='function')
+    root=document.getElementById('mc')||document.body;
   var failed=[];
   root.querySelectorAll('.math-block,.math-inline').forEach(function(el){
     if(el.dataset.mathDone)return;
@@ -445,6 +447,10 @@ def _fix_markdown_links(content: str) -> str:
 _CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf]')
 _DISPLAY_MATH_RE = re.compile(r'\$\$([^$]+?)\$\$', re.DOTALL)
 _INLINE_MATH_RE = re.compile(r'\$(?!\s)([^$\n]+?)\$(?!\$)')
+# Backslash-delimited math: \[...\] and \(...\) — generated directly by some LLMs.
+# Must be extracted before markdown-it, which otherwise escapes \[ → [ per CommonMark.
+_DISPLAY_MATH_BK_RE = re.compile(r'\\\[(.+?)\\\]', re.DOTALL)
+_INLINE_MATH_BK_RE  = re.compile(r'\\\((.+?)\\\)')
 
 
 def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
@@ -487,6 +493,10 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
 
     content = _DISPLAY_MATH_RE.sub(_display, content)
     content = _INLINE_MATH_RE.sub(_inline, content)
+    # Also extract backslash-delimited math that LLMs may write directly.
+    # Process after $-delimited so placeholders from above are never re-matched.
+    content = _DISPLAY_MATH_BK_RE.sub(_display, content)
+    content = _INLINE_MATH_BK_RE.sub(_inline, content)
     return content, protected
 
 
