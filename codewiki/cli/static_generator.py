@@ -395,29 +395,59 @@ _DISPLAY_MATH_RE = re.compile(r'\$\$([^$]+?)\$\$', re.DOTALL)
 _INLINE_MATH_RE = re.compile(r'\$(?!\s)([^$\n]+?)\$(?!\$)')
 
 
-def _normalize_math_delimiters(content: str) -> str:
-    """Convert $...$ and $$...$$ to \\(...\\) / \\[...\\] before markdown rendering.
+def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
+    """Extract math blocks BEFORE markdown rendering to prevent markdown-it from
+    escaping LaTeX delimiters (\\[ → [, \\( → () and double-backslashes (\\\\ → \\).
 
-    Segments containing CJK characters are left unchanged so that Chinese
-    prose accidentally enclosed by dollar signs is not forwarded to KaTeX.
+    Each block is replaced with an all-alphanumeric placeholder that markdown-it
+    leaves untouched.  The companion list maps placeholder → HTML replacement with
+    properly escaped content for the browser / KaTeX auto-render.
+
+    Segments containing CJK characters are skipped so Chinese prose enclosed by
+    dollar signs is never forwarded to KaTeX.
 
     $$...$$ is processed first to avoid partial matches with $...$.
     """
-    def _replace_display(m: re.Match) -> str:
+    import html as _html
+    protected: list[tuple[str, str]] = []
+
+    def _display(m: re.Match) -> str:
         inner = m.group(1)
         if _CJK_RE.search(inner):
             return m.group(0)
-        return f'\\[{inner}\\]'
+        idx = len(protected)
+        ph = f'CWIKIMD{idx:06d}'
+        # HTML-escape so & < > are safe in the DOM; KaTeX reads textContent
+        # which the browser decodes back to the original LaTeX characters.
+        escaped = _html.escape(inner, quote=False)
+        protected.append((ph, f'<div class="math-block">\\[{escaped}\\]</div>'))
+        return ph
 
-    def _replace_inline(m: re.Match) -> str:
+    def _inline(m: re.Match) -> str:
         inner = m.group(1)
         if _CJK_RE.search(inner):
             return m.group(0)
-        return f'\\({inner}\\)'
+        idx = len(protected)
+        ph = f'CWIKIMI{idx:06d}'
+        escaped = _html.escape(inner, quote=False)
+        protected.append((ph, f'<span class="math-inline">\\({escaped}\\)</span>'))
+        return ph
 
-    content = _DISPLAY_MATH_RE.sub(_replace_display, content)
-    content = _INLINE_MATH_RE.sub(_replace_inline, content)
-    return content
+    content = _DISPLAY_MATH_RE.sub(_display, content)
+    content = _INLINE_MATH_RE.sub(_inline, content)
+    return content, protected
+
+
+def _restore_math_blocks(html: str, protected: list[tuple[str, str]]) -> str:
+    """Restore protected math blocks after markdown rendering.
+
+    markdown-it may wrap a block-level placeholder in a ``<p>`` tag; we strip
+    that wrapper when restoring display-math divs.
+    """
+    for ph, math_html in protected:
+        html = html.replace(f'<p>{ph}</p>', math_html)
+        html = html.replace(ph, math_html)
+    return html
 
 
 # Lazy-initialised markdown parser (avoids top-level import of markdown_it
@@ -436,9 +466,12 @@ def _markdown_to_static_html(content: str) -> str:
     """Convert markdown to HTML for static output (no base_url rewriting needed)."""
     # Fix spaces only (no base_url — links will be rewritten to .html afterwards)
     content = _fix_markdown_links(content)
-    # Normalise math delimiters before rendering so KaTeX only needs \(...\) / \[...\]
-    content = _normalize_math_delimiters(content)
+    # Extract math blocks BEFORE markdown rendering so markdown-it cannot escape
+    # the LaTeX delimiters (\[ → [, \( → () or strip double-backslashes (\\ → \).
+    content, protected_math = _extract_math_blocks(content)
     html = _get_md_parser().render(content)
+    # Restore math blocks as raw HTML with proper KaTeX delimiters.
+    html = _restore_math_blocks(html, protected_math)
 
     # Handle mermaid fences
     import html as html_module
