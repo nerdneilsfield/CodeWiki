@@ -90,6 +90,9 @@ def analyze_vitis_cfg(
 
     # Parse [connectivity] section
     if "connectivity" in sections:
+        # Track kernel instances already created to avoid duplicate nodes
+        seen_kernel_instances: set[str] = set()
+
         for key, value in sections["connectivity"]:
             if not value:
                 continue
@@ -100,16 +103,19 @@ def analyze_vitis_cfg(
                 if len(parts) >= 3:
                     kernel_name, count, instance_name = parts[0], parts[1], parts[2]
                     comp_id = f"{module_path}.{instance_name}"
-                    nodes.append(Node(
-                        id=comp_id,
-                        name=instance_name,
-                        component_type="kernel_instance",
-                        file_path=file_path,
-                        relative_path=rel_path,
-                        node_type="kernel_instance",
-                        display_name=f"kernel {kernel_name} as {instance_name}",
-                        component_id=comp_id,
-                    ))
+                    if comp_id not in seen_kernel_instances:
+                        seen_kernel_instances.add(comp_id)
+                        nodes.append(Node(
+                            id=comp_id,
+                            name=instance_name,
+                            component_type="kernel_instance",
+                            file_path=file_path,
+                            relative_path=rel_path,
+                            node_type="kernel_instance",
+                            display_name=f"kernel {kernel_name} as {instance_name}",
+                            component_id=comp_id,
+                            is_hls_kernel=True,
+                        ))
 
             elif key == "stream_connect":
                 # stream_connect=src_inst.port:dst_inst.port
@@ -126,14 +132,31 @@ def analyze_vitis_cfg(
                     ))
 
             elif key == "sp":
-                # sp=instance.port:DDR[0]
+                # sp=instance.port:memory_resource
+                # Also create a kernel_instance node for the instance if not yet seen —
+                # configs that use only sp= (no nk=) still reference a kernel that the
+                # dependency analyzer needs to know about so HLS mode can be detected.
                 parts = value.split(":")
                 if len(parts) >= 2:
                     port_spec = parts[0]
                     memory = ":".join(parts[1:])
                     inst = port_spec.split(".")[0] if "." in port_spec else port_spec
+                    comp_id = f"{module_path}.{inst}"
+                    if comp_id not in seen_kernel_instances:
+                        seen_kernel_instances.add(comp_id)
+                        nodes.append(Node(
+                            id=comp_id,
+                            name=inst,
+                            component_type="kernel_instance",
+                            file_path=file_path,
+                            relative_path=rel_path,
+                            node_type="kernel_instance",
+                            display_name=f"kernel instance: {inst}",
+                            component_id=comp_id,
+                            is_hls_kernel=True,
+                        ))
                     relationships.append(CallRelationship(
-                        caller=f"{module_path}.{inst}",
+                        caller=comp_id,
                         callee=memory,
                         relationship_type="memory_map",
                         is_resolved=False,

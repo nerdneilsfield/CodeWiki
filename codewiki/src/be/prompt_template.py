@@ -984,7 +984,10 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
                 core_component_codes += f"  Parameters: {', '.join(params)}\n"
             # HLS kernel hardware interface (only for compiled-language HLS nodes)
             if getattr(node, "is_hls_kernel", False):
-                core_component_codes += f"  HLS Kernel: yes (extern \"C\" / Vitis top)\n"
+                if node.component_type in ("kernel_instance", "hls_project"):
+                    core_component_codes += f"  HLS Kernel: yes (Vitis kernel instance)\n"
+                else:
+                    core_component_codes += f"  HLS Kernel: yes (extern \"C\" / Vitis top)\n"
             hls_pragmas = getattr(node, "hls_pragmas", None)
             if hls_pragmas:
                 for pragma in hls_pragmas:
