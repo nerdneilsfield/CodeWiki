@@ -822,7 +822,7 @@ class GuideGenerator:
             response = await self._call_llm_with_fallback(section_prompt)
             content = self._parse_guide_response(response)
 
-            out_path = self._safe_output_path(f"guide-beginners-guide-{section_id}.md")
+            out_path = self._safe_output_path(f"guide-beginners-guide-{i+1:02d}-{section_id}.md")
             file_manager.save_text(content, out_path)
             output_files.append(out_path)
 
@@ -841,7 +841,7 @@ class GuideGenerator:
         logger.info("📝 Beginner's Guide — Phase C: parent page")
         # Reuse pre-built section_slugs — no second _unique_slug call here
         chapters_list = "\n".join(
-            f"- [{s.title}](guide-beginners-guide-{section_slugs[i]}.md): {s.summary}"
+            f"- [{s.title}](guide-beginners-guide-{i+1:02d}-{section_slugs[i]}.md): {s.summary}"
             for i, s in enumerate(sections)
         )
         parent_prompt = BEGINNER_PARENT_PROMPT.format(
@@ -1046,7 +1046,7 @@ class GuideGenerator:
             logger.info(f"  ⌛ Algorithm {idx+1}/{len(algorithms)}: {algo_title}")
             response = await self._call_llm_with_fallback(dd_prompt)
             content = self._parse_guide_response(response)
-            out_path = self._safe_output_path(f"guide-core-algorithms-{algo_id}.md")
+            out_path = self._safe_output_path(f"guide-core-algorithms-{idx+1:02d}-{algo_id}.md")
             file_manager.save_text(content, out_path)
             output_files[idx] = out_path
             logger.info(f"  ✓ Algorithm {idx+1}/{len(algorithms)}: {algo_title}")
@@ -1060,7 +1060,7 @@ class GuideGenerator:
         logger.info("📝 Core Algorithms — Phase C: parent page")
         # Reuse pre-built algo_slugs — no second _unique_slug call here
         algos_list = "\n".join(
-            f"- [{a.title}](guide-core-algorithms-{algo_slugs[i]}.md): {a.summary}"
+            f"- [{a.title}](guide-core-algorithms-{i+1:02d}-{algo_slugs[i]}.md): {a.summary}"
             for i, a in enumerate(algorithms)
         )
         parent_prompt = ALGORITHM_PARENT_PROMPT.format(
