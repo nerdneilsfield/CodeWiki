@@ -1,3 +1,22 @@
+# ── Shared Mermaid safety rules ───────────────────────────────────────────────
+# Embedded verbatim in every <MERMAID_REQUIREMENTS> block and in the base system
+# prompts.  Rule rationale: Mermaid's lexer rejects Unicode math operators in
+# node/edge labels, causing silent parse errors visible to readers.  Math belongs
+# in LaTeX, not in diagrams.
+_MERMAID_SAFETY_RULES = """\
+MERMAID SYNTAX SAFETY — violations cause parse errors visible to readers:
+- Node and edge labels must be plain ASCII (or CJK for CJK-language repos).
+  NEVER put Unicode math operators in labels: ∃ ∀ ∈ ∉ ⊂ ⊆ ⊇ ∧ ∨ ∩ ∪ ≡ ≈ ≠ → ⇒ ≤ ≥.
+  Use plain-text equivalents: "exists", "forall", "in", "not in", "subset",
+  "and", "or", "intersect", "union", "equiv", "approx", "neq", "implies".
+  BAD:  E{∃c: lower(d(c)) = q'?}   ← ∃ and ' break the Mermaid lexer
+  GOOD: E{exists c: lower d c = q_low?}
+- No single-quote characters (') inside node labels — rewrite as "_low" suffix or omit.
+- Math expressions belong in LaTeX blocks ($$...$$), NEVER inside diagram labels.
+  A diagram shows flow and structure; LaTeX expresses the math. Keep them separate.\
+"""
+# ──────────────────────────────────────────────────────────────────────────────
+
 SYSTEM_PROMPT = """
 <ROLE>
 You are a senior software architect writing a technical book chapter about the `{module_name}` module. Your goal is not merely to catalog code — it is to make a reader **understand** the module the way its original author does: the problems it solves, the ideas behind it, and the tradeoffs that shaped it.
@@ -50,6 +69,7 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
 3. **Visual Documentation**:
    - Mermaid diagrams for architecture, dependency graphs, and data flow — include ONLY when they genuinely clarify (max ~10 nodes per diagram)
    - Every diagram must be accompanied by a written explanation — diagrams supplement prose, never replace it
+   - **Mermaid syntax safety**: node and edge labels must be plain ASCII text.  Never use Unicode math operators (∃ ∀ ∈ ⊂ ∧ ∨ ≡ …) or single quotes in labels — they break the Mermaid parser.  Use text equivalents ("exists", "in", "subset", …) or move the math into a LaTeX block.
    - Mathematical notation: use LaTeX syntax (`$inline$` / `$$block$$`) ONLY when a formula communicates something prose cannot — e.g., algorithmic complexity (O(n log n)), ML loss functions, probability distributions, or cryptographic properties. Default to plain language; reach for math only when it genuinely adds precision.
 </DOCUMENTATION_STRUCTURE>
 
@@ -122,7 +142,7 @@ Good: "`Tokenizer.split()` exists because the downstream parser expects a flat t
 
 <DOCUMENTATION_REQUIREMENTS>
 1. **Opening**: A vivid, jargon-light paragraph explaining what this module does and why — a reader should "get it" in 30 seconds
-2. **Architecture**: A Mermaid diagram (only if it genuinely clarifies, max ~10 nodes) followed by a narrative walkthrough of the component roles and data flow
+2. **Architecture**: A Mermaid diagram (only if it genuinely clarifies, max ~10 nodes) followed by a narrative walkthrough of the component roles and data flow.  Node and edge labels must be plain ASCII — Unicode math operators (∃ ∀ ∈ ⊂ ∧ ∨ ≡ …) break the Mermaid parser; use "exists", "in", "subset", etc. instead.  Math belongs in LaTeX, not in diagram labels.
 3. **Component deep-dives**: For each important class/function — purpose, internal mechanics, parameters, return values, side effects, explained with enough context that a newcomer understands not just the API but the design reasoning
 4. **Dependency analysis**: What this module calls (and why), what calls it (and what they expect), and the data contracts in between
 5. **Design decisions & tradeoffs**: Key patterns chosen, alternatives that exist, and the tensions in the current approach
@@ -490,6 +510,8 @@ Every step MUST include:
 <MERMAID_REQUIREMENTS>
 - A `flowchart TD` showing the installation pipeline (clone → install deps → configure → run)
 - A `sequenceDiagram` showing the first-run interaction between user, CLI, and backend
+- SYNTAX SAFETY: node/edge labels must be plain ASCII. Unicode math operators (∃ ∀ ∈ ⊂ ∧ ∨ ≡ …)
+  and single quotes (') in labels cause parse errors. Use text equivalents or LaTeX blocks instead.
 </MERMAID_REQUIREMENTS>
 
 <REPO_README>
@@ -589,6 +611,15 @@ Every major concept or flow MUST have a companion Mermaid diagram:
 - `sequenceDiagram` for request traces and interactions
 - `classDiagram` for concept relationship maps (even if not literally classes)
 Max ~15 nodes per diagram.  Every diagram must be followed by a prose walkthrough.
+
+SYNTAX SAFETY (violations cause parse errors the reader sees):
+- Node and edge labels must be plain ASCII (or CJK for CJK-language output).
+  NEVER use Unicode math operators: ∃ ∀ ∈ ∉ ⊂ ⊆ ⊇ ∧ ∨ ∩ ∪ ≡ ≈ ≠ → ⇒ ≤ ≥.
+  Use plain-text equivalents: "exists", "forall", "in", "subset", "and", "or".
+  BAD:  E{∃c: lower(d(c)) = q'?}   ← ∃ and ' break the Mermaid lexer
+  GOOD: E{exists c: lower d c = q_low?}
+- No single-quote characters (') inside node labels.
+- Math expressions belong in LaTeX blocks ($$...$$), NOT in diagram labels.
 </MERMAID_REQUIREMENTS>
 
 <FULL_OUTLINE>
@@ -753,6 +784,19 @@ You are an algorithm researcher writing a formal deep-dive on the
 - `flowchart` for algorithm execution steps
 - `stateDiagram-v2` for state transitions (if applicable)
 - `graph` for data structure relationships
+
+CRITICAL SYNTAX SAFETY — this prompt uses heavy LaTeX math; do NOT let it leak
+into Mermaid labels:
+- Node and edge labels must be plain ASCII (or CJK for CJK-language output).
+  NEVER use Unicode math operators: ∃ ∀ ∈ ∉ ⊂ ⊆ ⊇ ∧ ∨ ∩ ∪ ≡ ≈ ≠ → ⇒ ≤ ≥.
+  Use plain-text equivalents: "exists", "forall", "in", "not in", "subset",
+  "and", "or", "intersect", "union", "equiv", "approx", "neq", "implies".
+  BAD:  E{∃c: lower(d(c)) = q'?}   ← ∃ and ' cause a Mermaid parse error
+  GOOD: E{exists c: lower d c = q_low?}
+- No single-quote characters (') inside node labels — use "_low" suffix or omit.
+- Formal math notation (predicates, set expressions, recurrences) belongs ONLY in
+  LaTeX blocks ($$...$$). A diagram shows execution flow; LaTeX shows the math.
+  These are separate concerns — never mix them.
 </MERMAID_REQUIREMENTS>
 
 <ALGORITHM_SOURCE_CODE>
