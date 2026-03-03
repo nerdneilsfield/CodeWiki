@@ -818,6 +818,7 @@ class GuideGenerator:
                 language_instruction=lang_inst,
             )
 
+            logger.info(f"  ⌛ Section {i+1}/{len(sections)}: {section_title}")
             response = await self._call_llm_with_fallback(section_prompt)
             content = self._parse_guide_response(response)
 
@@ -1042,6 +1043,7 @@ class GuideGenerator:
                 language_instruction=lang_inst,
             )
 
+            logger.info(f"  ⌛ Algorithm {idx+1}/{len(algorithms)}: {algo_title}")
             response = await self._call_llm_with_fallback(dd_prompt)
             content = self._parse_guide_response(response)
             out_path = self._safe_output_path(f"guide-core-algorithms-{algo_id}.md")
