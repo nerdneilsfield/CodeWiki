@@ -661,7 +661,13 @@ class StaticHTMLGenerator:
                     nav_html += f'  <div class="nvsub" style="display:block">\n'
                     for sub_file in sub_pages:
                         sub_html = sub_file.replace(".md", ".html")
-                        sub_label = sub_file[len(sub_prefix):-3].replace("-", " ").title()
+                        raw = sub_file[len(sub_prefix):-3]
+                        # "01-some-title" → "1. Some Title"
+                        m = re.match(r'^(\d+)-(.+)$', raw)
+                        if m:
+                            sub_label = f"{int(m.group(1))}. {m.group(2).replace('-', ' ').title()}"
+                        else:
+                            sub_label = raw.replace("-", " ").title()
                         sub_active = ' on' if html_name == sub_html else ''
                         nav_html += (
                             f'    <div class="nav-row" style="padding-left:24px">\n'
