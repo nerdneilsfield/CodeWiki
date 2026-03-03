@@ -549,7 +549,7 @@
                 await renderMermaidDiagrams();
 
                 // Render math (KaTeX)
-                // Delimiters already normalised by normalizeMathDelimiters() above.
+                // Math is pre-wrapped in \[...\] / \(...\) by extractMathBlocks().
                 if (typeof renderMathInElement !== 'undefined') {
                     renderMathInElement(content, {
                         delimiters: [
@@ -622,26 +622,51 @@
             content.addEventListener('click', listener);
         }
         
-        function normalizeMathDelimiters(text) {
-            // Convert $...$ and $$...$$ to \(...\) / \[...\] so KaTeX does not need
-            // dollar delimiters and cannot accidentally match Chinese prose.
-            // Segments containing CJK characters are left unchanged.
+        // Extract $...$ and $$...$$ blocks BEFORE markdown parsing so that marked
+        // cannot escape the LaTeX delimiters (\[ → [, \( → () or strip \\
+        // line-breaks inside aligned environments.
+        // Segments containing CJK characters are left unchanged to avoid
+        // accidentally forwarding Chinese prose to KaTeX.
+        function extractMathBlocks(text) {
             const CJK_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+            const blocks = [];   // [[placeholder, htmlReplacement], ...]
+
+            function escape(s) {
+                return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+
             // Display math first to avoid partial matches with inline math
             text = text.replace(/\$\$([^$]+?)\$\$/gs, function(match, inner) {
-                return CJK_RE.test(inner) ? match : '\\[' + inner + '\\]';
+                if (CJK_RE.test(inner)) return match;
+                const ph = 'CWIKIMD' + String(blocks.length).padStart(6, '0');
+                blocks.push([ph, '<div class="math-block">\\[' + escape(inner) + '\\]</div>']);
+                return ph;
             });
             text = text.replace(/\$(?!\s)([^$\n]+?)\$(?!\$)/g, function(match, inner) {
-                return CJK_RE.test(inner) ? match : '\\(' + inner + '\\)';
+                if (CJK_RE.test(inner)) return match;
+                const ph = 'CWIKIMI' + String(blocks.length).padStart(6, '0');
+                blocks.push([ph, '<span class="math-inline">\\(' + escape(inner) + '\\)</span>']);
+                return ph;
             });
-            return text;
+            return [text, blocks];
+        }
+
+        function restoreMathBlocks(html, blocks) {
+            for (const [ph, mathHtml] of blocks) {
+                // marked may wrap a block-level placeholder in <p> tags
+                html = html.replace('<p>' + ph + '</p>', mathHtml);
+                html = html.replace(ph, mathHtml);
+            }
+            return html;
         }
 
         async function renderMarkdown(markdown) {
-            // Normalise math delimiters before parsing so KaTeX only needs \(...\) / \[...\]
-            markdown = normalizeMathDelimiters(markdown);
-            // Convert markdown to HTML using marked
-            let html = marked.parse(markdown);
+            // Extract math blocks BEFORE parsing so marked cannot escape the
+            // LaTeX delimiters or strip double-backslashes inside aligned envs.
+            const [textWithPhs, protectedMath] = extractMathBlocks(markdown);
+            let html = marked.parse(textWithPhs);
+            // Restore math blocks as raw HTML with \[...\] / \(...\) for KaTeX.
+            html = restoreMathBlocks(html, protectedMath);
             
             // Process mermaid code blocks
             html = html.replace(
