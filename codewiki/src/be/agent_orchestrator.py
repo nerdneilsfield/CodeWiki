@@ -198,14 +198,19 @@ class AgentOrchestrator:
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
             module_tree = file_manager.load_json(module_tree_path)
 
-        # Estimate prompt tokens to pre-select long-context model if needed
+        # Estimate prompt tokens to pre-select long-context model if needed.
+        # The model receives system_prompt + tool_definitions + user_prompt, so we
+        # add a fixed overhead for the parts we don't measure here (~12 k tokens for
+        # the system prompt + pydantic_ai tool schemas).  Under-counting leads to
+        # the fallback chain being used when the long-context model should be chosen.
+        _TOKEN_OVERHEAD = 12_000
         user_prompt = format_user_prompt(
             module_name=module_name,
             core_component_ids=core_component_ids,
             components=components,
             module_tree=module_tree,
         )
-        estimated_tokens = count_tokens(user_prompt)
+        estimated_tokens = count_tokens(user_prompt) + _TOKEN_OVERHEAD
 
         # Create agent
         agent = self.create_agent(module_name, components, core_component_ids, estimated_tokens)

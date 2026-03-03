@@ -390,12 +390,30 @@ class DocumentationGenerator:
         # immediately on a fresh agent — no delay needed.
         _WORKER_RETRY_DELAYS = [10, 30, 90]
 
+        def _is_context_length_error(exc: Exception) -> bool:
+            """Return True when the error is a deterministic input-too-long rejection.
+
+            These 400 errors are caused by the prompt exceeding the model's
+            context window.  Retrying with the same input will always fail, so
+            the retry loop must skip them entirely.
+            """
+            if isinstance(exc, openai.APIStatusError) and exc.status_code == 400:
+                msg = str(exc)
+                return (
+                    "input length" in msg
+                    or "Range of input" in msg
+                    or "context_length_exceeded" in msg
+                    or "maximum context length" in msg.lower()
+                )
+            return False
+
         def _retry_delay(attempt: int, exc: Exception) -> int:
             """Return seconds to wait before the given retry attempt.
 
             Server-side transient errors (rate limits, 5xx) need real back-off.
             Model-quality errors (HTTP 400 invalid JSON args, UnexpectedModelBehavior)
             resolve immediately once a fresh agent context is used — delay = 0.
+            Context-length errors are deterministic — never retried (caller checks).
             """
             is_model_quality = (
                 isinstance(exc, UnexpectedModelBehavior)
@@ -448,6 +466,12 @@ class DocumentationGenerator:
                             break  # success
                         except Exception as exc:
                             last_exc = exc
+                            if _is_context_length_error(exc):
+                                logger.warning(
+                                    f"  ✗ '{label}' prompt exceeds model context limit"
+                                    " — skipping retries"
+                                )
+                                break  # deterministic; retrying the same input won't help
 
                     if last_exc is not None:
                         raise last_exc
