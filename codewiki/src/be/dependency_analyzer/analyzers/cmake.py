@@ -62,10 +62,12 @@ class TreeSitterCMakeAnalyzer:
         parser = Parser(lang)
         tree = parser.parse(bytes(self.content, "utf8"))
         root = tree.root_node
-        lines = self.content.splitlines()
+        self._lines = self.content.splitlines()
 
         top_level_nodes = {}
-        self._extract_nodes(root, top_level_nodes, lines)
+        self._extract_nodes(root, top_level_nodes, self._lines)
+        # Track build targets created in _extract_nodes to avoid duplicates
+        self._build_targets: set[str] = set()
         self._extract_relationships(root, top_level_nodes)
 
     def _extract_nodes(self, node, top_level_nodes, lines):
@@ -156,6 +158,28 @@ class TreeSitterCMakeAnalyzer:
                         if arg_nodes:
                             target_name = self._node_text(arg_nodes[0]).strip()
                             target_id = self._get_component_id(target_name)
+                            # Create a Node for the build target so the component dict
+                            # has an entry — without this, the target_id used as caller
+                            # in relationships resolves to None in the components dict,
+                            # causing the CMakeLists file content to be skipped.
+                            if target_id not in self._build_targets:
+                                self._build_targets.add(target_id)
+                                comp_type = "executable" if cmd_name == "add_executable" else "library"
+                                self.nodes.append(Node(
+                                    id=target_id,
+                                    name=target_name,
+                                    component_type=comp_type,
+                                    file_path=str(self.file_path),
+                                    relative_path=self._get_relative_path(),
+                                    source_code="\n".join(
+                                        self._lines[node.start_point[0]:node.end_point[0] + 1]
+                                    ),
+                                    start_line=node.start_point[0] + 1,
+                                    end_line=node.end_point[0] + 1,
+                                    node_type=comp_type,
+                                    display_name=f"{cmd_name}({target_name})",
+                                    component_id=target_id,
+                                ))
                             skip_keywords = {"STATIC", "SHARED", "MODULE", "OBJECT", "INTERFACE", "IMPORTED", "ALIAS"}
                             for arg in arg_nodes[1:]:
                                 val = self._node_text(arg).strip()
