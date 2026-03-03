@@ -9,8 +9,8 @@ MERMAID SYNTAX SAFETY — violations cause parse errors visible to readers:
   NEVER put Unicode math operators in labels: ∃ ∀ ∈ ∉ ⊂ ⊆ ⊇ ∧ ∨ ∩ ∪ ≡ ≈ ≠ → ⇒ ≤ ≥.
   Use plain-text equivalents: "exists", "forall", "in", "not in", "subset",
   "and", "or", "intersect", "union", "equiv", "approx", "neq", "implies".
-  BAD:  E{∃c: lower(d(c)) = q'?}   ← ∃ and ' break the Mermaid lexer
-  GOOD: E{exists c: lower d c = q_low?}
+  BAD:  E{{∃c: lower(d(c)) = q'?}}   ← ∃ and ' break the Mermaid lexer
+  GOOD: E{{exists c: lower d c = q_low?}}
 - No single-quote characters (') inside node labels — rewrite as "_low" suffix or omit.
 - Math expressions belong in LaTeX blocks ($$...$$), NEVER inside diagram labels.
   A diagram shows flow and structure; LaTeX expresses the math. Keep them separate.\
@@ -616,8 +616,8 @@ SYNTAX SAFETY (violations cause parse errors the reader sees):
 - Node and edge labels must be plain ASCII (or CJK for CJK-language output).
   NEVER use Unicode math operators: ∃ ∀ ∈ ∉ ⊂ ⊆ ⊇ ∧ ∨ ∩ ∪ ≡ ≈ ≠ → ⇒ ≤ ≥.
   Use plain-text equivalents: "exists", "forall", "in", "subset", "and", "or".
-  BAD:  E{∃c: lower(d(c)) = q'?}   ← ∃ and ' break the Mermaid lexer
-  GOOD: E{exists c: lower d c = q_low?}
+  BAD:  E{{∃c: lower(d(c)) = q'?}}   ← ∃ and ' break the Mermaid lexer
+  GOOD: E{{exists c: lower d c = q_low?}}
 - No single-quote characters (') inside node labels.
 - Math expressions belong in LaTeX blocks ($$...$$), NOT in diagram labels.
 </MERMAID_REQUIREMENTS>
@@ -791,8 +791,8 @@ into Mermaid labels:
   NEVER use Unicode math operators: ∃ ∀ ∈ ∉ ⊂ ⊆ ⊇ ∧ ∨ ∩ ∪ ≡ ≈ ≠ → ⇒ ≤ ≥.
   Use plain-text equivalents: "exists", "forall", "in", "not in", "subset",
   "and", "or", "intersect", "union", "equiv", "approx", "neq", "implies".
-  BAD:  E{∃c: lower(d(c)) = q'?}   ← ∃ and ' cause a Mermaid parse error
-  GOOD: E{exists c: lower d c = q_low?}
+  BAD:  E{{∃c: lower(d(c)) = q'?}}   ← ∃ and ' cause a Mermaid parse error
+  GOOD: E{{exists c: lower d c = q_low?}}
 - No single-quote characters (') inside node labels — use "_low" suffix or omit.
 - Formal math notation (predicates, set expressions, recurrences) belongs ONLY in
   LaTeX blocks ($$...$$). A diagram shows execution flow; LaTeX shows the math.
