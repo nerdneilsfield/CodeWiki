@@ -67,7 +67,7 @@ from codewiki.src.be.agent_tools.deps import CodeWikiDeps
 from codewiki.src.be.agent_tools.read_code_components import read_code_components_tool
 from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_tool
 from codewiki.src.be.agent_tools.generate_sub_module_documentations import generate_sub_module_documentation_tool
-from codewiki.src.be.llm_services import create_fallback_models, select_agent_model
+from codewiki.src.be.llm_services import create_fallback_models, create_long_context_model
 from codewiki.src.be.prompt_template import (
     format_user_prompt,
     format_system_prompt,
@@ -89,6 +89,9 @@ class AgentOrchestrator:
     def __init__(self, config: Config):
         self.config = config
         self.fallback_models = create_fallback_models(config)
+        self.long_context_model = (
+            create_long_context_model(config) if config.long_context_model else None
+        )
         self.custom_instructions = config.get_prompt_addition() if config else None
         self.output_language = config.output_language if config else "en"
     
@@ -96,7 +99,13 @@ class AgentOrchestrator:
                     core_component_ids: List[str],
                     estimated_tokens: int = 0) -> Agent:
         """Create an appropriate agent based on module complexity."""
-        model = select_agent_model(self.config, estimated_tokens)
+        if (
+            self.long_context_model
+            and estimated_tokens > self.config.long_context_threshold
+        ):
+            model = self.long_context_model
+        else:
+            model = self.fallback_models
 
         if is_complex_module(components, core_component_ids):
             return Agent(
