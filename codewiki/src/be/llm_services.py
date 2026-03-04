@@ -3,6 +3,7 @@ LLM service factory for creating configured LLM clients.
 """
 import time
 import logging
+import random
 from functools import lru_cache
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -143,6 +144,34 @@ def _is_cf_timeout(exc: Exception) -> bool:
     )
 
 
+def _parse_retry_after(exc: Exception) -> float | None:
+    """Extract Retry-After seconds from a 429 RateLimitError response, if present.
+
+    Returns None for any other exception type or when the header is absent.
+    """
+    import openai
+    if not isinstance(exc, openai.RateLimitError):
+        return None
+    headers = getattr(getattr(exc, "response", None), "headers", {})
+    val = headers.get("retry-after") or headers.get("Retry-After")
+    if val:
+        try:
+            return float(val)
+        except ValueError:
+            pass
+    return None
+
+
+def _sleep_with_jitter(base_delay: float) -> None:
+    """Sleep for base_delay + random jitter (uniform 0-50% of base).
+
+    Avoids the thundering-herd problem when multiple workers all retry
+    simultaneously after a rate-limit or transient server error.
+    """
+    actual = base_delay + random.uniform(0, base_delay * 0.5)
+    time.sleep(actual)
+
+
 def _call_llm_streaming(client: OpenAI, model: str, prompt: str,
                         temperature: float, config: Config) -> str:
     """Call the LLM in streaming mode and reassemble the full response.
@@ -223,7 +252,12 @@ def call_llm(
                 f"(attempt {attempt}/{len(_RETRY_DELAYS)}) after: {last_exc}"
                 + (" [streaming]" if use_streaming else "")
             )
-            time.sleep(delay)
+            retry_after = _parse_retry_after(last_exc)
+            if retry_after is not None:
+                _logger.info(f"call_llm: honouring Retry-After: {retry_after}s")
+                time.sleep(retry_after)
+            else:
+                _sleep_with_jitter(delay)
         try:
             if use_streaming:
                 content = _call_llm_streaming(client, model, prompt, temperature, config)

@@ -3,6 +3,7 @@ import hashlib
 import logging
 import os
 import json
+import random
 from collections import defaultdict
 from typing import Dict, List, Any, Optional
 from copy import deepcopy
@@ -395,6 +396,22 @@ class DocumentationGenerator:
         # immediately on a fresh agent — no delay needed.
         _WORKER_RETRY_DELAYS = [10, 30, 90]
 
+        def _jitter(base: float) -> float:
+            """Add uniform 0-50% jitter to a base delay."""
+            return base + random.uniform(0, base * 0.5)
+
+        def _get_retry_after(exc: Exception) -> float | None:
+            """Extract Retry-After from a 429 response header, if present."""
+            if isinstance(exc, openai.RateLimitError):
+                headers = getattr(getattr(exc, "response", None), "headers", {})
+                val = headers.get("retry-after") or headers.get("Retry-After")
+                if val:
+                    try:
+                        return float(val)
+                    except ValueError:
+                        pass
+            return None
+
         def _is_context_length_error(exc: Exception) -> bool:
             """Return True when the error is a deterministic input-too-long rejection.
 
@@ -454,7 +471,9 @@ class DocumentationGenerator:
                                 + f" after: {last_exc}"
                             )
                             if delay:
-                                await asyncio.sleep(delay)
+                                retry_after = _get_retry_after(last_exc)
+                                actual_delay = retry_after if retry_after is not None else _jitter(delay)
+                                await asyncio.sleep(actual_delay)
                         try:
                             if key == ROOT_KEY:
                                 logger.info("📚 Generating repository overview")
