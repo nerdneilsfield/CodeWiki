@@ -23,15 +23,33 @@ _RETRY_DELAYS = [10, 30, 90]
 _LLM_TIMEOUT = httpx.Timeout(180.0)
 
 
-def _make_provider(config: Config) -> OpenAIProvider:
-    """Create an OpenAIProvider with a 180 s timeout."""
-    return OpenAIProvider(
-        openai_client=AsyncOpenAI(
-            base_url=config.llm_base_url,
-            api_key=config.llm_api_key,
-            timeout=_LLM_TIMEOUT,
-        )
+@lru_cache(maxsize=4)
+def _get_cached_async_client(base_url: str, api_key: str) -> AsyncOpenAI:
+    """Return (and cache) an AsyncOpenAI client for the given endpoint.
+
+    lru_cache keyed on (base_url, api_key) so the underlying httpx connection
+    pool is reused across all concurrent agent.run() calls — no repeated TLS
+    handshakes or pool allocations per module.
+    maxsize=4 accommodates main + fallback + long-context endpoints.
+    """
+    return AsyncOpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        timeout=_LLM_TIMEOUT,
     )
+
+
+@lru_cache(maxsize=4)
+def _get_cached_async_provider(base_url: str, api_key: str) -> OpenAIProvider:
+    """Return (and cache) an OpenAIProvider wrapping a cached AsyncOpenAI client."""
+    return OpenAIProvider(
+        openai_client=_get_cached_async_client(base_url, api_key)
+    )
+
+
+def _make_provider(config: Config) -> OpenAIProvider:
+    """Return (cached) OpenAIProvider for the given config endpoint."""
+    return _get_cached_async_provider(config.llm_base_url, config.llm_api_key)
 
 
 def create_main_model(config: Config) -> OpenAIModel:
