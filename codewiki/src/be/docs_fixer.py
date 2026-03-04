@@ -14,11 +14,15 @@ Validation strategy for Mermaid (in priority order):
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import os
 import re
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -79,6 +83,36 @@ class FixStats:
     math_invalid: int = 0
     math_repaired: int = 0
     math_failed: int = 0
+
+
+# ── Incremental cache ─────────────────────────────────────────────────────────
+
+_FIX_CACHE_FILENAME = ".fix_docs_cache.json"
+
+
+def _file_hash(text: str) -> str:
+    """Return a 16-char hex digest of the text (SHA-256 truncated)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _load_hash_cache(docs_path: Path) -> dict[str, str]:
+    """Load the hash cache from disk; return empty dict on any error."""
+    cache_file = docs_path / _FIX_CACHE_FILENAME
+    if cache_file.exists():
+        try:
+            return json.loads(cache_file.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_hash_cache(docs_path: Path, cache: dict[str, str]) -> None:
+    """Persist the hash cache to disk."""
+    cache_file = docs_path / _FIX_CACHE_FILENAME
+    try:
+        cache_file.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning(f"Could not save fix_docs cache: {exc}")
 
 
 # ── Phase 1: Markdown formatting ────────────────────────────────────────────────
@@ -436,11 +470,12 @@ def fix_mermaid_in_file(path: Path, config: Config, stats: FixStats) -> bool:
 def fix_docs(working_dir: str, config: Config) -> FixStats:
     """Apply all three post-processing fix phases to every .md file in *working_dir*.
 
-    Phase 1 — Markdown formatting (mdformat, mechanical)
+    Phase 1 — Markdown formatting (mdformat, mechanical) — run in parallel
     Phase 2 — Math repair (LaTeX validation + LLM)
     Phase 3 — Mermaid repair (mmdc/regex + LLM)
 
-    This is the hook called at the end of the documentation generation pipeline.
+    Hash-based incremental skip: if a file's content after Phase 1 matches the
+    hash stored from the last successful run, Phases 2 and 3 are skipped.
     """
     docs_path = Path(working_dir)
     md_files = sorted(docs_path.glob("*.md"))
@@ -456,13 +491,53 @@ def fix_docs(working_dir: str, config: Config) -> FixStats:
     )
 
     stats = FixStats()
-    for md_file in md_files:
+    hash_cache = _load_hash_cache(docs_path)
+    updated_cache: dict[str, str] = {}
+
+    # ── Phase 1: parallel mdformat ────────────────────────────────────────────
+    def _phase1(md_file: Path) -> tuple[Path, str, int]:
+        """Format one file; returns (path, formatted_text, files_formatted_delta).
+
+        Uses a thread-local FixStats to avoid shared-state races.
+        """
         try:
             text = md_file.read_text(encoding="utf-8")
-            original = text
+            local_stats = FixStats()
+            formatted = _format_markdown(text, local_stats)
+            return md_file, formatted, local_stats.md_files_formatted
+        except Exception as exc:
+            logger.warning(f"  ✗ Phase 1 failed for {md_file.name}: {exc}")
+            try:
+                return md_file, md_file.read_text(encoding="utf-8"), 0
+            except Exception:
+                return md_file, "", 0
 
-            # Phase 1 — Markdown formatting
-            text = _format_markdown(text, stats)
+    max_workers = min(32, (os.cpu_count() or 1) + 4)
+    phase1_results: dict[Path, str] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for md_file, formatted, delta in executor.map(_phase1, md_files):
+            phase1_results[md_file] = formatted
+            stats.md_files_formatted += delta  # safe: single-threaded merge
+
+    # ── Phases 2+3: serial, with hash-based skip ─────────────────────────────
+    for md_file in md_files:
+        try:
+            text = phase1_results.get(md_file, "")
+            if not text:
+                continue
+
+            original_raw = md_file.read_text(encoding="utf-8")
+
+            # Write Phase 1 result if changed
+            if text != original_raw:
+                md_file.write_text(text, encoding="utf-8")
+
+            # Check incremental cache: skip LLM phases if content unchanged
+            cache_key = md_file.name
+            current_hash = _file_hash(text)
+            if hash_cache.get(cache_key) == current_hash:
+                updated_cache[cache_key] = current_hash
+                continue  # skip Phases 2+3
 
             # Phase 2 — Math repair
             text = _fix_math_in_text(text, config, stats)
@@ -470,10 +545,16 @@ def fix_docs(working_dir: str, config: Config) -> FixStats:
             # Phase 3 — Mermaid repair
             text = _fix_mermaid_in_text(text, config, stats)
 
-            if text != original:
+            if text != original_raw:
                 md_file.write_text(text, encoding="utf-8")
+
+            # Store hash of final output so next run can skip
+            updated_cache[cache_key] = _file_hash(text)
+
         except Exception as exc:
             logger.warning(f"  ✗ Failed to process {md_file.name}: {exc}")
+
+    _save_hash_cache(docs_path, updated_cache)
 
     if stats.md_files_formatted:
         logger.info(f"  📝 Formatted {stats.md_files_formatted} file(s) with mdformat")
