@@ -3,6 +3,7 @@ LLM service factory for creating configured LLM clients.
 """
 import time
 import logging
+from functools import lru_cache
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.models.openai import OpenAIModelSettings
@@ -100,13 +101,24 @@ def select_agent_model(config: Config, estimated_tokens: int = 0):
     return create_fallback_models(config)
 
 
-def create_openai_client(config: Config) -> OpenAI:
-    """Create OpenAI client from configuration."""
+@lru_cache(maxsize=4)
+def _get_cached_openai_client(base_url: str, api_key: str) -> OpenAI:
+    """Return (and cache) an OpenAI client for the given endpoint.
+
+    lru_cache keyed on (base_url, api_key) so the underlying httpx connection
+    pool is reused across calls — no repeated TLS handshakes.
+    maxsize=4 accommodates main + fallback + long-context endpoints.
+    """
     return OpenAI(
-        base_url=config.llm_base_url,
-        api_key=config.llm_api_key,
+        base_url=base_url,
+        api_key=api_key,
         timeout=_LLM_TIMEOUT,
     )
+
+
+def create_openai_client(config: Config) -> OpenAI:
+    """Create (or return cached) OpenAI client from configuration."""
+    return _get_cached_openai_client(config.llm_base_url, config.llm_api_key)
 
 
 def _is_cf_timeout(exc: Exception) -> bool:
