@@ -1,8 +1,6 @@
 # tests/test_index_builder.py
 """Tests for IndexBuilder: end-to-end index construction."""
-import os
 import textwrap
-import tempfile
 import pytest
 from codewiki.src.be.index.index_builder import IndexBuilder, IndexProducts
 from codewiki.src.be.index.models import SymbolKind

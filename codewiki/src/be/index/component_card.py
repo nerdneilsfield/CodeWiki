@@ -26,10 +26,15 @@ class CardBuilder:
             file_context=f"{symbol.file_path} (lines {symbol.range.start_line}-{symbol.range.end_line})",
         )
 
+    _MAX_SUMMARY_CHARS = 300
+
     @staticmethod
     def _truncate_docstring(doc: str | None, max_sentences: int = 2) -> str:
         if not doc:
             return ""
         # Split on sentence boundaries (period + space or end)
         sentences = re.split(r'(?<=[.!?])\s+', doc.strip())
-        return " ".join(sentences[:max_sentences]).strip()
+        summary = " ".join(sentences[:max_sentences]).strip()
+        if len(summary) > CardBuilder._MAX_SUMMARY_CHARS:
+            summary = summary[:CardBuilder._MAX_SUMMARY_CHARS].rstrip() + "…"
+        return summary

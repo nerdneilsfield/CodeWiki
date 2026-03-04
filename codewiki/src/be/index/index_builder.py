@@ -1,8 +1,9 @@
 # codewiki/src/be/index/index_builder.py
 """IndexBuilder: orchestrates index construction from source files."""
+import fnmatch
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from codewiki.src.be.index.models import (
@@ -91,7 +92,7 @@ class IndexBuilder:
         # Build products
         symbol_table = SymbolTable(all_symbols)
         import_graph = ImportGraph(all_imports)
-        edges = self._build_edges(all_symbols, all_imports, symbol_table)
+        edges = self._build_edges(all_imports, symbol_table)
         card_builder = CardBuilder()
         cards = [card_builder.build_card(s, edges) for s in all_symbols if s.parent_symbol_id is None]
 
@@ -112,7 +113,11 @@ class IndexBuilder:
             all_symbols.extend(adapter.convert(nodes))
 
     def _analyze_with_existing(self, abs_path: str, content: str, lang: str) -> list:
-        """Use existing language analyzers to get Node objects."""
+        """Use existing language analyzers to get Node objects.
+
+        NOTE: This calls CallGraphAnalyzer._analyze_code_file, a private method.
+        TODO: Replace with a public API wrapper once CallGraphAnalyzer exposes one.
+        """
         try:
             from codewiki.src.be.dependency_analyzer.analysis.call_graph_analyzer import CallGraphAnalyzer
             analyzer = CallGraphAnalyzer()
@@ -123,50 +128,67 @@ class IndexBuilder:
             logger.debug(f"Existing analyzer failed for {abs_path}: {e}")
             return []
 
+    def _should_include(self, rel_path: str) -> bool:
+        """Check if a file passes include/exclude pattern filters."""
+        if self.include_patterns:
+            if not any(fnmatch.fnmatch(rel_path, p) for p in self.include_patterns):
+                return False
+        if self.exclude_patterns:
+            if any(fnmatch.fnmatch(rel_path, p) for p in self.exclude_patterns):
+                return False
+        return True
+
     def _discover_files(self) -> list[tuple[str, str]]:
-        """Walk repo and yield (relative_path, language) for source files."""
+        """Walk repo and return sorted (relative_path, language) pairs for source files."""
         results = []
         for root, dirs, files in os.walk(self.repo_path):
             # Skip common non-source directories
-            dirs[:] = [d for d in dirs if d not in {
+            dirs[:] = sorted(d for d in dirs if d not in {
                 ".git", "node_modules", "__pycache__", ".venv", "venv",
                 ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
-            }]
-            for fname in files:
+            })
+            for fname in sorted(files):
                 abs_path = os.path.join(root, fname)
                 rel_path = os.path.relpath(abs_path, self.repo_path).replace("\\", "/")
                 ext = os.path.splitext(fname)[1].lower()
                 lang = CODE_EXTENSIONS.get(ext)
-                if lang:
+                if lang and self._should_include(rel_path):
                     results.append((rel_path, lang))
         return results
 
-    def _build_edges(self, symbols: list[Symbol], imports: list[ImportStatement],
+    def _build_edges(self, imports: list[ImportStatement],
                      symbol_table: SymbolTable) -> list[SymbolEdge]:
-        """Build SymbolEdge list from imports and parent-child relationships."""
+        """Build SymbolEdge list from resolved imports.
+
+        Import edges are recorded as file_path → symbol, not anchored to an
+        arbitrary first symbol in the file.  The from_symbol uses the file path
+        directly as an identifier (prefixed with "file:") so that downstream
+        consumers can distinguish file-level import edges from symbol-to-symbol edges.
+        """
         edges = []
-        # Import edges: file-level
+        # Pre-build (file_path, name) → Symbol index for O(1) lookup
+        name_index: dict[tuple[str, str], Symbol] = {
+            (s.file_path, s.name): s for s in symbol_table.all_symbols()
+        }
+
         for imp in imports:
-            if imp.resolved_path:
-                for name in imp.imported_names:
-                    from_syms = symbol_table.by_file(imp.file_path)
-                    to_sym = None
-                    for s in symbol_table.by_file(imp.resolved_path):
-                        if s.name == name:
-                            to_sym = s
-                            break
-                    if from_syms:
-                        edges.append(SymbolEdge(
-                            edge_type=EdgeType.IMPORTS,
-                            from_symbol=from_syms[0].symbol_id,
-                            to_symbol=to_sym.symbol_id if to_sym else None,
-                            to_unresolved=name if not to_sym else None,
-                            evidence_refs=[SourceRange(
-                                file_path=imp.file_path,
-                                start_line=imp.line, start_col=0,
-                                end_line=imp.line, end_col=0,
-                            )],
-                            confidence=Confidence.HIGH if to_sym else Confidence.LOW,
-                            resolver="ast",
-                        ))
+            if not imp.resolved_path:
+                continue
+            for name in imp.imported_names:
+                if name == "*":
+                    continue
+                to_sym = name_index.get((imp.resolved_path, name))
+                edges.append(SymbolEdge(
+                    edge_type=EdgeType.IMPORTS,
+                    from_symbol=f"file:{imp.file_path}",
+                    to_symbol=to_sym.symbol_id if to_sym else None,
+                    to_unresolved=name if not to_sym else None,
+                    evidence_refs=[SourceRange(
+                        file_path=imp.file_path,
+                        start_line=imp.line, start_col=0,
+                        end_line=imp.line, end_col=0,
+                    )],
+                    confidence=Confidence.HIGH if to_sym else Confidence.LOW,
+                    resolver="ast",
+                ))
         return edges

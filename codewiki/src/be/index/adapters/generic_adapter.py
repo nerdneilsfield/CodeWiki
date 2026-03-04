@@ -38,7 +38,7 @@ class GenericIndexAdapter:
         ).hexdigest()[:16]
 
         return Symbol(
-            symbol_id=f"{self.lang}:{rel_path}#{node.name}({kind.value})",
+            symbol_id=f"{self.lang}:{rel_path}#{node.name}:{node.start_line}({kind.value})",
             lang=self.lang,
             kind=kind,
             name=node.name,
