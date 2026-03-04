@@ -56,6 +56,7 @@ dependencies = [
     "mermaid-parser-py>=0.0.2",
     "mermaid-py>=0.8.0",
     "markdown-it-py>=3.0.0",
+    "json_repair>=0.30.0",
 ]
 
 [external]
@@ -83,24 +84,9 @@ Documentation = "https://github.com/yourusername/codewiki/docs"
 Repository = "https://github.com/yourusername/codewiki"
 Issues = "https://github.com/yourusername/codewiki/issues"
 
-[tool.setuptools]
-packages = [
-    "codewiki",
-    "codewiki.cli",
-    "codewiki.cli.commands",
-    "codewiki.cli.models",
-    "codewiki.cli.utils",
-    "codewiki.cli.adapters",
-    "codewiki.src",
-    "codewiki.src.be",
-    "codewiki.src.be.agent_tools",
-    "codewiki.src.be.dependency_analyzer",
-    "codewiki.src.be.dependency_analyzer.analysis",
-    "codewiki.src.be.dependency_analyzer.analyzers",
-    "codewiki.src.be.dependency_analyzer.models",
-    "codewiki.src.be.dependency_analyzer.utils",
-    "codewiki.src.fe"
-]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["codewiki*"]
 
 [tool.setuptools.package-data]
 codewiki = ["templates/**/*", "py.typed"]
