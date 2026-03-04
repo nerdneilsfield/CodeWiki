@@ -156,7 +156,13 @@ async def generate_sub_module_documentation(
         logger.info(f"{indent}{arrow} Generating documentation for sub-module: {sub_module_name}")
 
         num_tokens = count_tokens(format_potential_core_components(core_component_ids, ctx.deps.components)[-1])
-        model = select_agent_model(ctx.deps.config, num_tokens)
+        if (
+            ctx.deps.long_context_model
+            and num_tokens > ctx.deps.config.long_context_threshold
+        ):
+            model = ctx.deps.long_context_model
+        else:
+            model = ctx.deps.fallback_models or select_agent_model(ctx.deps.config, num_tokens)
 
         if is_complex_module(ctx.deps.components, core_component_ids) and ctx.deps.current_depth < ctx.deps.max_depth and num_tokens >= ctx.deps.config.max_token_per_leaf_module:
             sub_agent = Agent(

@@ -238,6 +238,8 @@ class AgentOrchestrator:
             config=self.config,
             custom_instructions=self.custom_instructions,
             module_tree_manager=tree_manager,
+            fallback_models=self.fallback_models,
+            long_context_model=self.long_context_model,
         )
 
         # Run agent
