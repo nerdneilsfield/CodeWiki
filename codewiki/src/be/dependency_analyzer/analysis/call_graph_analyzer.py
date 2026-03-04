@@ -6,6 +6,8 @@ Coordinates language-specific analyzers to build comprehensive call graphs
 across different programming languages in a repository.
 """
 
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List
 import logging
 import traceback
@@ -39,13 +41,27 @@ class CallGraphAnalyzer:
         self.functions = {}
         self.call_relationships = []
 
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
         files_analyzed = 0
-        for file_info in code_files:
-            logger.debug(f"Analyzing: {file_info['path']}")
-            self._analyze_code_file(base_dir, file_info)
-            files_analyzed += 1
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_info = {
+                executor.submit(self._analyze_code_file, base_dir, file_info): file_info
+                for file_info in code_files
+            }
+            for future in as_completed(future_to_info):
+                file_info = future_to_info[future]
+                try:
+                    file_funcs, file_rels = future.result()
+                    self.functions.update(file_funcs)
+                    self.call_relationships.extend(file_rels)
+                    files_analyzed += 1
+                except Exception as e:
+                    logger.error(f"Unexpected error for {file_info.get('path')}: {e}", exc_info=True)
+
         logger.debug(
-            f"Analysis complete: {files_analyzed} files analyzed, {len(self.functions)} functions, {len(self.call_relationships)} relationships"
+            f"Analysis complete: {files_analyzed} files analyzed, "
+            f"{len(self.functions)} functions, {len(self.call_relationships)} relationships"
         )
 
         logger.debug("Resolving call relationships")
@@ -118,16 +134,10 @@ class CallGraphAnalyzer:
         traverse(file_tree)
         return code_files
 
-    def _analyze_code_file(self, repo_dir: str, file_info: Dict):
-        """
-        Analyze a single code file based on its language.
-
-        Routes to appropriate language-specific analyzer.
-
-        Args:
-            repo_dir: Repository directory path
-            file_info: File information dictionary
-        """
+    def _analyze_code_file(self, repo_dir: str, file_info: Dict) -> tuple[dict, list]:
+        """Analyze one file; returns (functions_dict, relationships_list). Does NOT mutate self."""
+        file_funcs: dict = {}
+        file_rels: list = []
 
         base = Path(repo_dir)
         file_path = base / file_info["path"]
@@ -136,222 +146,199 @@ class CallGraphAnalyzer:
             content = safe_open_text(base, file_path)
             language = file_info["language"]
 
+            funcs, rels = [], []
+
             # ── Scripting / dynamic languages ─────────────────────────────
             if language == "python":
-                self._analyze_python_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_python_file(file_path, content, repo_dir)
             elif language == "javascript":
-                self._analyze_javascript_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_javascript_file(file_path, content, repo_dir)
             elif language == "typescript":
-                self._analyze_typescript_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_typescript_file(file_path, content, repo_dir)
             elif language == "php":
-                self._analyze_php_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_php_file(file_path, content, repo_dir)
 
             # ── JVM / managed languages ────────────────────────────────────
             elif language == "java":
-                self._analyze_java_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_java_file(file_path, content, repo_dir)
             elif language == "csharp":
-                self._analyze_csharp_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_csharp_file(file_path, content, repo_dir)
 
             # ── Systems languages ──────────────────────────────────────────
             elif language == "c":
-                self._analyze_c_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_c_file(file_path, content, repo_dir)
             elif language == "cpp":
-                self._analyze_cpp_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_cpp_file(file_path, content, repo_dir)
             elif language == "go":
-                self._analyze_go_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_go_file(file_path, content, repo_dir)
             elif language == "rust":
-                self._analyze_rust_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_rust_file(file_path, content, repo_dir)
 
             # ── Shell / build / config ─────────────────────────────────────
             elif language == "bash":
-                self._analyze_bash_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_bash_file(file_path, content, repo_dir)
             elif language == "cmake":
-                self._analyze_cmake_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_cmake_file(file_path, content, repo_dir)
             elif language == "toml":
-                self._analyze_toml_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_toml_file(file_path, content, repo_dir)
             elif language == "vitis_cfg":
-                self._analyze_vitis_cfg_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_vitis_cfg_file(file_path, content, repo_dir)
             elif language == "makefile":
-                self._analyze_makefile_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_makefile_file(file_path, content, repo_dir)
             elif language == "tcl":
-                self._analyze_tcl_file(file_path, content, repo_dir)
+                funcs, rels = self._analyze_tcl_file(file_path, content, repo_dir)
+
+            for func in funcs:
+                file_funcs[func.id or f"{file_path}:{func.name}"] = func
+            file_rels.extend(rels)
 
         except Exception as e:
-            logger.error(f"⚠️ Error analyzing {file_path}: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Error analyzing {file_info.get('path')}: {e}", exc_info=True)
+
+        return file_funcs, file_rels
 
     # ── Scripting / dynamic languages ─────────────────────────────────────
 
-    def _analyze_python_file(self, file_path: str, content: str, base_dir: str):
+    def _analyze_python_file(self, file_path: str, content: str, base_dir: str) -> tuple[list, list]:
         """Analyze Python file using the native AST analyzer."""
         from codewiki.src.be.dependency_analyzer.analyzers.python import analyze_python_file
         try:
-            functions, relationships = analyze_python_file(file_path, content, repo_path=base_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_python_file(file_path, content, repo_path=base_dir)
         except Exception as e:
             logger.error(f"Failed to analyze Python file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_javascript_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_javascript_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze JavaScript file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.javascript import analyze_javascript_file_treesitter
         try:
-            functions, relationships = analyze_javascript_file_treesitter(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_javascript_file_treesitter(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze JavaScript file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_typescript_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_typescript_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze TypeScript file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.typescript import analyze_typescript_file_treesitter
         try:
-            functions, relationships = analyze_typescript_file_treesitter(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_typescript_file_treesitter(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze TypeScript file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_php_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_php_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze PHP file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.php import analyze_php_file
         try:
-            functions, relationships = analyze_php_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_php_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze PHP file {file_path}: {e}", exc_info=True)
+            return [], []
 
     # ── JVM / managed languages ────────────────────────────────────────────
 
-    def _analyze_java_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_java_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Java file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.java import analyze_java_file
         try:
-            functions, relationships = analyze_java_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_java_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze Java file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_csharp_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_csharp_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze C# file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.csharp import analyze_csharp_file
         try:
-            functions, relationships = analyze_csharp_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_csharp_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze C# file {file_path}: {e}", exc_info=True)
+            return [], []
 
     # ── Systems languages ──────────────────────────────────────────────────
 
-    def _analyze_c_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_c_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze C file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.c import analyze_c_file
         try:
-            functions, relationships = analyze_c_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_c_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze C file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_cpp_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_cpp_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze C++ file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.cpp import analyze_cpp_file
         try:
-            functions, relationships = analyze_cpp_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_cpp_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze C++ file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_go_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_go_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Go file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.go import analyze_go_file
         try:
-            functions, relationships = analyze_go_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_go_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze Go file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_rust_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_rust_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Rust file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.rust import analyze_rust_file
         try:
-            functions, relationships = analyze_rust_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_rust_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze Rust file {file_path}: {e}", exc_info=True)
+            return [], []
 
     # ── Shell / build / config ─────────────────────────────────────────────
 
-    def _analyze_bash_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_bash_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Bash/Shell file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.bash import analyze_bash_file
         try:
-            functions, relationships = analyze_bash_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_bash_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze Bash file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_cmake_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_cmake_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze CMake file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.cmake import analyze_cmake_file
         try:
-            functions, relationships = analyze_cmake_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_cmake_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze CMake file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_toml_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_toml_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze TOML file using tree-sitter (extracts top-level tables as structural nodes)."""
         from codewiki.src.be.dependency_analyzer.analyzers.toml import analyze_toml_file
         try:
-            functions, relationships = analyze_toml_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_toml_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze TOML file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_tcl_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_tcl_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Vitis HLS TCL script."""
         from codewiki.src.be.dependency_analyzer.analyzers.tcl import analyze_tcl_file
         try:
-            functions, relationships = analyze_tcl_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_tcl_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze TCL file {file_path}: {e}", exc_info=True)
+            return [], []
 
-    def _analyze_makefile_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_makefile_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Makefile using tree-sitter-make."""
         from codewiki.src.be.dependency_analyzer.analyzers.makefile import analyze_makefile_file
         try:
-            functions, relationships = analyze_makefile_file(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_makefile_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze Makefile {file_path}: {e}", exc_info=True)
+            return [], []
 
     # Vitis .cfg markers — must be present in file content for it to be treated as Vitis config.
     # These are unique to Xilinx/AMD Vitis and would not appear in generic .cfg files.
@@ -368,19 +355,17 @@ class CallGraphAnalyzer:
                 return True
         return False
 
-    def _analyze_vitis_cfg_file(self, file_path: str, content: str, repo_dir: str):
+    def _analyze_vitis_cfg_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Vitis .cfg file for HLS top functions, stream connections, memory maps."""
         if not self._is_vitis_cfg(content):
             logger.debug(f"Skipping {file_path}: does not look like a Vitis .cfg file")
-            return
+            return [], []
         from codewiki.src.be.dependency_analyzer.analyzers.vitis_cfg import analyze_vitis_cfg
         try:
-            functions, relationships = analyze_vitis_cfg(file_path, content, repo_path=repo_dir)
-            for func in functions:
-                self.functions[func.id or f"{file_path}:{func.name}"] = func
-            self.call_relationships.extend(relationships)
+            return analyze_vitis_cfg(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze Vitis cfg {file_path}: {e}", exc_info=True)
+            return [], []
 
     def _analyze_data_flow(self) -> dict:
         """Run cross-file data flow analysis."""
