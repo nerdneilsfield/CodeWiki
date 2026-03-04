@@ -162,10 +162,17 @@ def _is_cf_timeout(exc: Exception) -> bool:
     )
 
 
+# Maximum seconds to honour from a Retry-After header.
+_MAX_RETRY_AFTER = 120.0
+
+
 def _parse_retry_after(exc: Exception) -> float | None:
     """Extract Retry-After seconds from a 429 RateLimitError response, if present.
 
-    Returns None for any other exception type or when the header is absent.
+    Returns None for any other exception type, when the header is absent, or
+    when the value is negative/non-finite (all treated as 'ignore and fall back
+    to jittered delay').  Values above _MAX_RETRY_AFTER are clamped to prevent
+    excessive blocking from misconfigured or malicious upstream responses.
     """
     import openai
     if not isinstance(exc, openai.RateLimitError):
@@ -174,9 +181,12 @@ def _parse_retry_after(exc: Exception) -> float | None:
     val = headers.get("retry-after") or headers.get("Retry-After")
     if val:
         try:
-            return float(val)
-        except ValueError:
-            pass
+            seconds = float(val)
+        except (ValueError, OverflowError):
+            return None
+        if not (0 <= seconds < float("inf")):
+            return None
+        return min(seconds, _MAX_RETRY_AFTER)
     return None
 
 

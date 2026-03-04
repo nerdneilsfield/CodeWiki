@@ -401,15 +401,20 @@ class DocumentationGenerator:
             return base + random.uniform(0, base * 0.5)
 
         def _get_retry_after(exc: Exception) -> float | None:
-            """Extract Retry-After from a 429 response header, if present."""
-            if isinstance(exc, openai.RateLimitError):
-                headers = getattr(getattr(exc, "response", None), "headers", {})
-                val = headers.get("retry-after") or headers.get("Retry-After")
-                if val:
-                    try:
-                        return float(val)
-                    except ValueError:
-                        pass
+            """Extract and sanitize Retry-After from a 429 response header."""
+            import openai
+            if not isinstance(exc, openai.RateLimitError):
+                return None
+            headers = getattr(getattr(exc, "response", None), "headers", {})
+            val = headers.get("retry-after") or headers.get("Retry-After")
+            if val:
+                try:
+                    seconds = float(val)
+                except (ValueError, OverflowError):
+                    return None
+                if not (0 <= seconds < float("inf")):
+                    return None
+                return min(seconds, 120.0)
             return None
 
         def _is_context_length_error(exc: Exception) -> bool:

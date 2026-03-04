@@ -50,3 +50,30 @@ def test_parse_retry_after_returns_none_when_header_missing():
     exc.response.headers = {}
     result = _parse_retry_after(exc)
     assert result is None
+
+
+def test_parse_retry_after_clamps_negative_value():
+    """Negative Retry-After must not be returned (would crash time.sleep)."""
+    import openai
+    from unittest.mock import MagicMock
+    from codewiki.src.be.llm_services import _parse_retry_after
+
+    exc = MagicMock(spec=openai.RateLimitError)
+    exc.response = MagicMock()
+    exc.response.headers = {"retry-after": "-5"}
+    result = _parse_retry_after(exc)
+    assert result is None or result >= 0, f"Got {result!r}, expected None or >= 0"
+
+
+def test_parse_retry_after_clamps_oversized_value():
+    """Retry-After > 120s must be clamped to 120 to prevent excessive blocking."""
+    import openai
+    from unittest.mock import MagicMock
+    from codewiki.src.be.llm_services import _parse_retry_after
+
+    exc = MagicMock(spec=openai.RateLimitError)
+    exc.response = MagicMock()
+    exc.response.headers = {"retry-after": "9999"}
+    result = _parse_retry_after(exc)
+    assert result is not None
+    assert result <= 120, f"Expected <= 120s but got {result}"
