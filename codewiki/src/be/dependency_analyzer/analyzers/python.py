@@ -33,24 +33,34 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         self.current_function_name: str | None = None
         
         self.top_level_nodes = {}
-    
-    def _get_relative_path(self) -> str:
-        """Get relative path from repo root."""
+
+        # Pre-compute path fields — these never change for a given file
+        self._relative_path: str = self._compute_relative_path()
+        self._module_path: str = self._compute_module_path()
+
+    def _compute_relative_path(self) -> str:
+        """Compute relative path from repo root (called once at init)."""
         if self.repo_path:
             return os.path.relpath(self.file_path, self.repo_path)
         return str(self.file_path)
 
-    def _get_module_path(self) -> str:
+    def _compute_module_path(self) -> str:
+        """Compute dot-separated module path (called once at init)."""
         try:
-            relative_path = self._get_relative_path()
-            path = relative_path
+            path = self._relative_path
             for ext in ['.py', '.pyx']:
                 if path.endswith(ext):
                     path = path[:-len(ext)]
                     break
             return path.replace('/', '.').replace('\\', '.')
-        except:
+        except Exception:
             return str(self.file_path).replace('/', '.').replace('\\', '.')
+
+    def _get_relative_path(self) -> str:
+        return self._relative_path
+
+    def _get_module_path(self) -> str:
+        return self._module_path
     
     def _get_component_id(self, name: str) -> str:
         """Generate dot-separated component ID."""
