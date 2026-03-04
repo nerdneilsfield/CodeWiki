@@ -79,6 +79,9 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
 - Use the dependency graph (depends_on / depended_by) to describe architecture and data flow accurately
 - When describing component interactions, cite the actual call relationships from the provided dependency data
 - If you are uncertain about implementation details, say so rather than guessing
+- **Code examples must be grounded**: every line of a code example must come from actual files in the provided source (test files, example files, main source). If a complete runnable example would require inventing helper functions or glue code that does not exist in the repo, do ONE of the following instead:
+  (a) Show only the real call-site — e.g., just `polyvec_ntt(&input, &output);` with a prose explanation of what the caller must set up beforehand, or
+  (b) Clearly mark the whole block as pseudocode with a `// pseudocode` or `# pseudocode` comment on the first line. Never silently label made-up helpers as "假设的" (hypothetical) buried inside the block.
 </GROUNDING_RULES>
 
 <WORKFLOW>
@@ -146,7 +149,7 @@ Good: "`Tokenizer.split()` exists because the downstream parser expects a flat t
 3. **Component deep-dives**: For each important class/function — purpose, internal mechanics, parameters, return values, side effects, explained with enough context that a newcomer understands not just the API but the design reasoning
 4. **Dependency analysis**: What this module calls (and why), what calls it (and what they expect), and the data contracts in between
 5. **Design decisions & tradeoffs**: Key patterns chosen, alternatives that exist, and the tensions in the current approach
-6. **Usage & examples**: Code snippets, configuration options, common patterns
+6. **Usage & examples**: Code snippets drawn from real files in the repo (test files, example files, or actual call-sites in the source). If a complete example would require inventing surrounding glue code, prefer a minimal real call-site plus prose, or label the block `// pseudocode` on the first line
 7. **Edge cases & gotchas**: Error conditions, behavioral constraints, known limitations, operational considerations
 8. **References**: Link to other module docs rather than duplicating their content
 9. **Prose over bullets**: Write conceptual explanations in full paragraphs; reserve bullet points for enumerations, not for narratives
@@ -159,6 +162,9 @@ Good: "`Tokenizer.split()` exists because the downstream parser expects a flat t
 - Use the dependency graph (depends_on / depended_by) to describe architecture and data flow accurately
 - When describing component interactions, cite the actual call relationships from the provided dependency data
 - If you are uncertain about implementation details, say so rather than guessing
+- **Code examples must be grounded**: every line of a code example must come from actual files in the provided source (test files, example files, main source). If a complete runnable example would require inventing helper functions or glue code that does not exist in the repo, do ONE of the following instead:
+  (a) Show only the real call-site — e.g., just `polyvec_ntt(&input, &output);` with a prose explanation of what the caller must set up beforehand, or
+  (b) Clearly mark the whole block as pseudocode with a `// pseudocode` or `# pseudocode` comment on the first line. Never silently label made-up helpers as "假设的" (hypothetical) buried inside the block.
 </GROUNDING_RULES>
 
 <WORKFLOW>
@@ -336,6 +342,7 @@ Please shortlist the files, folders representing the core functionality and igno
 Reasoning at first, then return the list of relative paths in JSON format.
 """
 
+import re
 from typing import Dict, Any
 from codewiki.src.utils import file_manager
 
@@ -1089,11 +1096,63 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
     if _is_hls_module:
         extra_guides += HLS_EXTRA_GUIDE
 
+    # ── Real call-site snippets from external callers ─────────────────────────
+    # Find components outside this module that depend on it, extract their
+    # source_code snippet (the function body), and inject as usage examples.
+    _MAX_CALLER_SNIPPETS = 4
+    _MAX_SNIPPET_CHARS   = 1000
+    _EXAMPLE_PATH_RE = re.compile(
+        r'(?:test|example|demo|sample|bench)', re.IGNORECASE
+    )
+
+    caller_snippets: list[dict] = []
+    for ext_cid, ext_node in components.items():
+        if ext_cid in module_ids:
+            continue
+        called = ext_node.depends_on & module_ids
+        if not called:
+            continue
+        snippet = ext_node.source_code or ""
+        if not snippet:
+            continue
+        if len(snippet) > _MAX_SNIPPET_CHARS:
+            snippet = snippet[:_MAX_SNIPPET_CHARS] + "\n// ... (truncated)"
+        path = ext_node.relative_path or ""
+        caller_snippets.append({
+            "path":     path,
+            "name":     ext_node.name,
+            "calls":    sorted(called),
+            "snippet":  snippet,
+            "is_test":  bool(_EXAMPLE_PATH_RE.search(path)),
+        })
+
+    # Prioritise test/example files; keep only the top N
+    caller_snippets.sort(key=lambda x: (not x["is_test"], x["path"]))
+    caller_snippets = caller_snippets[:_MAX_CALLER_SNIPPETS]
+
+    callers_section = ""
+    if caller_snippets:
+        callers_section = "\n<REAL_USAGE_EXAMPLES>\n"
+        callers_section += (
+            "These are actual function bodies from the repository that call this "
+            "module's API. Use them as the basis for usage examples — do NOT invent "
+            "surrounding code that is not shown here.\n\n"
+        )
+        for info in caller_snippets:
+            ext = "." + info["path"].rsplit(".", 1)[-1] if "." in info["path"] else ""
+            lang = EXTENSION_TO_LANGUAGE.get(ext, ext.lstrip(".") or "text")
+            callers_section += (
+                f"# {info['path']} — `{info['name']}` "
+                f"(uses: {', '.join(info['calls'])})\n"
+                f"```{lang}\n{info['snippet']}\n```\n\n"
+            )
+        callers_section += "</REAL_USAGE_EXAMPLES>\n"
+
     return USER_PROMPT.format(
         module_name=module_name,
         formatted_core_component_codes=core_component_codes,
         module_tree=formatted_module_tree,
-    ) + dependency_section + extra_guides
+    ) + dependency_section + extra_guides + callers_section
 
 
 
