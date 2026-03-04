@@ -1,6 +1,7 @@
 import re
 import time
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import AsyncIterable, List, Tuple
 import logging
@@ -65,24 +66,24 @@ def is_complex_module(components: dict[str, any], core_component_ids: list[str])
 # ---------------------- Token Counting ---------------------
 # ------------------------------------------------------------
 
-def count_tokens(text: str, model: str = "gpt-4") -> int:
-    """
-    Count the number of tokens in a text.
 
-    Args:
-        text: The text to tokenize.
-        model: The model name used to look up the appropriate tokenizer.
-               Models not recognized by tiktoken (e.g. Claude, GLM) fall back
-               to cl100k_base, which is the same encoding GPT-4 uses and
-               provides a reasonable approximation for most modern LLMs.
+@lru_cache(maxsize=8)
+def _get_encoder(model: str):
+    """Return (and cache) the tiktoken encoder for *model*.
+
+    Falls back to cl100k_base for models not recognised by tiktoken
+    (e.g. Claude, GLM).  lru_cache ensures the expensive first-load
+    only happens once per model name per process lifetime.
     """
     try:
-        enc = tiktoken.encoding_for_model(model)
+        return tiktoken.encoding_for_model(model)
     except KeyError:
-        enc = tiktoken.get_encoding("cl100k_base")
-    length = len(enc.encode(text))
-    # logger.debug(f"Number of tokens: {length}")
-    return length
+        return tiktoken.get_encoding("cl100k_base")
+
+
+def count_tokens(text: str, model: str = "gpt-4") -> int:
+    """Count the number of tokens in a text."""
+    return len(_get_encoder(model).encode(text))
 
 
 # ------------------------------------------------------------
