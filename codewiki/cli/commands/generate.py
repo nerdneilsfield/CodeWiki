@@ -307,7 +307,7 @@ def generate_command(
         
         # Validate output directory
         output_dir = Path(output).expanduser().resolve()
-        check_writable_output(output_dir.parent)
+        check_writable_output(output_dir)
         
         logger.success(f"Output directory: {output_dir}")
         
@@ -443,6 +443,7 @@ def generate_command(
             verbose=verbose,
             generate_html=github_pages,
             generate_static=generate_static,
+            no_cache=no_cache,
         )
         
         # Run generation

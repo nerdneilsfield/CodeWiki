@@ -125,7 +125,7 @@ def is_git_repository(repo_path: Path) -> bool:
         True if git repository, False otherwise
     """
     git_dir = repo_path / ".git"
-    return git_dir.exists() and git_dir.is_dir()
+    return git_dir.exists()
 
 
 def get_git_commit_hash(repo_path: Path) -> str:
