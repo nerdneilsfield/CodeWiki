@@ -67,6 +67,7 @@ logfire-api==4.1.0
 loguru==0.7.3
 markdown-it-py==3.0.0
 MarkupSafe==3.0.2
+mdformat>=0.7.21
 matplotlib-inline==0.1.7
 mcp==1.12.3
 mdurl==0.1.2

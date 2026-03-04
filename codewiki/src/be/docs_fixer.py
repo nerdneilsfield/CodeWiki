@@ -1,10 +1,13 @@
 """
 Post-processing fix phase for generated documentation.
 
-Scans all .md files in the docs directory and repairs broken Mermaid diagrams
-using the same validate → LLM-repair loop as deepresearch_flow/recognize/mermaid.py.
+Scans all .md files in the docs directory and applies three repair phases:
 
-Validation strategy (in priority order):
+  Phase 1 — Markdown formatting (mdformat, mechanical, no LLM)
+  Phase 2 — Math repair (LaTeX validation + LLM repair)
+  Phase 3 — Mermaid repair (mmdc → regex heuristics → LLM repair)
+
+Validation strategy for Mermaid (in priority order):
   1. mmdc (Mermaid CLI) — accurate, requires `npm i -g @mermaid-js/mermaid-cli`
   2. Regex heuristics   — catches the patterns we know break the Mermaid lexer
 """
@@ -16,13 +19,36 @@ import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from codewiki.src.be.llm_services import call_llm
 from codewiki.src.config import Config
 
 logger = logging.getLogger(__name__)
+
+# ── mdformat (optional dependency) ─────────────────────────────────────────────
+try:
+    import mdformat
+    _HAS_MDFORMAT = True
+except ImportError:
+    _HAS_MDFORMAT = False
+
+
+# ── Math block extraction ───────────────────────────────────────────────────────
+_MATH_DISPLAY_RE = re.compile(r'(\$\$)([\s\S]+?)(\$\$)', re.DOTALL)
+_MATH_INLINE_RE  = re.compile(r'(?<!\$)(\$)(?!\s)([^$\n]+?)(\$)(?!\$)')
+_MATH_BK_DISP_RE = re.compile(r'(\\\[)([\s\S]+?)(\\\])', re.DOTALL)
+_MATH_BK_INLN_RE = re.compile(r'(\\\()(.+?)(\\\))')
+
+# ── Math validation helpers ────────────────────────────────────────────────────
+# Combined begin/end pattern for stack-based nesting validation
+_MATH_ENV_RE = re.compile(r'\\(begin|end)\{([^}]+)\}')
+
+# ── Code block masking (protect fenced/inline code from math regex) ───────────
+# Covers backtick fences (``` and ~~~) and inline code.
+# Indented code blocks (4-space) are not covered — too complex without full MD parsing.
+_CODE_FENCE_RE = re.compile(r'(~~~[\s\S]*?~~~|```[\s\S]*?```|`[^`\n]+`)', re.DOTALL)
 
 # ── Mermaid block extraction ───────────────────────────────────────────────────
 _MERMAID_BLOCK_RE = re.compile(r"(```\s*mermaid\s*\n)([\s\S]*?)(```)", re.IGNORECASE)
@@ -35,6 +61,174 @@ _MERMAID_BAD_UNICODE_RE = re.compile(
 # Single quote inside a node label bracket  e.g.  A["it's"]  or  B['text']
 _MERMAID_SINGLE_QUOTE_RE = re.compile(r'\[["\'](?:[^"\']*\'[^"\']*)+["\'][^]]*]')
 
+
+# ── FixStats ────────────────────────────────────────────────────────────────────
+@dataclass
+class FixStats:
+    # Markdown formatting
+    md_files_formatted: int = 0
+    # Mermaid
+    files_with_mermaid: int = 0
+    files_with_issues: int = 0
+    diagrams_total: int = 0
+    diagrams_invalid: int = 0
+    diagrams_repaired: int = 0
+    diagrams_failed: int = 0
+    # Math
+    math_total: int = 0
+    math_invalid: int = 0
+    math_repaired: int = 0
+    math_failed: int = 0
+
+
+# ── Phase 1: Markdown formatting ────────────────────────────────────────────────
+
+def _format_markdown(text: str, stats: FixStats) -> str:
+    if not _HAS_MDFORMAT:
+        return text
+    try:
+        formatted = mdformat.text(text)
+        if formatted != text:
+            stats.md_files_formatted += 1
+        return formatted
+    except Exception as exc:
+        logger.debug(f"mdformat skipped: {exc}")
+        return text
+
+
+# ── Phase 2: Math repair ────────────────────────────────────────────────────────
+
+def _validate_math(content: str) -> list[str]:
+    """Check a LaTeX formula for structural errors. Returns list of issue strings."""
+    issues: list[str] = []
+    # Unmatched curly braces.
+    # A brace is escaped only when preceded by an ODD number of backslashes,
+    # e.g. \{ is escaped but \\{ is a real brace (escaped backslash + real brace).
+    depth = 0
+    backslash_run = 0
+    for ch in content:
+        if ch == '\\':
+            backslash_run += 1
+            continue
+        if ch == '{' and backslash_run % 2 == 0:
+            depth += 1
+        elif ch == '}' and backslash_run % 2 == 0:
+            depth -= 1
+        backslash_run = 0
+        if depth < 0:
+            issues.append("Unmatched closing brace '}'")
+            break
+    if depth > 0:
+        issues.append(f"Unmatched opening brace(s) ({depth})")
+    # Mismatched \begin/\end environments — stack-based to handle nesting
+    env_stack: list[str] = []
+    for m in _MATH_ENV_RE.finditer(content):
+        tag, env = m.group(1), m.group(2)
+        if tag == "begin":
+            env_stack.append(env)
+        else:
+            if not env_stack:
+                issues.append(f"Unmatched \\end{{{env}}}")
+            elif env_stack[-1] != env:
+                issues.append(
+                    f"Mismatched \\end{{{env}}} (expected \\end{{{env_stack[-1]}}})"
+                )
+                env_stack.pop()
+            else:
+                env_stack.pop()
+    if env_stack:
+        issues.append(f"Unclosed environments: {', '.join(env_stack)}")
+    return issues
+
+
+_MATH_REPAIR_USER = """\
+You are a LaTeX math expert. Fix the supplied formula so it parses without errors.
+Preserve the mathematical meaning exactly.
+Output ONLY the corrected formula — no delimiters, no explanation.
+
+The following LaTeX formula contains syntax errors.
+
+Issues:
+{issues}
+
+Formula to fix:
+{formula}
+
+Return ONLY the corrected formula content (no $, $$, \\[, \\( delimiters, no commentary).
+"""
+
+
+def _llm_repair_math(content: str, issues: list[str], config: Config) -> str:
+    """Ask the LLM to fix a broken LaTeX formula. Returns the fixed content."""
+    prompt = _MATH_REPAIR_USER.format(
+        issues="\n".join(f"- {i}" for i in issues),
+        formula=content.strip(),
+    )
+    try:
+        fixed = call_llm(prompt, config, temperature=0.0)
+        return fixed.strip()
+    except Exception as exc:
+        logger.warning(f"Math LLM repair failed: {exc}")
+        return content
+
+
+def _fix_math_in_text(text: str, config: Config, stats: FixStats) -> str:
+    """Validate and repair LaTeX math blocks in *text*. Returns updated text."""
+    # Step 1: Mask fenced/inline code blocks so math regex never fires inside them
+    code_blocks: list[str] = []
+
+    def _mask_code(m: re.Match) -> str:
+        code_blocks.append(m.group(0))
+        return f"\x00CODE{len(code_blocks) - 1}\x00"
+
+    masked = _CODE_FENCE_RE.sub(_mask_code, text)
+
+    # Step 2: Mask escaped dollar signs (\$) so they are never treated as math
+    # delimiters.  We use str.split instead of a regex because Python's re
+    # module treats \$ as a literal-dollar pattern (not backslash+dollar),
+    # making regex-based matching of the 2-char sequence unreliable.
+    _ESC_DOLLAR = '\\$'  # the 2-char sequence: backslash then dollar
+    esc_dollar_parts = masked.split(_ESC_DOLLAR)
+    esc_dollars_count = len(esc_dollar_parts) - 1
+    if esc_dollars_count:
+        new_parts = [esc_dollar_parts[0]]
+        for i in range(esc_dollars_count):
+            new_parts.append(f"\x00ESCD{i}\x00")
+            new_parts.append(esc_dollar_parts[i + 1])
+        masked = ''.join(new_parts)
+
+    def _try_fix(m: re.Match) -> str:
+        open_delim  = m.group(1)
+        content     = m.group(2)
+        close_delim = m.group(3)
+        stats.math_total += 1
+        issues = _validate_math(content)
+        if not issues:
+            return m.group(0)
+        stats.math_invalid += 1
+        fixed = _llm_repair_math(content, issues, config)
+        if fixed == content.strip():
+            stats.math_failed += 1
+            return m.group(0)
+        recheck = _validate_math(fixed)
+        if recheck:
+            logger.warning(f"    ✗ Math repair introduced new issues: {'; '.join(recheck)}")
+            stats.math_failed += 1
+            return m.group(0)
+        stats.math_repaired += 1
+        return f"{open_delim}{fixed}{close_delim}"
+
+    for pattern in (_MATH_DISPLAY_RE, _MATH_BK_DISP_RE, _MATH_INLINE_RE, _MATH_BK_INLN_RE):
+        masked = pattern.sub(_try_fix, masked)
+
+    # Restore escaped dollar signs, then code blocks
+    if esc_dollars_count:
+        for i in range(esc_dollars_count):
+            masked = masked.replace(f"\x00ESCD{i}\x00", _ESC_DOLLAR)
+    return re.sub(r'\x00CODE(\d+)\x00', lambda m: code_blocks[int(m.group(1))], masked)
+
+
+# ── Phase 3: Mermaid repair ─────────────────────────────────────────────────────
 
 # ── mmdc detection ─────────────────────────────────────────────────────────────
 _MMDC_PATH: str | None = None
@@ -80,8 +274,15 @@ def _validate_with_mmdc(mmd_text: str) -> str | None:
     except Exception as exc:
         return str(exc)
     finally:
-        import shutil as _shutil
-        _shutil.rmtree(base, ignore_errors=True)
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def _has_unquoted_nonascii(content: str) -> bool:
+    """Return True if *content* has non-ASCII characters outside of quoted strings."""
+    # Temporarily strip all double/single-quoted strings, then look for non-ASCII
+    cleaned = re.sub(r'"[^"]*"', '""', content)
+    cleaned = re.sub(r"'[^']*'", "''", cleaned)
+    return bool(re.search(r'[^\x00-\x7F]', cleaned))
 
 
 def _validate_with_regex(content: str) -> list[str]:
@@ -95,18 +296,15 @@ def _validate_with_regex(content: str) -> list[str]:
     if _MERMAID_SINGLE_QUOTE_RE.search(content):
         issues.append("Single-quote character inside a node label bracket")
     open_sq = content.count("[") - content.count("]")
-    if abs(open_sq) > 1:
+    if open_sq != 0:
         issues.append(f"Unbalanced square brackets ({open_sq:+d})")
+    if _has_unquoted_nonascii(content):
+        issues.append(
+            "Non-ASCII characters (e.g. Chinese/CJK) outside quoted strings — "
+            "wrap node labels in double quotes, e.g. A[\"中文\"]"
+        )
     return issues
 
-
-# ── LLM repair ─────────────────────────────────────────────────────────────────
-_REPAIR_SYSTEM = (
-    "You are a Mermaid diagram syntax expert. "
-    "Fix the supplied diagram so it parses without errors. "
-    "Preserve the logical meaning and structure exactly. "
-    "Output ONLY the corrected diagram content — no fences, no explanation."
-)
 
 _REPAIR_USER = """\
 The following Mermaid diagram contains syntax errors.
@@ -140,43 +338,32 @@ def _llm_repair(content: str, issues: list[str], config: Config) -> str:
         return content
 
 
-# ── Per-file fixer ──────────────────────────────────────────────────────────────
-@dataclass
-class FixStats:
-    files_scanned: int = 0
-    files_with_issues: int = 0
-    diagrams_total: int = 0
-    diagrams_invalid: int = 0
-    diagrams_repaired: int = 0
-    diagrams_failed: int = 0
-
-
-def fix_mermaid_in_file(path: Path, config: Config, stats: FixStats) -> bool:
-    """Scan one markdown file and repair broken Mermaid diagrams in-place.
-
-    Returns True if the file was modified.
-    """
-    text = path.read_text(encoding="utf-8")
+def _fix_mermaid_in_text(text: str, config: Config, stats: FixStats) -> str:
+    """Validate and repair Mermaid diagrams embedded in *text*. Returns updated text."""
     matches = list(_MERMAID_BLOCK_RE.finditer(text))
     if not matches:
-        return False
+        return text
 
-    stats.files_scanned += 1
+    stats.files_with_mermaid += 1
 
-    replacements: list[tuple[int, int, str]] = []  # (start, end, replacement)
-    file_has_issues = False
+    # Cache mmdc availability once per call to avoid redundant shutil.which lookups
+    mmdc_available = _find_mmdc() is not None
+
+    replacements: list[tuple[int, int, str]] = []
+    file_has_issues = False  # any diagram in this file was invalid
 
     for m in matches:
         stats.diagrams_total += 1
         open_fence, content, close_fence = m.group(1), m.group(2), m.group(3)
         start, end = m.start(), m.end()
 
-        # 1. Try mmdc first (authoritative)
-        mmdc_err = _validate_with_mmdc(content)
-        if mmdc_err is not None:
-            issues = [mmdc_err]
+        # Validation: mmdc is authoritative when available; regex is the fallback.
+        # _validate_with_mmdc returns None for BOTH "unavailable" and "valid",
+        # so we must gate on mmdc_available to avoid running regex on valid diagrams.
+        if mmdc_available:
+            mmdc_err = _validate_with_mmdc(content)
+            issues = [mmdc_err] if mmdc_err is not None else []
         else:
-            # 2. Fallback to regex heuristics when mmdc unavailable or passes
             issues = _validate_with_regex(content)
 
         if not issues:
@@ -186,43 +373,76 @@ def fix_mermaid_in_file(path: Path, config: Config, stats: FixStats) -> bool:
         file_has_issues = True
         approx_line = text[:start].count("\n") + 1
         logger.info(
-            f"  🔧 {path.name}:{approx_line} — Mermaid issues: {'; '.join(issues)}"
+            f"    🔧 Mermaid line ~{approx_line} — {'; '.join(issues)}"
         )
 
         fixed = _llm_repair(content, issues, config)
 
-        # Verify the fix with mmdc (if available)
-        recheck = _validate_with_mmdc(fixed)
-        if recheck is not None and _find_mmdc():
-            logger.warning(
-                f"  ✗ {path.name}:{approx_line} — repaired diagram still invalid: {recheck}"
-            )
-            stats.diagrams_failed += 1
-            continue
+        # Verify the fix with the same validator used for detection
+        if mmdc_available:
+            recheck = _validate_with_mmdc(fixed)
+            if recheck is not None:
+                logger.warning(
+                    f"    ✗ Mermaid line ~{approx_line} — repaired diagram still invalid: {recheck}"
+                )
+                stats.diagrams_failed += 1
+                continue
+        else:
+            regex_recheck = _validate_with_regex(fixed)
+            if regex_recheck:
+                logger.warning(
+                    f"    ✗ Mermaid line ~{approx_line} — regex recheck failed after repair: "
+                    f"{'; '.join(regex_recheck)}"
+                )
+                stats.diagrams_failed += 1
+                continue
 
         if fixed == content.strip():
-            logger.debug(f"  ⊘ {path.name}:{approx_line} — LLM returned unchanged content")
+            logger.debug(f"    ⊘ Mermaid line ~{approx_line} — LLM returned unchanged content")
             stats.diagrams_failed += 1
             continue
 
         replacements.append((start, end, f"{open_fence}{fixed}\n{close_fence}"))
         stats.diagrams_repaired += 1
 
-    if not replacements:
-        return False
+    # files_with_issues counts files where any invalid diagram was FOUND,
+    # regardless of whether repair succeeded (so failed repairs are also counted).
+    if file_has_issues:
+        stats.files_with_issues += 1
 
-    stats.files_with_issues += 1
+    if not replacements:
+        return text
+
     # Apply replacements from end → start to preserve offsets
     for start, end, new_block in sorted(replacements, key=lambda x: x[0], reverse=True):
         text = text[:start] + new_block + text[end:]
 
-    path.write_text(text, encoding="utf-8")
+    return text
+
+
+# ── Backward-compat wrapper ─────────────────────────────────────────────────────
+
+def fix_mermaid_in_file(path: Path, config: Config, stats: FixStats) -> bool:
+    """Scan one markdown file and repair broken Mermaid diagrams in-place.
+
+    Returns True if the file was modified.
+    """
+    text = path.read_text(encoding="utf-8")
+    new_text = _fix_mermaid_in_text(text, config, stats)
+    if new_text == text:
+        return False
+    path.write_text(new_text, encoding="utf-8")
     return True
 
 
 # ── Directory-level entry point ─────────────────────────────────────────────────
+
 def fix_docs(working_dir: str, config: Config) -> FixStats:
-    """Scan every .md file in *working_dir* and fix broken Mermaid diagrams.
+    """Apply all three post-processing fix phases to every .md file in *working_dir*.
+
+    Phase 1 — Markdown formatting (mdformat, mechanical)
+    Phase 2 — Math repair (LaTeX validation + LLM)
+    Phase 3 — Mermaid repair (mmdc/regex + LLM)
 
     This is the hook called at the end of the documentation generation pipeline.
     """
@@ -235,14 +455,35 @@ def fix_docs(working_dir: str, config: Config) -> FixStats:
     mmdc_available = _find_mmdc() is not None
     validation_mode = "mmdc" if mmdc_available else "regex heuristics"
     logger.info(
-        f"🔧 Mermaid fix phase — {len(md_files)} file(s), validation: {validation_mode}"
+        f"🔧 Post-processing {len(md_files)} file(s): markdown + math + mermaid "
+        f"(mermaid validation: {validation_mode})"
     )
 
     stats = FixStats()
     for md_file in md_files:
         try:
-            fix_mermaid_in_file(md_file, config, stats)
+            text = md_file.read_text(encoding="utf-8")
+            original = text
+
+            # Phase 1 — Markdown formatting
+            text = _format_markdown(text, stats)
+
+            # Phase 2 — Math repair
+            text = _fix_math_in_text(text, config, stats)
+
+            # Phase 3 — Mermaid repair
+            text = _fix_mermaid_in_text(text, config, stats)
+
+            if text != original:
+                md_file.write_text(text, encoding="utf-8")
         except Exception as exc:
             logger.warning(f"  ✗ Failed to process {md_file.name}: {exc}")
+
+    if stats.md_files_formatted:
+        logger.info(f"  📝 Formatted {stats.md_files_formatted} file(s) with mdformat")
+    if stats.math_repaired:
+        logger.info(f"  ✓ Math: repaired {stats.math_repaired}/{stats.math_invalid} formula(s)")
+    if stats.diagrams_repaired:
+        logger.info(f"  ✓ Mermaid: repaired {stats.diagrams_repaired}/{stats.diagrams_invalid} diagram(s)")
 
     return stats
