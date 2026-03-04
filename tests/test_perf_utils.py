@@ -3,7 +3,7 @@ import time
 from codewiki.src.be.utils import count_tokens, _get_encoder
 
 def test_count_tokens_basic():
-    assert count_tokens("hello world") > 0
+    assert count_tokens("hello world", model="gpt-4") == 2
 
 def test_count_tokens_unknown_model_fallback():
     result = count_tokens("hello world", model="some-unknown-model-xyz")
