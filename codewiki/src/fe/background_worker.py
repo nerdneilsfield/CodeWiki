@@ -3,17 +3,21 @@
 Background worker for processing documentation generation jobs.
 """
 
+import logging
 import os
 import json
+import queue
+import shutil
 import time
 import threading
-import subprocess
 import asyncio
 from datetime import datetime
 from pathlib import Path
 from queue import Queue
 from typing import Dict
 from dataclasses import asdict
+
+logger = logging.getLogger(__name__)
 
 from codewiki.src.be.documentation_generator import DocumentationGenerator
 from codewiki.src.config import Config, MAIN_MODEL
@@ -47,10 +51,17 @@ class BackgroundWorker:
         """Stop the background worker."""
         self.running = False
     
-    def add_job(self, job_id: str, job: JobStatus):
-        """Add a job to the processing queue."""
+    def add_job(self, job_id: str, job: JobStatus) -> bool:
+        """Add a job to the processing queue. Returns False if queue is full."""
         self.job_status[job_id] = job
-        self.processing_queue.put(job_id)
+        try:
+            self.processing_queue.put(job_id, timeout=5)
+            return True
+        except queue.Full:
+            logger.error("Queue is full, cannot add job %s", job_id)
+            job.status = "failed"
+            job.error_message = "Server is at capacity, please try again later"
+            return False
     
     def get_job_status(self, job_id: str) -> JobStatus:
         """Get job status by ID."""
@@ -249,8 +260,9 @@ class BackgroundWorker:
         
         finally:
             # Cleanup temporary repository
-            if 'temp_repo_dir' in locals() and os.path.exists(temp_repo_dir):
+            if 'temp_repo_dir' in locals() and temp_repo_dir and os.path.exists(temp_repo_dir):
                 try:
-                    subprocess.run(['rm', '-rf', temp_repo_dir], check=True)
+                    shutil.rmtree(temp_repo_dir)
+                    logger.info("Cleaned up temp directory: %s", temp_repo_dir)
                 except Exception as e:
-                    print(f"Failed to cleanup temp directory: {e}")
+                    logger.error("Failed to cleanup temp directory %s: %s", temp_repo_dir, e)

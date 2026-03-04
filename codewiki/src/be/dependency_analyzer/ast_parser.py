@@ -66,7 +66,8 @@ class DependencyParser:
         relationships = call_graph_result.get("relationships", [])
         
         component_id_mapping = {}
-        
+        name_to_comp_ids: dict[str, list[str]] = defaultdict(list)
+
         for func_dict in functions:
             component_id = func_dict.get("id", "")
             if not component_id:
@@ -100,7 +101,15 @@ class DependencyParser:
             legacy_id = f"{func_dict.get('file_path', '')}:{func_dict.get('name', '')}"
             if legacy_id and legacy_id != component_id:
                 component_id_mapping[legacy_id] = component_id
-            
+
+            # Build name→comp_id index for O(1) callee resolution below.
+            _node_name = func_dict.get("name", "")
+            if _node_name:
+                name_to_comp_ids[_node_name].append(component_id)
+            _short_name = component_id.split(".")[-1] if "." in component_id else ""
+            if _short_name and _short_name != _node_name:
+                name_to_comp_ids[_short_name].append(component_id)
+
             if "." in component_id:
                 module_parts = component_id.split(".")[:-1]  
                 module_path = ".".join(module_parts)
@@ -117,10 +126,8 @@ class DependencyParser:
 
             callee_component_id = component_id_mapping.get(callee_id)
             if not callee_component_id:
-                for comp_id, comp_node in self.components.items():
-                    if comp_node.name == callee_id:
-                        callee_component_id = comp_id
-                        break
+                candidates = name_to_comp_ids.get(callee_id, [])
+                callee_component_id = candidates[0] if candidates else None
 
             if caller_component_id and caller_component_id in self.components:
                 if callee_component_id:

@@ -65,12 +65,21 @@ def is_complex_module(components: dict[str, any], core_component_ids: list[str])
 # ---------------------- Token Counting ---------------------
 # ------------------------------------------------------------
 
-enc = tiktoken.encoding_for_model("gpt-4")
-
-def count_tokens(text: str) -> int:
+def count_tokens(text: str, model: str = "gpt-4") -> int:
     """
     Count the number of tokens in a text.
+
+    Args:
+        text: The text to tokenize.
+        model: The model name used to look up the appropriate tokenizer.
+               Models not recognized by tiktoken (e.g. Claude, GLM) fall back
+               to cl100k_base, which is the same encoding GPT-4 uses and
+               provides a reasonable approximation for most modern LLMs.
     """
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except KeyError:
+        enc = tiktoken.get_encoding("cl100k_base")
     length = len(enc.encode(text))
     # logger.debug(f"Number of tokens: {length}")
     return length

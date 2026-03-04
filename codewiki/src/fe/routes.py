@@ -127,10 +127,13 @@ class WebRoutes:
                             commit_id=commit_id if commit_id else None
                         )
                         
-                        self.background_worker.add_job(job_id, job)
-                        message = f"Repository added to processing queue! Job ID: {job_id}"
-                        message_type = "success"
-                        repo_url = ""  # Clear form
+                        if self.background_worker.add_job(job_id, job):
+                            message = f"Repository added to processing queue! Job ID: {job_id}"
+                            message_type = "success"
+                            repo_url = ""  # Clear form
+                        else:
+                            message = "Server is at capacity, please try again later"
+                            message_type = "error"
                         
                     except Exception as e:
                         logger.error("Failed to add repository to queue: %s", e, exc_info=True)
@@ -250,7 +253,10 @@ class WebRoutes:
             stem = filename.rsplit(".", 1)[0] if "." in filename else filename
             found = find_module_doc(str(docs_path), stem.split("-"))
             if found:
-                file_path = Path(found)
+                found_path = Path(found).resolve()
+                if not found_path.is_relative_to(docs_path.resolve()):
+                    raise HTTPException(status_code=403, detail="Access denied")
+                file_path = found_path
             else:
                 raise HTTPException(status_code=404, detail=f"File {filename} not found")
         
