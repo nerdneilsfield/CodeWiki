@@ -6,6 +6,7 @@ along with their dependency relationships (use, extends, implements, new, static
 """
 
 import logging
+import threading
 from typing import List, Optional, Tuple, Dict, Set
 from pathlib import Path
 import os
@@ -15,6 +16,22 @@ import tree_sitter_php
 from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationship
 
 logger = logging.getLogger(__name__)
+
+_PHP_LANGUAGE: "Language | None" = None
+_PHP_LANGUAGE_LOCK = threading.Lock()
+_PHP_PARSER_LOCAL = threading.local()
+
+
+def _get_php_parser() -> "Parser":
+    global _PHP_LANGUAGE
+    if _PHP_LANGUAGE is None:
+        with _PHP_LANGUAGE_LOCK:
+            if _PHP_LANGUAGE is None:
+                _PHP_LANGUAGE = Language(tree_sitter_php.language_php())
+    p = getattr(_PHP_PARSER_LOCAL, "parser", None)
+    if p is None:
+        _PHP_PARSER_LOCAL.parser = Parser(_PHP_LANGUAGE)
+    return _PHP_PARSER_LOCAL.parser
 
 # PHP primitive and built-in types to exclude from dependencies
 PHP_PRIMITIVES: Set[str] = {
@@ -163,10 +180,7 @@ class TreeSitterPHPAnalyzer:
     def _analyze(self):
         """Parse and analyze the PHP file."""
         try:
-            # Use language_php for mixed PHP/HTML files (most common)
-            php_lang_capsule = tree_sitter_php.language_php()
-            php_language = Language(php_lang_capsule)
-            parser = Parser(php_language)
+            parser = _get_php_parser()
 
             tree = parser.parse(bytes(self.content, "utf8"))
             root = tree.root_node

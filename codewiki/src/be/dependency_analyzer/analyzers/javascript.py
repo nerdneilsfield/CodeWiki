@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import traceback
 from typing import List, Set, Optional, Tuple
 from pathlib import Path
@@ -14,6 +15,26 @@ from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationsh
 
 logger = logging.getLogger(__name__)
 
+_JS_LANGUAGE: "Language | None" = None
+_JS_LANGUAGE_LOCK = threading.Lock()
+_JS_PARSER_LOCAL = threading.local()
+
+
+def _get_js_parser() -> "Parser | None":
+    global _JS_LANGUAGE
+    try:
+        if _JS_LANGUAGE is None:
+            with _JS_LANGUAGE_LOCK:
+                if _JS_LANGUAGE is None:
+                    _JS_LANGUAGE = Language(tree_sitter_javascript.language())
+        p = getattr(_JS_PARSER_LOCAL, "parser", None)
+        if p is None:
+            _JS_PARSER_LOCAL.parser = Parser(_JS_LANGUAGE)
+        return _JS_PARSER_LOCAL.parser
+    except Exception as e:
+        logger.error(f"Failed to initialise JavaScript parser: {e}")
+        return None
+
 
 class TreeSitterJSAnalyzer:
     def __init__(self, file_path: str, content: str, repo_path: str = None):
@@ -27,16 +48,8 @@ class TreeSitterJSAnalyzer:
         
         self.seen_relationships = set()
 
-        try:
-            language_capsule = tree_sitter_javascript.language()
-            self.js_language = Language(language_capsule)
-            self.parser = Parser(self.js_language)
-
-        except Exception as e:
-            logger.error(f"Failed to initialize JavaScript parser: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            self.parser = None
-            self.js_language = None
+        self.parser = _get_js_parser()
+        self.js_language = _JS_LANGUAGE
 
 
     def _add_relationship(self, relationship: CallRelationship) -> bool:

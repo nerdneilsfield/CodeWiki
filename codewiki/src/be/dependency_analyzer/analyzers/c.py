@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import List, Optional, Tuple
 from pathlib import Path
 import sys
@@ -9,6 +10,22 @@ import tree_sitter_c
 from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationship
 
 logger = logging.getLogger(__name__)
+
+_C_LANGUAGE: "Language | None" = None
+_C_LANGUAGE_LOCK = threading.Lock()
+_C_PARSER_LOCAL = threading.local()
+
+
+def _get_c_parser() -> "Parser":
+    global _C_LANGUAGE
+    if _C_LANGUAGE is None:
+        with _C_LANGUAGE_LOCK:
+            if _C_LANGUAGE is None:
+                _C_LANGUAGE = Language(tree_sitter_c.language())
+    p = getattr(_C_PARSER_LOCAL, "parser", None)
+    if p is None:
+        _C_PARSER_LOCAL.parser = Parser(_C_LANGUAGE)
+    return _C_PARSER_LOCAL.parser
 
 class TreeSitterCAnalyzer:
 	def __init__(self, file_path: str, content: str, repo_path: str = None):
@@ -48,9 +65,7 @@ class TreeSitterCAnalyzer:
 		return f"{module_path}.{name}" if module_path else name
 
 	def _analyze(self):
-		language_capsule = tree_sitter_c.language()
-		c_language = Language(language_capsule)
-		parser = Parser(c_language)
+		parser = _get_c_parser()
 		tree = parser.parse(bytes(self.content, "utf8"))
 		root = tree.root_node
 		lines = self.content.splitlines()

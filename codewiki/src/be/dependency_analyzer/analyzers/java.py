@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import List, Optional, Tuple
 from pathlib import Path
 import sys
@@ -9,6 +10,22 @@ import tree_sitter_java
 from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationship
 
 logger = logging.getLogger(__name__)
+
+_JAVA_LANGUAGE: "Language | None" = None
+_JAVA_LANGUAGE_LOCK = threading.Lock()
+_JAVA_PARSER_LOCAL = threading.local()
+
+
+def _get_java_parser() -> "Parser":
+    global _JAVA_LANGUAGE
+    if _JAVA_LANGUAGE is None:
+        with _JAVA_LANGUAGE_LOCK:
+            if _JAVA_LANGUAGE is None:
+                _JAVA_LANGUAGE = Language(tree_sitter_java.language())
+    p = getattr(_JAVA_PARSER_LOCAL, "parser", None)
+    if p is None:
+        _JAVA_PARSER_LOCAL.parser = Parser(_JAVA_LANGUAGE)
+    return _JAVA_PARSER_LOCAL.parser
 
 class TreeSitterJavaAnalyzer:
 	def __init__(self, file_path: str, content: str, repo_path: str = None):
@@ -52,9 +69,7 @@ class TreeSitterJavaAnalyzer:
 			return f"{module_path}.{name}"
 
 	def _analyze(self):
-		language_capsule = tree_sitter_java.language()
-		java_language = Language(language_capsule)
-		parser = Parser(java_language)
+		parser = _get_java_parser()
 		tree = parser.parse(bytes(self.content, "utf8"))
 		root = tree.root_node
 		lines = self.content.splitlines()

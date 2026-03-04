@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import traceback
 from typing import List, Set, Optional, Tuple
 from pathlib import Path
@@ -14,6 +15,26 @@ from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationsh
 
 logger = logging.getLogger(__name__)
 
+_TS_LANGUAGE: "Language | None" = None
+_TS_LANGUAGE_LOCK = threading.Lock()
+_TS_PARSER_LOCAL = threading.local()
+
+
+def _get_ts_parser() -> "Parser | None":
+    global _TS_LANGUAGE
+    try:
+        if _TS_LANGUAGE is None:
+            with _TS_LANGUAGE_LOCK:
+                if _TS_LANGUAGE is None:
+                    _TS_LANGUAGE = Language(tree_sitter_typescript.language_typescript())
+        p = getattr(_TS_PARSER_LOCAL, "parser", None)
+        if p is None:
+            _TS_PARSER_LOCAL.parser = Parser(_TS_LANGUAGE)
+        return _TS_PARSER_LOCAL.parser
+    except Exception as e:
+        logger.error(f"Failed to initialise TypeScript parser: {e}")
+        return None
+
 class TreeSitterTSAnalyzer:
 
     def __init__(self, file_path: str, content: str, repo_path: str = None):
@@ -25,16 +46,8 @@ class TreeSitterTSAnalyzer:
         
         self.top_level_nodes = {}
 
-        try:
-            language_capsule = tree_sitter_typescript.language_typescript()
-            self.ts_language = Language(language_capsule)
-            self.parser = Parser(self.ts_language)
-
-        except Exception as e:
-            logger.error(f"Failed to initialize TypeScript parser: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            self.parser = None
-            self.ts_language = None
+        self.parser = _get_ts_parser()
+        self.ts_language = _TS_LANGUAGE
 
     def analyze(self) -> None:
         if self.parser is None:

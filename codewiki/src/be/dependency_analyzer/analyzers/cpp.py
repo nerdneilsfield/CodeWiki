@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import List, Optional, Tuple
 from pathlib import Path
 import sys
@@ -9,6 +10,22 @@ import tree_sitter_cpp
 from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationship
 
 logger = logging.getLogger(__name__)
+
+_CPP_LANGUAGE: "Language | None" = None
+_CPP_LANGUAGE_LOCK = threading.Lock()
+_CPP_PARSER_LOCAL = threading.local()
+
+
+def _get_cpp_parser() -> "Parser":
+    global _CPP_LANGUAGE
+    if _CPP_LANGUAGE is None:
+        with _CPP_LANGUAGE_LOCK:
+            if _CPP_LANGUAGE is None:
+                _CPP_LANGUAGE = Language(tree_sitter_cpp.language())
+    p = getattr(_CPP_PARSER_LOCAL, "parser", None)
+    if p is None:
+        _CPP_PARSER_LOCAL.parser = Parser(_CPP_LANGUAGE)
+    return _CPP_PARSER_LOCAL.parser
 
 class TreeSitterCppAnalyzer:
 	def __init__(self, file_path: str, content: str, repo_path: str = None):
@@ -50,9 +67,7 @@ class TreeSitterCppAnalyzer:
 		return f"{module_path}.{name}" if module_path else name
 
 	def _analyze(self):
-		language_capsule = tree_sitter_cpp.language()
-		cpp_language = Language(language_capsule)
-		parser = Parser(cpp_language)
+		parser = _get_cpp_parser()
 		tree = parser.parse(bytes(self.content, "utf8"))
 		root = tree.root_node
 		lines = self.content.splitlines()
