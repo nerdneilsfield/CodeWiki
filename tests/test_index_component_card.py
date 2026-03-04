@@ -74,3 +74,61 @@ def test_file_context():
     builder = CardBuilder(max_edges=5)
     card = builder.build_card(sym, [])
     assert card.file_context == "src/auth/login.py (lines 10-42)"
+
+
+# ── New edge-case tests ───────────────────────────────────────────────────────
+
+def test_no_signature_falls_back_to_name():
+    """When symbol has no signature, card.signature should fall back to symbol.name."""
+    sym = _sym(sig=None)
+    builder = CardBuilder(max_edges=5)
+    card = builder.build_card(sym, [])
+    assert card.signature == sym.name
+
+
+def test_single_sentence_docstring_not_truncated():
+    """Single-sentence docstring should not be modified (no extra content added)."""
+    sym = _sym(doc="Handles authentication.")
+    builder = CardBuilder(max_edges=5)
+    card = builder.build_card(sym, [])
+    assert card.docstring_summary == "Handles authentication."
+
+
+def test_edge_with_to_unresolved_included_in_key_edges():
+    """Edges where to_symbol is None but to_unresolved is set should appear in key_edges."""
+    from codewiki.src.be.index.models import SymbolEdge, EdgeType, Confidence
+    sym = _sym(sid="s1")
+    edge = SymbolEdge(
+        edge_type=EdgeType.CALLS,
+        from_symbol="s1",
+        to_symbol=None,
+        to_unresolved="some.external.lib",
+        confidence=Confidence.LOW,
+        resolver="heuristic",
+    )
+    builder = CardBuilder(max_edges=5)
+    card = builder.build_card(sym, [edge])
+    assert len(card.key_edges) == 1
+    assert "some.external.lib" in card.key_edges[0]
+
+
+def test_max_edges_zero_produces_empty_key_edges():
+    """max_edges=0 should produce empty key_edges list."""
+    sym = _sym(sid="s1")
+    edges = [_edge("s1", f"s{i}") for i in range(5)]
+    builder = CardBuilder(max_edges=0)
+    card = builder.build_card(sym, edges)
+    assert card.key_edges == []
+
+
+def test_only_incoming_edges_not_included_in_key_edges():
+    """Edges where from_symbol != symbol.symbol_id (incoming edges) are NOT included in key_edges."""
+    sym = _sym(sid="s1")
+    # These edges all point TO s1, not FROM s1
+    edges = [
+        _edge("other1", "s1", EdgeType.CALLS),
+        _edge("other2", "s1", EdgeType.IMPORTS),
+    ]
+    builder = CardBuilder(max_edges=5)
+    card = builder.build_card(sym, edges)
+    assert card.key_edges == []

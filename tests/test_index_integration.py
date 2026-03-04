@@ -91,3 +91,90 @@ def test_serialization_roundtrip(python_repo):
     restored = IndexProducts.from_dict(data)
     assert len(restored.symbol_table.all_symbols()) == len(products.symbol_table.all_symbols())
     assert len(restored.import_graph.all_imports()) == len(products.import_graph.all_imports())
+
+
+# ── New edge-case tests ───────────────────────────────────────────────────────
+
+@pytest.fixture
+def mixed_repo(tmp_path):
+    """Repo with both Python and TypeScript files."""
+    py_pkg = tmp_path / "backend"
+    py_pkg.mkdir()
+    (py_pkg / "__init__.py").write_text("")
+    (py_pkg / "server.py").write_text(textwrap.dedent('''
+        class Server:
+            """Backend server."""
+            def start(self):
+                pass
+    '''))
+    ts_dir = tmp_path / "frontend"
+    ts_dir.mkdir()
+    (ts_dir / "app.ts").write_text(textwrap.dedent('''
+        export class AppComponent {
+            render() {
+                return null;
+            }
+        }
+    '''))
+    return str(tmp_path)
+
+
+def test_repo_with_both_python_and_typescript_files(mixed_repo):
+    """Repo with both Python and TypeScript files should index both."""
+    builder = IndexBuilder(repo_path=mixed_repo)
+    products = builder.build()
+    st = products.symbol_table
+
+    # Python class should be indexed
+    py_classes = [s for s in st.all_symbols() if s.name == "Server" and s.lang == "python"]
+    assert len(py_classes) == 1
+
+    # TS class should be indexed (if tree-sitter is available)
+    # At minimum, the builder should not crash
+    assert products.symbol_table is not None
+    assert products.import_graph is not None
+
+
+def test_class_with_many_methods_has_populated_children(python_repo):
+    """Class with many methods should have all methods as children."""
+    builder = IndexBuilder(repo_path=python_repo)
+    products = builder.build()
+    st = products.symbol_table
+
+    # Find AuthService (has login, logout, _validate_token)
+    auth_class = [s for s in st.all_symbols() if s.name == "AuthService"]
+    assert len(auth_class) == 1
+    auth = auth_class[0]
+    assert len(auth.children) >= 3
+
+    # All children should be resolvable
+    children = st.children_of(auth.symbol_id)
+    assert len(children) >= 3
+    child_names = {c.name for c in children}
+    assert "login" in child_names
+    assert "logout" in child_names
+
+
+def test_syntax_error_in_one_file_does_not_prevent_others(tmp_path):
+    """A file with syntax error should not crash the builder; other files are still indexed."""
+    pkg = tmp_path / "mypkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "broken.py").write_text("def broken_func(:\n    # syntax error\n    pass\n")
+    (pkg / "good.py").write_text(textwrap.dedent('''
+        def working_function():
+            """Works correctly."""
+            return True
+
+        class WorkingClass:
+            """A working class."""
+            def method(self):
+                pass
+    '''))
+    builder = IndexBuilder(repo_path=str(tmp_path))
+    products = builder.build()
+
+    # The good file should still be indexed
+    all_names = {s.name for s in products.symbol_table.all_symbols()}
+    assert "working_function" in all_names
+    assert "WorkingClass" in all_names

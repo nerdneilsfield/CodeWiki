@@ -198,3 +198,177 @@ def test_file_paths_are_relative():
         assert not s.file_path.startswith("/"), f"Symbol {s.symbol_id} has absolute path: {s.file_path}"
     for i in imports:
         assert not i.file_path.startswith("/"), f"Import has absolute path: {i.file_path}"
+
+
+# ── New edge-case tests ───────────────────────────────────────────────────────
+
+def test_empty_file_returns_empty():
+    symbols, imports = _adapt('')
+    assert symbols == []
+    assert imports == []
+
+
+def test_file_with_only_comments_returns_empty():
+    symbols, imports = _adapt('''
+        # This is a comment
+        # Another comment
+        # No actual code here
+    ''')
+    assert symbols == []
+    assert imports == []
+
+
+def test_syntax_error_returns_empty():
+    symbols, imports = _adapt('''
+        def broken(
+            # unterminated function definition
+        class Foo:
+            pass
+    ''')
+    assert symbols == []
+    assert imports == []
+
+
+def test_multiple_classes_in_one_file():
+    symbols, _ = _adapt('''
+        class Alpha:
+            """First class."""
+            pass
+
+        class Beta:
+            """Second class."""
+            pass
+
+        class Gamma:
+            pass
+    ''')
+    classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
+    class_names = {c.name for c in classes}
+    assert len(classes) == 3
+    assert class_names == {"Alpha", "Beta", "Gamma"}
+
+
+def test_class_inheriting_from_base():
+    symbols, _ = _adapt('''
+        class Child(BaseClass):
+            pass
+    ''')
+    classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
+    assert len(classes) == 1
+    assert "BaseClass" in classes[0].signature
+
+
+def test_dunder_init_visibility():
+    """__init__ starts with _ so it is treated as PRIVATE by the visibility logic."""
+    symbols, _ = _adapt('''
+        class Foo:
+            def __init__(self, x: int):
+                self.x = x
+    ''')
+    methods = [s for s in symbols if s.kind == SymbolKind.METHOD]
+    assert len(methods) == 1
+    assert methods[0].name == "__init__"
+    # The adapter treats any name starting with _ as PRIVATE (dunder methods included)
+    assert methods[0].visibility == Visibility.PRIVATE
+
+
+def test_dunder_str_visibility():
+    """__str__ starts with _ so it is treated as PRIVATE by the visibility logic."""
+    symbols, _ = _adapt('''
+        class Foo:
+            def __str__(self) -> str:
+                return "Foo"
+    ''')
+    methods = [s for s in symbols if s.kind == SymbolKind.METHOD]
+    assert len(methods) == 1
+    assert methods[0].name == "__str__"
+    # Dunder methods are treated as PRIVATE because they start with underscore
+    assert methods[0].visibility == Visibility.PRIVATE
+
+
+def test_kwonly_args_in_signature():
+    """Function with keyword-only args (after *) should still be extractable."""
+    symbols, _ = _adapt('''
+        def func_with_kwonly(a, b, *, key: str = "default", flag: bool = False):
+            pass
+    ''')
+    funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
+    assert len(funcs) == 1
+    assert funcs[0].name == "func_with_kwonly"
+    # Should have extracted a signature
+    assert funcs[0].signature is not None
+
+
+def test_args_and_kwargs_in_signature():
+    """Function with *args and **kwargs should be extractable."""
+    symbols, _ = _adapt('''
+        def variadic(*args, **kwargs):
+            pass
+    ''')
+    funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
+    assert len(funcs) == 1
+    assert "*args" in funcs[0].signature
+    assert "**kwargs" in funcs[0].signature
+
+
+def test_property_decorated_method():
+    """@property decorator should still result in a METHOD symbol."""
+    symbols, _ = _adapt('''
+        class Foo:
+            @property
+            def value(self) -> int:
+                return self._value
+    ''')
+    methods = [s for s in symbols if s.kind == SymbolKind.METHOD]
+    assert len(methods) == 1
+    assert methods[0].name == "value"
+
+
+def test_deep_module_path_in_qualified_name():
+    """Deep file path like src/pkg/sub/module.py → qualified_name starts with src.pkg.sub.module."""
+    symbols, _ = _adapt('''
+        def my_func():
+            pass
+    ''', file_path="src/pkg/sub/module.py", repo_path="")
+    funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
+    assert len(funcs) == 1
+    assert funcs[0].qualified_name.startswith("src.pkg.sub.module")
+
+
+def test_dunder_all_as_tuple():
+    """__all__ defined as a tuple should still determine export status."""
+    symbols, _ = _adapt('''
+        __all__ = ("exported_func",)
+
+        def exported_func():
+            pass
+
+        def hidden_func():
+            pass
+    ''')
+    exported = [s for s in symbols if s.export_status == ExportStatus.EXPORTED]
+    not_exported = [s for s in symbols if s.export_status == ExportStatus.NOT_EXPORTED]
+    assert len(exported) == 1
+    assert exported[0].name == "exported_func"
+    assert any(s.name == "hidden_func" for s in not_exported)
+
+
+def test_multiple_imports_from_same_module():
+    """Multiple `from X import ...` statements from the same module create multiple ImportStatement objects."""
+    _, imports = _adapt('''
+        from os.path import join
+        from os.path import dirname
+    ''')
+    os_path_imports = [i for i in imports if i.module_path == "os.path"]
+    assert len(os_path_imports) == 2
+
+
+def test_relative_import_empty_module():
+    """from . import foo (empty module in relative import) should work."""
+    _, imports = _adapt('''
+        from . import foo
+    ''')
+    assert len(imports) == 1
+    # module_path should just be "." (the dot prefix with empty module)
+    assert imports[0].module_path == "."
+    assert "foo" in imports[0].imported_names

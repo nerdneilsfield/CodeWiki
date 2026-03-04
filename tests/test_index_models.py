@@ -162,3 +162,97 @@ def test_component_card_basic():
     )
     assert card.symbol_id == "py:src/a.py#Foo(class)"
     assert len(card.key_edges) == 2
+
+
+# ── New edge-case tests ───────────────────────────────────────────────────────
+
+def test_symbol_model_dump_is_json_serializable():
+    """Symbol.model_dump() should produce a JSON-serializable dict (no custom types)."""
+    import json
+    s = Symbol(
+        symbol_id="py:src/a.py#Foo(class)",
+        lang="python",
+        kind=SymbolKind.CLASS,
+        name="Foo",
+        qualified_name="src.a.Foo",
+        file_path="src/a.py",
+        range=SourceRange(file_path="src/a.py", start_line=1, start_col=0, end_line=10, end_col=0),
+        source_hash="abc123",
+        visibility=Visibility.PUBLIC,
+        export_status=ExportStatus.EXPORTED,
+    )
+    dumped = s.model_dump()
+    # This should not raise
+    serialized = json.dumps(dumped)
+    assert isinstance(serialized, str)
+
+
+def test_symbol_edge_with_both_to_symbol_and_to_unresolved_allowed():
+    """SymbolEdge model allows having both to_symbol and to_unresolved set (no exclusivity validation)."""
+    e = SymbolEdge(
+        edge_type=EdgeType.CALLS,
+        from_symbol="py:src/a.py#f(function)",
+        to_symbol="py:src/b.py#g(function)",
+        to_unresolved="some.external.func",
+        confidence=Confidence.MEDIUM,
+        resolver="ast",
+    )
+    assert e.to_symbol == "py:src/b.py#g(function)"
+    assert e.to_unresolved == "some.external.func"
+
+
+def test_all_symbol_kind_values_are_strings():
+    """Every SymbolKind member should have a string value."""
+    for kind in SymbolKind:
+        assert isinstance(kind.value, str), f"SymbolKind.{kind.name}.value is not a string"
+
+
+def test_visibility_unknown_is_default_for_symbol():
+    """Visibility.UNKNOWN should be the default visibility for a new Symbol."""
+    s = Symbol(
+        symbol_id="py:src/a.py#f(function)",
+        lang="python",
+        kind=SymbolKind.FUNCTION,
+        name="f",
+        qualified_name="src.a.f",
+        file_path="src/a.py",
+        range=SourceRange(file_path="src/a.py", start_line=1, start_col=0, end_line=1, end_col=0),
+        source_hash="x",
+    )
+    assert s.visibility == Visibility.UNKNOWN
+
+
+def test_export_status_unknown_is_default_for_symbol():
+    """ExportStatus.UNKNOWN should be the default export_status for a new Symbol."""
+    s = Symbol(
+        symbol_id="py:src/a.py#f(function)",
+        lang="python",
+        kind=SymbolKind.FUNCTION,
+        name="f",
+        qualified_name="src.a.f",
+        file_path="src/a.py",
+        range=SourceRange(file_path="src/a.py", start_line=1, start_col=0, end_line=1, end_col=0),
+        source_hash="x",
+    )
+    assert s.export_status == ExportStatus.UNKNOWN
+
+
+def test_import_statement_is_reexport_true():
+    """ImportStatement supports is_reexport=True."""
+    imp = ImportStatement(
+        file_path="src/index.py",
+        module_path="./auth",
+        imported_names=["AuthService"],
+        is_reexport=True,
+        line=1,
+    )
+    assert imp.is_reexport is True
+
+
+def test_source_range_equality():
+    """Two SourceRange objects with same values should be equal."""
+    r1 = SourceRange(file_path="src/a.py", start_line=5, start_col=0, end_line=10, end_col=4)
+    r2 = SourceRange(file_path="src/a.py", start_line=5, start_col=0, end_line=10, end_col=4)
+    r3 = SourceRange(file_path="src/b.py", start_line=5, start_col=0, end_line=10, end_col=4)
+    assert r1 == r2
+    assert r1 != r3

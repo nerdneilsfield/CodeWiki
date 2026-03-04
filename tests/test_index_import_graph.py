@@ -87,3 +87,70 @@ def test_all_imports():
     imps = [_imp("a.py", "x"), _imp("b.py", "y")]
     ig = ImportGraph(imps)
     assert len(ig.all_imports()) == 2
+
+
+# ── New edge-case tests ───────────────────────────────────────────────────────
+
+def test_importers_of_deduplicates_when_same_file_imports_same_target_twice():
+    """importers_of() deduplicates when the same file imports the same target multiple times."""
+    imp1 = _imp("src/main.py", "./utils", ["foo"], resolved="src/utils.py")
+    imp2 = _imp("src/main.py", "./utils", ["bar"], resolved="src/utils.py")
+    ig = ImportGraph([imp1, imp2])
+    result = ig.importers_of("src/utils.py")
+    # Should deduplicate: src/main.py appears only once
+    assert result.count("src/main.py") == 1
+    assert len(result) == 1
+
+
+def test_file_dependency_graph_with_no_imports_is_empty():
+    """file_dependency_graph() returns empty dict when there are no imports."""
+    ig = ImportGraph([])
+    graph = ig.file_dependency_graph()
+    assert graph == {}
+
+
+def test_resolve_with_star_in_imported_names_does_not_crash():
+    """resolve() with '*' in imported_names should not crash (gracefully returns None)."""
+    imp = _imp("src/main.py", "./utils", ["*"], resolved="src/utils.py")
+    sym = _sym("py:src/utils.py#helper(function)", "helper", "src/utils.py")
+    st = SymbolTable([sym])
+    ig = ImportGraph([imp])
+    # Resolving a specific name via a star-import — may find it or return None, but should not crash
+    result = ig.resolve("src/main.py", "helper", st)
+    # Star imports: name 'helper' is in ['*'], so it should find via the wildcard check
+    # Actually the code checks `name in imp.imported_names` — '*' in ['*'] is True
+    # but 'helper' in ['*'] is False. Let's just verify it doesn't crash.
+    assert result is None or result.name == "helper"
+
+
+def test_imports_of_preserves_order():
+    """imports_of() returns imports in the order they were added."""
+    imp1 = _imp("src/main.py", "os", line=1)
+    imp2 = _imp("src/main.py", "sys", line=2)
+    imp3 = _imp("src/main.py", "json", line=3)
+    ig = ImportGraph([imp1, imp2, imp3])
+    result = ig.imports_of("src/main.py")
+    assert len(result) == 3
+    # Order should be preserved
+    module_paths = [i.module_path for i in result]
+    assert module_paths == ["os", "sys", "json"]
+
+
+def test_multiple_files_importing_same_resolved_file():
+    """Multiple files that import the same resolved file are all in importers_of()."""
+    imp1 = _imp("src/a.py", "./shared", resolved="src/shared.py")
+    imp2 = _imp("src/b.py", "./shared", resolved="src/shared.py")
+    imp3 = _imp("src/c.py", "./shared", resolved="src/shared.py")
+    ig = ImportGraph([imp1, imp2, imp3])
+    result = ig.importers_of("src/shared.py")
+    assert set(result) == {"src/a.py", "src/b.py", "src/c.py"}
+
+
+def test_file_dependency_graph_only_includes_resolved():
+    """file_dependency_graph() only includes edges where resolved_path is set."""
+    imp1 = _imp("src/a.py", "./b", resolved="src/b.py")
+    imp2 = _imp("src/a.py", "external_lib")  # no resolved_path
+    ig = ImportGraph([imp1, imp2])
+    graph = ig.file_dependency_graph()
+    assert "src/a.py" in graph
+    assert graph["src/a.py"] == {"src/b.py"}  # only the resolved one

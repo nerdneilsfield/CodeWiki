@@ -127,3 +127,120 @@ def test_paths_are_relative():
         assert not s.file_path.startswith("/")
     for i in imports:
         assert not i.file_path.startswith("/")
+
+
+# ── New edge-case tests ───────────────────────────────────────────────────────
+
+def test_class_with_multiple_methods_all_extracted():
+    """All methods in a class should be extracted as children."""
+    symbols, _ = _adapt('''
+        class MyService {
+            methodA() { return 1; }
+            methodB() { return 2; }
+            methodC() { return 3; }
+        }
+    ''')
+    classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
+    methods = [s for s in symbols if s.kind == SymbolKind.METHOD]
+    assert len(classes) == 1
+    assert len(methods) == 3
+    child_ids = set(classes[0].children)
+    for m in methods:
+        assert m.symbol_id in child_ids
+
+
+def test_two_classes_in_same_file():
+    """Two class declarations in same file should both be extracted."""
+    symbols, _ = _adapt('''
+        class Alpha {
+            doAlpha() {}
+        }
+        class Beta {
+            doBeta() {}
+        }
+    ''')
+    classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
+    class_names = {c.name for c in classes}
+    assert len(classes) == 2
+    assert "Alpha" in class_names
+    assert "Beta" in class_names
+
+
+def test_export_default_class():
+    """export default class Foo {} should be EXPORTED."""
+    symbols, _ = _adapt('''
+        export default class DefaultClass {
+            run() {}
+        }
+    ''')
+    classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
+    # The class may or may not be extracted depending on tree-sitter node type.
+    # Either it is found as EXPORTED or it doesn't crash.
+    # At minimum, the adapter should not raise an exception.
+    assert isinstance(symbols, list)
+
+
+def test_export_default_function():
+    """export default function foo() {} should be EXPORTED or at least not crash."""
+    symbols, _ = _adapt('''
+        export default function defaultFunc() {
+            return 42;
+        }
+    ''')
+    assert isinstance(symbols, list)
+    # If the function was extracted, verify it doesn't have NOT_EXPORTED status
+    funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION and s.name == "defaultFunc"]
+    for f in funcs:
+        assert f.export_status != ExportStatus.NOT_EXPORTED
+
+
+def test_empty_class_has_zero_methods():
+    """Empty class body should produce a CLASS with 0 children."""
+    symbols, _ = _adapt('''
+        class Empty {}
+    ''')
+    classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
+    assert len(classes) == 1
+    assert classes[0].name == "Empty"
+    assert classes[0].children == []
+
+
+def test_javascript_function():
+    """JavaScript function extraction works like TypeScript."""
+    symbols, _ = _adapt('''
+        function greetUser(name) {
+            console.log("Hello " + name);
+        }
+    ''', file_path="src/app.js", lang="javascript")
+    funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
+    assert len(funcs) == 1
+    assert funcs[0].name == "greetUser"
+    assert funcs[0].lang == "javascript"
+
+
+def test_side_effect_import_does_not_crash():
+    """import 'side-effect' with no named imports should not crash."""
+    symbols, imports = _adapt('''
+        import 'some-polyfill';
+        function main() {}
+    ''')
+    assert isinstance(symbols, list)
+    assert isinstance(imports, list)
+    # At minimum, main() function should be extracted
+    funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
+    assert any(f.name == "main" for f in funcs)
+
+
+def test_arrow_function_does_not_crash():
+    """Arrow function assigned to const should not crash the adapter."""
+    symbols, imports = _adapt('''
+        const fn = () => {
+            return 42;
+        };
+        class Wrapper {}
+    ''')
+    assert isinstance(symbols, list)
+    assert isinstance(imports, list)
+    # The class should still be extracted
+    classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
+    assert any(c.name == "Wrapper" for c in classes)

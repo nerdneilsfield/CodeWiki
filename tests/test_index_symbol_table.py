@@ -107,3 +107,70 @@ def test_all_files():
     s3 = _make_symbol("s3", "c", file_path="src/a.py")
     st = SymbolTable([s1, s2, s3])
     assert st.all_files() == {"src/a.py", "src/b.py"}
+
+
+# ── New edge-case tests ───────────────────────────────────────────────────────
+
+def test_search_is_case_insensitive():
+    """search('foo') should find symbols with 'FooService', 'foobar', etc."""
+    s1 = _make_symbol("s1", "FooService")
+    s2 = _make_symbol("s2", "BarService")
+    s3 = _make_symbol("s3", "foobar")
+    st = SymbolTable([s1, s2, s3])
+    results = st.search("foo")
+    result_names = {s.name for s in results}
+    assert "FooService" in result_names
+    assert "foobar" in result_names
+    assert "BarService" not in result_names
+
+
+def test_search_returns_empty_list_when_no_match():
+    """search() with no matching symbols returns empty list."""
+    s1 = _make_symbol("s1", "Alpha")
+    s2 = _make_symbol("s2", "Beta")
+    st = SymbolTable([s1, s2])
+    results = st.search("Gamma")
+    assert results == []
+
+
+def test_public_api_excludes_unknown_export_status():
+    """Symbols with ExportStatus.UNKNOWN are NOT in public_api (only EXPORTED are)."""
+    s_exported = _make_symbol("s1", "pub", export_status=ExportStatus.EXPORTED)
+    s_unknown = _make_symbol("s2", "unk", export_status=ExportStatus.UNKNOWN, visibility=Visibility.PUBLIC)
+    s_not_exported = _make_symbol("s3", "priv", export_status=ExportStatus.NOT_EXPORTED)
+    st = SymbolTable([s_exported, s_unknown, s_not_exported])
+    api = st.public_api()
+    api_ids = {s.symbol_id for s in api}
+    assert "s1" in api_ids
+    assert "s2" not in api_ids  # UNKNOWN is NOT in public_api
+    assert "s3" not in api_ids
+
+
+def test_children_of_skips_missing_child_ids():
+    """children_of() gracefully skips child IDs that don't exist in the table."""
+    parent = _make_symbol("p1", "Parent", kind=SymbolKind.CLASS)
+    parent.children = ["m1", "m2", "nonexistent_id"]
+    m1 = _make_symbol("m1", "method_a", kind=SymbolKind.METHOD, parent="p1")
+    # m2 is deliberately omitted from the table
+    st = SymbolTable([parent, m1])
+    children = st.children_of("p1")
+    # Should only return m1, not crash on nonexistent_id or missing m2
+    assert len(children) == 1
+    assert children[0].name == "method_a"
+
+
+def test_duplicate_symbol_ids_later_wins():
+    """When two symbols share the same symbol_id, the later one overwrites the earlier."""
+    s1 = _make_symbol("dup_id", "First")
+    s2 = _make_symbol("dup_id", "Second")
+    st = SymbolTable([s1, s2])
+    result = st.get("dup_id")
+    # The later one (s2) should win
+    assert result is not None
+    assert result.name == "Second"
+
+
+def test_all_files_empty_table():
+    """all_files() returns empty set for empty SymbolTable."""
+    st = SymbolTable([])
+    assert st.all_files() == set()
