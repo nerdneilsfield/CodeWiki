@@ -210,9 +210,9 @@ def flake8(file_path: str) -> str:
     """Run flake8 on a given file and return the output as a string"""
     if Path(file_path).suffix != ".py":
         return ""
-    cmd = "flake8 --isolated --select=F821,F822,F831,E111,E112,E113,E999,E902 {file_path}"
+    cmd = ["flake8", "--isolated", "--select=F821,F822,F831,E111,E112,E113,E999,E902", file_path]
     # don't use capture_output because it's not compatible with python3.6
-    out = subprocess.run(cmd.format(file_path=file_path), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return out.stdout.decode()
 
 
@@ -376,12 +376,15 @@ class EditTool:
 
     name = "str_replace_editor"
 
-    def __init__(self, REGISTRY, absolute_docs_path=None):
+    def __init__(self, REGISTRY, absolute_docs_path=None, allowed_base_path=None):
         super().__init__()
         self._encoding = None
         self.REGISTRY = REGISTRY
         self.logs = []
         self.absolute_docs_path = Path(absolute_docs_path) if absolute_docs_path else None
+        # allowed_base_path is the containment root for validate_path(); defaults to
+        # absolute_docs_path for backwards compatibility when not explicitly provided.
+        self.allowed_base_path = Path(allowed_base_path) if allowed_base_path else self.absolute_docs_path
 
     def _get_display_path(self, path: Path) -> str:
         """Get path for display purposes - relative to absolute_docs_path if available"""
@@ -455,6 +458,14 @@ class EditTool:
                 f"The path {self._get_display_path(path)} is not an absolute path, it should start with `/`. Maybe you meant {self._get_display_path(suggested_path)}?"
             )
             return False
+        # Check that the path is contained within the allowed base directory
+        if self.allowed_base_path is not None:
+            resolved = path.resolve()
+            if not resolved.is_relative_to(self.allowed_base_path):
+                self.logs.append(
+                    f"Path {path} is outside the allowed directory"
+                )
+                return False
         # Check if path exists
         if not path.exists() and command != "create":
             self.logs.append(f"The path {self._get_display_path(path)} does not exist. Please provide a valid path.")
@@ -485,8 +496,7 @@ class EditTool:
                 return
 
             out = subprocess.run(
-                rf"find {path} -maxdepth 2 -not -path '*/\.*'",
-                shell=True,
+                ["find", str(path), "-maxdepth", "2", "-not", "-path", "*/.*"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
@@ -770,11 +780,16 @@ async def str_replace_editor(
     if path is None:
         path = file
 
-    tool = EditTool(ctx.deps.registry, ctx.deps.absolute_docs_path)
     if working_dir == "docs":
+        base_path = Path(ctx.deps.absolute_docs_path).resolve()
         absolute_path = str(Path(ctx.deps.absolute_docs_path) / path)
     else:
+        base_path = Path(ctx.deps.absolute_repo_path).resolve()
         absolute_path = str(Path(ctx.deps.absolute_repo_path) / path)
+    resolved = Path(absolute_path).resolve()
+    if not resolved.is_relative_to(base_path):
+        raise ValueError(f"Path {absolute_path} is outside the allowed directory")
+    tool = EditTool(ctx.deps.registry, ctx.deps.absolute_docs_path, allowed_base_path=base_path)
 
     # validate command
     if command != "view" and working_dir == "repo":

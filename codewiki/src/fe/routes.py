@@ -3,12 +3,11 @@
 FastAPI route handlers for the CodeWiki web application.
 """
 
+import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import asdict
-
-from traceback import format_exc
 
 from fastapi import Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -21,6 +20,8 @@ from .templates import WEB_INTERFACE_TEMPLATE
 from .template_utils import render_template
 from .config import WebAppConfig
 from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
+
+logger = logging.getLogger(__name__)
 
 
 class WebRoutes:
@@ -98,7 +99,7 @@ class WebRoutes:
                 message_type = "error"
             else:
                 # Check cache
-                cached_docs = self.cache_manager.get_cached_docs(normalized_repo_url)
+                cached_docs = self.cache_manager.get_cached_docs(normalized_repo_url, commit_id or None)
                 if cached_docs and Path(cached_docs).exists():
                     message = "Documentation found in cache! Redirecting to view..."
                     message_type = "success"
@@ -132,7 +133,8 @@ class WebRoutes:
                         repo_url = ""  # Clear form
                         
                     except Exception as e:
-                        message = f"Failed to add repository to queue: {str(e)}\n{format_exc()}"
+                        logger.error("Failed to add repository to queue: %s", e, exc_info=True)
+                        message = "Internal server error"
                         message_type = "error"
         
         # Get recent jobs (last 10)
@@ -195,8 +197,8 @@ class WebRoutes:
             repo_full_name = self._job_id_to_repo_full_name(job_id)
             potential_repo_url = f"https://github.com/{repo_full_name}"
             
-            # Check if documentation exists in cache
-            cached_docs = self.cache_manager.get_cached_docs(potential_repo_url)
+            # Check if documentation exists in cache (no commit info available here)
+            cached_docs = self.cache_manager.get_cached_docs(potential_repo_url, None)
             if cached_docs and Path(cached_docs).exists():
                 docs_path = Path(cached_docs)
                 repo_url = potential_repo_url
@@ -240,7 +242,9 @@ class WebRoutes:
                 pass
         
         # Serve the requested file (fuzzy-match tolerates - vs _ differences)
-        file_path = docs_path / filename
+        file_path = (docs_path / filename).resolve()
+        if not file_path.is_relative_to(docs_path.resolve()):
+            raise HTTPException(status_code=403, detail="Access denied")
         if not file_path.exists():
             # Strip extension, build a single-element path for fuzzy lookup
             stem = filename.rsplit(".", 1)[0] if "." in filename else filename
@@ -273,7 +277,8 @@ class WebRoutes:
             return HTMLResponse(content=render_template(DOCS_VIEW_TEMPLATE, context))
             
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error reading {filename}: {e}\n{format_exc()}")
+            logger.error("Error reading %s: %s", filename, e, exc_info=True)
+            raise HTTPException(status_code=500, detail="Internal server error")
     
     def _normalize_github_url(self, url: str) -> str:
         """Normalize GitHub URL for consistent comparison."""

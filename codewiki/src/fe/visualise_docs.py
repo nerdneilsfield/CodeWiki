@@ -209,7 +209,7 @@ async def serve_doc(filename: str):
     try:
         file_path = file_path.resolve()
         docs_folder_resolved = Path(DOCS_FOLDER).resolve()
-        if not str(file_path).startswith(str(docs_folder_resolved)):
+        if not file_path.is_relative_to(docs_folder_resolved):
             raise HTTPException(status_code=403, detail="Access denied")
     except Exception:
         raise HTTPException(status_code=403, detail="Invalid file path")

@@ -240,10 +240,6 @@ def _find_mmdc() -> str | None:
     if _MMDC_CHECKED:
         return _MMDC_PATH
     _MMDC_CHECKED = True
-    local = Path.cwd() / "node_modules" / ".bin" / "mmdc"
-    if local.exists():
-        _MMDC_PATH = str(local)
-        return _MMDC_PATH
     _MMDC_PATH = shutil.which("mmdc")
     return _MMDC_PATH
 
