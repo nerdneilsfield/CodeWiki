@@ -42,7 +42,10 @@ def _file_hash(path: str) -> str:
     """Return hex MD5 of file contents, or empty string if missing."""
     try:
         with open(path, 'rb') as f:
-            return hashlib.md5(f.read()).hexdigest()
+            h = hashlib.md5()
+            while chunk := f.read(8192):
+                h.update(chunk)
+            return h.hexdigest()
     except OSError:
         return ""
 
@@ -159,8 +162,10 @@ class DocumentationGenerator:
 
     # ── Legacy helper (kept for backward compat) ─────────────────────────
 
-    def get_processing_order(self, module_tree: Dict[str, Any], parent_path: List[str] = []) -> List[tuple[List[str], str]]:
+    def get_processing_order(self, module_tree: Dict[str, Any], parent_path: Optional[List[str]] = None) -> List[tuple[List[str], str]]:
         """Get the processing order using topological sort (leaf modules first)."""
+        if parent_path is None:
+            parent_path = []
         processing_order = []
 
         def collect_modules(tree: Dict[str, Any], path: List[str]):

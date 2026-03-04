@@ -1115,15 +1115,17 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
         snippet = ext_node.source_code or ""
         if not snippet:
             continue
-        if len(snippet) > _MAX_SNIPPET_CHARS:
-            snippet = snippet[:_MAX_SNIPPET_CHARS] + "\n// ... (truncated)"
+        truncated = len(snippet) > _MAX_SNIPPET_CHARS
+        if truncated:
+            snippet = snippet[:_MAX_SNIPPET_CHARS]
         path = ext_node.relative_path or ""
         caller_snippets.append({
-            "path":     path,
-            "name":     ext_node.name,
-            "calls":    sorted(called),
-            "snippet":  snippet,
-            "is_test":  bool(_EXAMPLE_PATH_RE.search(path)),
+            "path":      path,
+            "name":      ext_node.name,
+            "calls":     sorted(called),
+            "snippet":   snippet,
+            "truncated": truncated,
+            "is_test":   bool(_EXAMPLE_PATH_RE.search(path)),
         })
 
     # Prioritise test/example files; keep only the top N
@@ -1141,10 +1143,12 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
         for info in caller_snippets:
             ext = "." + info["path"].rsplit(".", 1)[-1] if "." in info["path"] else ""
             lang = EXTENSION_TO_LANGUAGE.get(ext, ext.lstrip(".") or "text")
+            truncation_note = "\n_(truncated for brevity)_\n" if info["truncated"] else ""
             callers_section += (
                 f"# {info['path']} — `{info['name']}` "
                 f"(uses: {', '.join(info['calls'])})\n"
-                f"```{lang}\n{info['snippet']}\n```\n\n"
+                f"```{lang}\n{info['snippet']}\n```\n"
+                f"{truncation_note}\n"
             )
         callers_section += "</REAL_USAGE_EXAMPLES>\n"
 
