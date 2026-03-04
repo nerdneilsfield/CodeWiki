@@ -22,10 +22,11 @@ def test_cpp_language_is_singleton():
 
     SAMPLE = "void foo() {}\nvoid bar() { foo(); }\n"
     analyze_cpp_file("/tmp/a.cpp", SAMPLE, "/tmp")
+    assert cpp_mod._CPP_LANGUAGE is not None, "_CPP_LANGUAGE singleton not created"
     lang1 = cpp_mod._CPP_LANGUAGE
     analyze_cpp_file("/tmp/b.cpp", SAMPLE, "/tmp")
     lang2 = cpp_mod._CPP_LANGUAGE
-    assert lang1 is lang2
+    assert lang1 is lang2, "Language object was recreated between calls"
 
 
 def test_js_language_is_singleton():
@@ -34,7 +35,8 @@ def test_js_language_is_singleton():
 
     SAMPLE = "function foo() {}\nfunction bar() { foo(); }\n"
     analyze_javascript_file_treesitter("/tmp/a.js", SAMPLE, "/tmp")
+    assert js_mod._JS_LANGUAGE is not None, "_JS_LANGUAGE singleton not created"
     lang1 = js_mod._JS_LANGUAGE
     analyze_javascript_file_treesitter("/tmp/b.js", SAMPLE, "/tmp")
     lang2 = js_mod._JS_LANGUAGE
-    assert lang1 is lang2
+    assert lang1 is lang2, "Language object was recreated between calls"
