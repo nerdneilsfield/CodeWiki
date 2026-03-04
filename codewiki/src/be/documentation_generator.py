@@ -694,6 +694,15 @@ class DocumentationGenerator:
 
             logger.debug(f"Found {len(leaf_nodes)} leaf nodes")
 
+            # Build v3 index (symbol table, import graph, component cards)
+            from codewiki.src.be.index.index_builder import IndexBuilder
+            index_builder = IndexBuilder(
+                repo_path=self.config.repo_path,
+                include_patterns=self.config.include_patterns,
+                exclude_patterns=self.config.exclude_patterns,
+            )
+            self.index_products = index_builder.build()
+
             # Cluster modules
             working_dir = os.path.abspath(self.config.docs_dir)
             file_manager.ensure_directory(working_dir)
