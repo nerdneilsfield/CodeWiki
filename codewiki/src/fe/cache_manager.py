@@ -58,17 +58,23 @@ class CacheManager:
         except Exception as e:
             print(f"Error saving cache index: {e}")
     
-    def get_repo_hash(self, repo_url: str) -> str:
-        """Generate hash for repository URL."""
-        return hashlib.sha256(repo_url.encode()).hexdigest()[:16]
-    
-    def get_cached_docs(self, repo_url: str) -> Optional[str]:
+    def get_repo_hash(self, repo_url: str, commit_id: Optional[str] = None) -> str:
+        """Generate hash for repository URL and optional commit ID.
+
+        Including commit_id ensures that cached docs for the same repo at
+        different commits are stored and retrieved independently, preventing
+        stale docs from being returned when the commit changes.
+        """
+        key = repo_url if not commit_id else f"{repo_url}@{commit_id}"
+        return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+    def get_cached_docs(self, repo_url: str, commit_id: Optional[str] = None) -> Optional[str]:
         """Get cached documentation path if available."""
-        repo_hash = self.get_repo_hash(repo_url)
-        
+        repo_hash = self.get_repo_hash(repo_url, commit_id)
+
         if repo_hash in self.cache_index:
             entry = self.cache_index[repo_hash]
-            
+
             # Check if cache is still valid
             if datetime.now() - entry.created_at < timedelta(days=self.cache_expiry_days):
                 # Update last accessed
@@ -77,15 +83,15 @@ class CacheManager:
                 return entry.docs_path
             else:
                 # Cache expired, remove it
-                self.remove_from_cache(repo_url)
-        
+                self.remove_from_cache(repo_url, commit_id)
+
         return None
-    
-    def add_to_cache(self, repo_url: str, docs_path: str):
+
+    def add_to_cache(self, repo_url: str, docs_path: str, commit_id: Optional[str] = None):
         """Add documentation to cache."""
-        repo_hash = self.get_repo_hash(repo_url)
+        repo_hash = self.get_repo_hash(repo_url, commit_id)
         now = datetime.now()
-        
+
         self.cache_index[repo_hash] = CacheEntry(
             repo_url=repo_url,
             repo_url_hash=repo_hash,
@@ -93,12 +99,12 @@ class CacheManager:
             created_at=now,
             last_accessed=now
         )
-        
+
         self.save_cache_index()
-    
-    def remove_from_cache(self, repo_url: str):
+
+    def remove_from_cache(self, repo_url: str, commit_id: Optional[str] = None):
         """Remove documentation from cache."""
-        repo_hash = self.get_repo_hash(repo_url)
+        repo_hash = self.get_repo_hash(repo_url, commit_id)
         if repo_hash in self.cache_index:
             del self.cache_index[repo_hash]
             self.save_cache_index()

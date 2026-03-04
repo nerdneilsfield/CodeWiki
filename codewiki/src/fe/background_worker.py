@@ -175,7 +175,7 @@ class BackgroundWorker:
             job.main_model = MAIN_MODEL
             
             # Check cache first
-            cached_docs = self.cache_manager.get_cached_docs(job.repo_url)
+            cached_docs = self.cache_manager.get_cached_docs(job.repo_url, job.commit_id)
             if cached_docs and Path(cached_docs).exists():
                 job.status = 'completed'
                 job.completed_at = datetime.now()
@@ -225,7 +225,7 @@ class BackgroundWorker:
             
             # Cache the results
             docs_path = os.path.abspath(config.docs_dir)
-            self.cache_manager.add_to_cache(job.repo_url, docs_path)
+            self.cache_manager.add_to_cache(job.repo_url, docs_path, job.commit_id)
             
             # Update job status
             job.status = 'completed'
