@@ -423,25 +423,98 @@ class CallGraphAnalyzer:
 
         Attempts to match function calls to actual function definitions,
         handling cross-language calls where possible.
+
+        Uses scope-aware resolution: when a bare name matches multiple
+        functions (e.g. two classes both define ``process``), the candidate
+        whose file_path or class_name matches the caller's context is
+        preferred before falling back to an arbitrary global match.
         """
-        func_lookup = {}
+        # func_lookup: exact 1-to-1 keys (func_id, component_id) -> func_id
+        func_lookup: Dict[str, str] = {}
+        # name_candidates: bare name / bare method tail -> [func_id, ...]
+        #   kept as a list so we can apply scope-aware tie-breaking instead
+        #   of silently discarding all but the last writer.
+        name_candidates: Dict[str, List[str]] = {}
+
         for func_id, func_info in self.functions.items():
             func_lookup[func_id] = func_id
-            func_lookup[func_info.name] = func_id
             if func_info.component_id:
                 func_lookup[func_info.component_id] = func_id
+
+            # Register every bare name that could appear at a call-site.
+            for bare in {func_info.name}:
+                name_candidates.setdefault(bare, [])
+                if func_id not in name_candidates[bare]:
+                    name_candidates[bare].append(func_id)
+
+            if func_info.component_id:
                 method_name = func_info.component_id.split(".")[-1]
-                if method_name not in func_lookup:
-                    func_lookup[method_name] = func_id
+                name_candidates.setdefault(method_name, [])
+                if func_id not in name_candidates[method_name]:
+                    name_candidates[method_name].append(func_id)
+
+        def _pick_candidate(candidates: List[str], caller_info) -> str:
+            """
+            Choose the best func_id from *candidates* given the caller's Node.
+
+            Priority (highest first):
+              1. Same class_name  AND  same file_path
+              2. Same file_path only
+              3. Same class_name only
+              4. First candidate (original last-write-wins behaviour, but
+                 now deterministic: we keep insertion order)
+            """
+            if len(candidates) == 1 or caller_info is None:
+                return candidates[0]
+
+            caller_file = caller_info.file_path
+            caller_class = caller_info.class_name  # may be None
+
+            same_file_same_class = []
+            same_file_only = []
+            same_class_only = []
+
+            for cid in candidates:
+                callee_info = self.functions.get(cid)
+                if callee_info is None:
+                    continue
+                match_file = callee_info.file_path == caller_file
+                match_class = (
+                    caller_class is not None
+                    and callee_info.class_name == caller_class
+                )
+                if match_file and match_class:
+                    same_file_same_class.append(cid)
+                elif match_file:
+                    same_file_only.append(cid)
+                elif match_class:
+                    same_class_only.append(cid)
+
+            for bucket in (same_file_same_class, same_file_only, same_class_only):
+                if bucket:
+                    return bucket[0]
+            return candidates[0]
 
         resolved_count = 0
         for relationship in self.call_relationships:
             callee_name = relationship.callee
+            caller_info = self.functions.get(relationship.caller)
 
+            # 1. Exact match via func_id or component_id (always unambiguous).
             if callee_name in func_lookup:
                 relationship.callee = func_lookup[callee_name]
                 relationship.is_resolved = True
                 resolved_count += 1
+
+            # 2. Bare-name lookup with scope-aware tie-breaking.
+            elif callee_name in name_candidates:
+                relationship.callee = _pick_candidate(
+                    name_candidates[callee_name], caller_info
+                )
+                relationship.is_resolved = True
+                resolved_count += 1
+
+            # 3. Dotted callee (e.g. "self.process" or "obj.helper").
             elif "." in callee_name:
                 if callee_name in func_lookup:
                     relationship.callee = func_lookup[callee_name]
@@ -449,8 +522,10 @@ class CallGraphAnalyzer:
                     resolved_count += 1
                 else:
                     method_name = callee_name.split(".")[-1]
-                    if method_name in func_lookup:
-                        relationship.callee = func_lookup[method_name]
+                    if method_name in name_candidates:
+                        relationship.callee = _pick_candidate(
+                            name_candidates[method_name], caller_info
+                        )
                         relationship.is_resolved = True
                         resolved_count += 1
 
@@ -465,7 +540,7 @@ class CallGraphAnalyzer:
         unique_relationships = []
 
         for rel in self.call_relationships:
-            key = (rel.caller, rel.callee)
+            key = (rel.caller, rel.callee, rel.relationship_type)
             if key not in seen:
                 seen.add(key)
                 unique_relationships.append(rel)

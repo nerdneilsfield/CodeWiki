@@ -209,7 +209,7 @@ class TreeSitterCppAnalyzer:
 
 				top_level_nodes[top_level_key] = node_obj
 
-				if node_type in ["class", "struct", "function", "template_class", "template_function"]:
+				if node_type in ["class", "struct", "function", "template_class", "template_function", "method"]:
 					self.nodes.append(node_obj)
 
 			# Push children in reverse so left-to-right order is preserved

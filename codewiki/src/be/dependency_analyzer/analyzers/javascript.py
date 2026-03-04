@@ -171,6 +171,7 @@ class TreeSitterJSAnalyzer:
                     method_node = self._create_method_node(child, method_name, class_name)
                     if method_node:
                         self.top_level_nodes[method_key] = method_node
+                        self.nodes.append(method_node)
             elif child.type == "field_definition":
                 # Handle arrow function properties
                 field_name = self._get_field_name(child)
@@ -179,6 +180,7 @@ class TreeSitterJSAnalyzer:
                     method_node = self._create_method_node(child, field_name, class_name)
                     if method_node:
                         self.top_level_nodes[method_key] = method_node
+                        self.nodes.append(method_node)
 
     def _get_method_name(self, method_node) -> Optional[str]:
         """Get method name from method_definition node."""
