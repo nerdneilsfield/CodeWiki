@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Local imports
 from codewiki.src.be.dependency_analyzer import DependencyGraphBuilder
-from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_services import call_llm, _MAX_RETRY_AFTER
 from codewiki.src.be.prompt_template import (
     format_overview_prompt,
 )
@@ -414,7 +414,7 @@ class DocumentationGenerator:
                     return None
                 if not (0 <= seconds < float("inf")):
                     return None
-                return min(seconds, 120.0)
+                return min(seconds, _MAX_RETRY_AFTER)
             return None
 
         def _is_context_length_error(exc: Exception) -> bool:

@@ -62,7 +62,7 @@ def test_parse_retry_after_clamps_negative_value():
     exc.response = MagicMock()
     exc.response.headers = {"retry-after": "-5"}
     result = _parse_retry_after(exc)
-    assert result is None or result >= 0, f"Got {result!r}, expected None or >= 0"
+    assert result is None, f"Expected None for negative Retry-After, got {result!r}"
 
 
 def test_parse_retry_after_clamps_oversized_value():
