@@ -132,7 +132,9 @@ class GuideGenerator:
             h.update(extra.encode())
         for fp in sorted(file_paths):
             try:
-                h.update(Path(fp).read_bytes())
+                with open(fp, 'rb') as f:
+                    while chunk := f.read(8192):
+                        h.update(chunk)
             except OSError:
                 h.update(fp.encode())
         return h.hexdigest()

@@ -2,6 +2,7 @@
 Validation utilities for CLI inputs and configuration.
 """
 
+import os
 import re
 from pathlib import Path
 from typing import Optional, List, Tuple
@@ -192,19 +193,26 @@ def detect_supported_languages(directory: Path) -> List[Tuple[str, int]]:
         parts = file_path.parts
         return any(excluded_dir in parts for excluded_dir in excluded_dirs)
     
-    language_counts = {}
-    
+    # Build a reverse mapping from extension to language for O(1) lookup per file.
+    ext_to_language = {}
     for language, extensions in language_extensions.items():
-        count = 0
         for ext in extensions:
-            # Filter out files in excluded directories
-            count += sum(
-                1 for f in directory.rglob(f"*{ext}")
-                if f.is_file() and not should_exclude_file(f)
-            )
-        
-        if count > 0:
-            language_counts[language] = count
+            ext_to_language[ext] = language
+
+    language_counts = {}
+
+    # Single os.walk() pass: traverse the tree once and classify each file by
+    # extension instead of calling rglob() once per extension.
+    for dirpath, dirnames, filenames in os.walk(directory):
+        # Prune excluded directories in-place so os.walk() does not descend
+        # into them, avoiding unnecessary traversal.
+        dirnames[:] = [d for d in dirnames if d not in excluded_dirs]
+
+        for filename in filenames:
+            _, ext = os.path.splitext(filename)
+            if ext in ext_to_language:
+                language = ext_to_language[ext]
+                language_counts[language] = language_counts.get(language, 0) + 1
     
     # Sort by count descending
     return sorted(language_counts.items(), key=lambda x: x[1], reverse=True)
