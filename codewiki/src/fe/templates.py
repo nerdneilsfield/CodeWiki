@@ -408,7 +408,8 @@ article li{margin-bottom:.3rem;color:var(--text2);}
 article a{color:var(--primary);}
 article a:hover{text-decoration:underline;}
 article code{font-family:'JetBrains Mono',Consolas,monospace;font-size:.82em;background:var(--bg-code);padding:.15em .4em;border-radius:4px;color:var(--text);}
-article pre{background:var(--bg-pre);border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;overflow-x:auto;margin-bottom:1.2rem;}
+article pre{background:var(--bg-pre);border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;overflow-x:auto;margin-bottom:1.2rem;outline:none;}
+article pre:focus-visible{box-shadow:0 0 0 3px var(--primary);border-color:var(--primary);}
 article pre code{background:none;padding:0;font-size:.87em;}
 article blockquote{border-left:4px solid var(--primary);padding:.5rem 1rem;margin-bottom:1rem;color:var(--text3);background:var(--primary-lt);border-radius:0 var(--r) var(--r) 0;}
 article table{width:100%;border-collapse:collapse;margin-bottom:1rem;}
@@ -422,16 +423,21 @@ article img{max-width:100%;border-radius:var(--r);}
 #btt:hover{background:var(--primary-h);transform:translateY(-2px);}
 #btt.on{display:flex;}
 /* responsive */
-@media(max-width:767px){.cw{padding:24px 18px;gap:0;}}
+@media(max-width:767px){
+  .cw{padding:24px 18px;gap:0;}
+  article pre{max-width:calc(100vw - 36px);}
+  article table{display:block;max-width:calc(100vw - 36px);overflow-x:auto;}
+  body{overflow-x:hidden;}
+}
 @media(min-width:768px){.sb{transform:none;}.sb.off{transform:translateX(calc(-1 * var(--sb-w)));}}
 </style>
 </head>
 <body>
 <header class="tb">
-  <button class="ib" id="sb-toggle" title="Toggle sidebar">☰</button>
+  <button class="ib" id="sb-toggle" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
   <a href="/static-docs/{{ job_id }}/overview.md" class="tb-logo">📚 {{ repo_name }}</a>
-  <a href="/" id="site-home-btn" class="ib" title="Back to main site">&#127968;</a>
-  <button class="ib" id="theme-btn" title="Toggle theme">&#127769;</button>
+  <a href="/" id="site-home-btn" class="ib" title="Back to main site" aria-label="Back to main site">&#127968;</a>
+  <button class="ib" id="theme-btn" title="Toggle theme" aria-label="Toggle light/dark theme">&#127769;</button>
 </header>
 <div class="ov" id="ov"></div>
 <div class="layout" id="layout">
@@ -500,7 +506,15 @@ function curTheme(){return html.getAttribute('data-theme')||(window.matchMedia('
 function setTheme(t){html.setAttribute('data-theme',t);localStorage.setItem('cw-theme',t);themeBtn.innerHTML=t==='dark'?'&#9728;&#65039;':'&#127769;';document.getElementById('hljs-css').href=_hljsBase+(t==='dark'?'github-dark':'github')+'.min.css';}
 setTheme(curTheme());
 themeBtn.addEventListener('click',function(){setTheme(curTheme()==='dark'?'light':'dark');});
-document.addEventListener('DOMContentLoaded',function(){hljs.highlightAll();});
+document.addEventListener('DOMContentLoaded',function(){
+  hljs.highlightAll();
+  // Make code blocks keyboard-focusable for scrollable regions (WCAG 2.1 SC 2.1.1)
+  document.querySelectorAll('article pre').forEach(function(pre){
+    pre.setAttribute('tabindex','0');
+    pre.setAttribute('role','region');
+    pre.setAttribute('aria-label','Code block');
+  });
+});
 // Sidebar
 var sb=document.getElementById('sb'),layout=document.getElementById('layout'),ov=document.getElementById('ov');
 function isMob(){return window.innerWidth<768;}
@@ -512,6 +526,9 @@ document.getElementById('sb-toggle').addEventListener('click',function(){
   else{sbHide();if(!isMob())localStorage.setItem('cw-sb','off');}
 });
 ov.addEventListener('click',sbHide);
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'&&!sb.classList.contains('off')){sbHide();document.getElementById('sb-toggle').focus();}
+});
 window.addEventListener('resize',function(){if(!isMob()){ov.classList.remove('on');if(localStorage.getItem('cw-sb')!=='off')sbShow();}else sbHide();});
 // Nav collapse — hierarchy visible by default; caret toggles manual collapse
 document.querySelectorAll('.nvcaret').forEach(function(c){
@@ -565,3 +582,34 @@ themeBtn.addEventListener('click',function(){setTimeout(cwRenderMermaid,50);});
 </body>
 </html>
 """
+
+NOT_FOUND_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page Not Found — CodeWiki</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Inter',system-ui,sans-serif;background:#f8fafc;color:#1e293b;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:48px 40px;max-width:440px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.06);}
+.code{font-size:72px;font-weight:700;color:#2563eb;line-height:1;margin-bottom:16px;}
+h1{font-size:1.4rem;font-weight:600;margin-bottom:10px;}
+p{color:#475569;line-height:1.6;margin-bottom:28px;}
+.btn{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:10px 24px;border-radius:6px;font-weight:500;font-size:15px;transition:background .15s;}
+.btn:hover{background:#1d4ed8;}
+.hint{margin-top:20px;font-size:13px;color:#94a3b8;margin-bottom:0;}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="code">404</div>
+  <h1>Page not found</h1>
+  <p>The page you&#8217;re looking for doesn&#8217;t exist or has been moved.</p>
+  <a href="/" class="btn">&#8592; Back to Home</a>
+  <p class="hint">If you followed a link inside a documentation page, the file may not have been generated yet.</p>
+</div>
+</body>
+</html>"""

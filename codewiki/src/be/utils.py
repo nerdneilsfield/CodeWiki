@@ -196,7 +196,7 @@ async def validate_single_diagram(diagram_content: str, diagram_num: int, line_s
         try:
             # Suppress mermaid parser JavaScript errors scoped to this call only
             import contextlib
-            with contextlib.redirect_stderr(open(os.devnull, 'w')):
+            with open(os.devnull, 'w') as _devnull, contextlib.redirect_stderr(_devnull):
                 json_output = await parse_mermaid_py(diagram_content)
         except Exception as e:
             error_str = str(e)

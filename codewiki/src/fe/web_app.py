@@ -13,18 +13,29 @@ Features:
 import argparse
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse
+from fastapi.exception_handlers import http_exception_handler as _default_http_exc_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .cache_manager import CacheManager
 from .background_worker import BackgroundWorker
 from .routes import WebRoutes
 from .config import WebAppConfig
+from .templates import NOT_FOUND_TEMPLATE
 
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="CodeWiki", 
+    title="CodeWiki",
     description="Generate comprehensive documentation for any GitHub repository"
 )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # Only return HTML 404 for browser routes; API routes must return JSON.
+    if exc.status_code == 404 and not request.url.path.startswith("/api/"):
+        return HTMLResponse(content=NOT_FOUND_TEMPLATE, status_code=404)
+    return await _default_http_exc_handler(request, exc)
 
 # Initialize components
 cache_manager = CacheManager(
