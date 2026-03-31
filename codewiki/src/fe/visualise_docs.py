@@ -25,6 +25,7 @@ from markdown_it import MarkdownIt
 from .template_utils import render_template
 from .templates import DOCS_VIEW_TEMPLATE
 from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
+from codewiki.src.be.postprocess.anchor import heading_to_slug
 
 app = FastAPI(title="Documentation Server", description="Simple documentation server for hosting markdown documentation folders")
 
@@ -117,6 +118,23 @@ def _fix_markdown_links(content: str, base_url: str = None) -> str:
     return re.sub(r'\[([^\]]*)\]\(([^)]*)\)', _fix_url, content)
 
 
+def _inject_heading_ids(html: str) -> str:
+    """Add id attributes to heading tags using stable slug function."""
+    import re
+
+    def replacer(match):
+        tag = match.group(1)
+        inner = match.group(2)
+        # Extract visible text, stripping any HTML tags
+        visible = re.sub(r'<[^>]+>', '', inner)
+        slug = heading_to_slug(visible)
+        if slug:
+            return f'<{tag} id="{slug}">{inner}</{tag}>'
+        return match.group(0)
+
+    return re.sub(r'<(h[1-6])>(.*?)</\1>', replacer, html, flags=re.DOTALL)
+
+
 def markdown_to_html(content: str, base_url: str = None) -> str:
     """Convert markdown content to HTML, with special handling for mermaid diagrams."""
     # Pre-process: fix link URLs (spaces + optional absolute-URL rewriting)
@@ -124,24 +142,27 @@ def markdown_to_html(content: str, base_url: str = None) -> str:
 
     # First, convert markdown to HTML
     html = md.render(content)
-    
+
     # Post-process to ensure mermaid code blocks are properly formatted
     # Look for code blocks with language-mermaid class and convert them to mermaid divs
     import re
-    
+
     # Pattern to match mermaid code blocks
     pattern = r'<pre><code class="language-mermaid">(.*?)</code></pre>'
-    
+
     def replace_mermaid(match):
         mermaid_code = match.group(1)
         # Decode HTML entities that might have been encoded
         import html
         mermaid_code = html.unescape(mermaid_code)
         return f'<div class="mermaid">{mermaid_code}</div>'
-    
+
     # Replace mermaid code blocks with proper mermaid divs
     html = re.sub(pattern, replace_mermaid, html, flags=re.DOTALL)
-    
+
+    # Inject stable heading IDs (replaces sequential h-0/h-1 JS assignment)
+    html = _inject_heading_ids(html)
+
     return html
 
 

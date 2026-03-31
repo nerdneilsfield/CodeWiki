@@ -80,27 +80,69 @@ else:
 
 ---
 
-## Phase 2: 链接校验 + 锚点注册（对齐 v3.md 4.5 L424-425）
+## Phase 2: 统一 Heading Anchor + 链接校验（对齐 v3.md 4.5 L424-425）
+
+### 问题现状
+
+当前前端没有稳定 heading anchor：
+- 服务端 `markdown_to_html()` 用裸 MarkdownIt()，不生成 heading id（visualise_docs.py:46, :115）
+- 浏览器端 JS 事后按顺序赋 h-0, h-1...（templates.py:542）
+- 文档中的 `[text](#heading)` 锚点链接根本不工作
+
+### 方案：一次统一生成 + 校验
+
+**Step 2a: 引入稳定 heading slug 函数**
+
+**新文件:** `codewiki/src/be/postprocess/anchor.py`
+
+```python
+def heading_to_slug(text: str) -> str:
+    """Convert heading text to a stable anchor slug.
+
+    Rules (deterministic, same as this function everywhere):
+    - Lowercase
+    - Strip leading/trailing whitespace
+    - Replace spaces and underscores with hyphens
+    - Remove non-alphanumeric chars except hyphens and CJK
+    - Collapse consecutive hyphens
+    - Strip leading/trailing hyphens
+
+    This is the SINGLE source of truth for anchor generation.
+    Both the renderer and the link validator MUST use this function.
+    """
+```
+
+**Step 2b: 修改渲染链路注入 heading ids**
+
+**修改文件:** `codewiki/src/fe/visualise_docs.py`
+
+在 `markdown_to_html()` 中，渲染后对每个 `<h1>`...`<h6>` 标签注入
+`id` 属性（使用 `heading_to_slug`）。移除前端 JS 的 h-0/h-1 顺序赋值。
+
+```python
+import re
+from codewiki.src.be.postprocess.anchor import heading_to_slug
+
+def _inject_heading_ids(html: str) -> str:
+    """Add id attributes to heading tags using stable slug function."""
+    def replacer(match):
+        tag = match.group(1)  # h1, h2, ...
+        text = re.sub(r'<[^>]+>', '', match.group(2))  # strip inner HTML
+        slug = heading_to_slug(text)
+        return f'<{tag} id="{slug}">{match.group(2)}</{tag}>'
+    return re.sub(r'<(h[1-6])>(.*?)</\1>', replacer, html)
+```
+
+**Step 2c: 链接校验**
 
 **新文件:** `codewiki/src/be/postprocess/link_validator.py`
 
-### 锚点注册
-
 ```python
 def build_anchor_registry(docs_dir: str) -> dict[str, set[str]]:
-    """Scan all .md files, extract headings as anchors.
+    """Scan all .md files, extract headings and compute anchor slugs.
 
-    Returns: {filename: {anchor1, anchor2, ...}}
-
-    Anchor generation MUST match the actual renderer's rules.
-    Current frontend uses bare MarkdownIt() without anchor/slug plugins
-    (codewiki/src/fe/visualise_docs.py:46, :115), so heading IDs follow
-    MarkdownIt's default: lowercase, spaces→hyphens, strip most punctuation,
-    collapse consecutive hyphens.
-
-    Implementation: use markdown_it_py (already in deps) to parse each file
-    and extract the actual anchor IDs from the rendered HTML, rather than
-    reimplementing slug rules. This guarantees consistency with the renderer.
+    Uses heading_to_slug() — the same function used by the renderer.
+    Returns: {relative_filename: {slug1, slug2, ...}}
     """
 ```
 
@@ -133,13 +175,26 @@ def validate_links(docs_dir: str) -> list[LinkIssue]:
 在 fix_docs() 末尾调用 validate_links()，结果纳入 FixStats。
 
 ### 测试
-- `test_anchor_registry_extracts_headings` — # H1, ## H2 → anchors
-- `test_anchor_generation_rules` — "My Heading!" → "my-heading"
+
+**anchor.py:**
+- `test_heading_to_slug_basic` — "My Heading" → "my-heading"
+- `test_heading_to_slug_strips_punctuation` — "Hello, World!" → "hello-world"
+- `test_heading_to_slug_collapses_hyphens` — "foo  --  bar" → "foo-bar"
+- `test_heading_to_slug_cjk` — "中文标题" → "中文标题"（保留 CJK）
+- `test_heading_to_slug_deterministic` — 同输入多次调用结果一致
+
+**link_validator.py:**
+- `test_anchor_registry_extracts_headings` — # H1, ## H2 → slugs
+- `test_anchor_registry_uses_heading_to_slug` — 验证用的是同一个 slug 函数
 - `test_validate_links_file_not_found` — [text](missing.md) → LinkIssue
 - `test_validate_links_anchor_not_found` — [text](file.md#bad) → LinkIssue
 - `test_validate_links_same_file_anchor` — [text](#heading) → valid
 - `test_validate_links_skips_external` — https://... → no issue
 - `test_validate_links_empty_docs_dir` — empty dir → no issues
+
+**visualise_docs.py (integration):**
+- `test_rendered_html_has_heading_ids` — 渲染后 `<h1 id="...">` 存在
+- `test_heading_ids_match_slug_function` — 渲染 id = heading_to_slug(text)
 
 ---
 
@@ -171,16 +226,30 @@ class LintReport:
 
 ### 门禁（可配置）
 
+**入口：新增 Config 字段**
+
 ```python
-def fix_docs(working_dir: str, config: Config, strict: bool = False) -> FixStats:
-    """
-    ...
-    If strict=True, raises LintError when unfixable issues remain.
-    If strict=False (default), logs warnings and continues.
-    """
+# codewiki/src/config.py
+@dataclass
+class Config:
+    # ... existing fields ...
+    postprocess_strict: bool = False  # 新增：True 时 lint 失败阻断构建
 ```
 
-`strict` 模式由配置控制（config 或环境变量），默认 False 保持向后兼容。
+`fix_docs` 从 config 读取：
+
+```python
+def fix_docs(working_dir: str, config: Config) -> FixStats:
+    """
+    ...
+    If config.postprocess_strict is True, raises LintError when
+    unfixable issues remain. Default False preserves backward compat.
+    """
+    strict = getattr(config, 'postprocess_strict', False)
+    ...
+```
+
+不引入环境变量，统一走 Config 对象。
 
 ### 测试
 - `test_lint_report_written_to_disk` — fix_docs 后 _lint_report.json 存在
@@ -195,13 +264,17 @@ def fix_docs(working_dir: str, config: Config, strict: bool = False) -> FixStats
 
 ### 新文件
 - `codewiki/src/be/postprocess/__init__.py`
+- `codewiki/src/be/postprocess/anchor.py` — heading_to_slug（唯一锚点规则源）
 - `codewiki/src/be/postprocess/link_validator.py`
 
 ### 修改文件
 - `codewiki/src/be/docs_fixer.py` — 降级策略 + LintReport + 门禁
-- `codewiki/src/be/documentation_generator.py` — 传 strict 参数
+- `codewiki/src/fe/visualise_docs.py` — 注入 heading ids（使用 heading_to_slug）
+- `codewiki/src/fe/templates.py` — 移除 JS 端 h-0/h-1 顺序赋值逻辑
+- `codewiki/src/config.py` — 新增 postprocess_strict: bool = False
 
 ### 新测试
+- `tests/test_postprocess_anchor.py`
 - `tests/test_postprocess_link_validator.py`
 - `tests/test_postprocess_lint_report.py`
 

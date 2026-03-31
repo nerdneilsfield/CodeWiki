@@ -72,6 +72,8 @@ class Config:
     max_retries: int = DEFAULT_MAX_RETRIES
     # Output language for generated documentation (e.g. "en", "zh", "ja")
     output_language: str = "en"
+    # When True, lint failures (mermaid/math/link) block the build
+    postprocess_strict: bool = False
     # Agent instructions for customization
     agent_instructions: Optional[Dict[str, Any]] = None
     

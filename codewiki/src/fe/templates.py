@@ -543,8 +543,9 @@ document.querySelectorAll('.nvcaret').forEach(function(c){
   if(!mc||!ul)return;
   var hs=mc.querySelectorAll('h2,h3');
   if(hs.length<2){if(toc)toc.style.display='none';return;}
-  hs.forEach(function(h,i){
-    if(!h.id)h.id='h-'+i;
+  hs.forEach(function(h){
+    // IDs are now injected server-side by _inject_heading_ids(); no fallback needed
+    if(!h.id)return;
     var li=document.createElement('li');li.className=h.tagName==='H3'?'h3':'';
     var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;
     li.appendChild(a);ul.appendChild(li);
