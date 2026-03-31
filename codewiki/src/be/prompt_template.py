@@ -17,6 +17,22 @@ MERMAID SYNTAX SAFETY — violations cause parse errors visible to readers:
 """
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ── Evidence-driven writing rules (v3.md 6.1) ────────────────────────────────
+EVIDENCE_RULES_BLOCK = """
+## Evidence-Driven Writing Rules
+
+1. Every behavioral assertion MUST cite evidence:
+   - Reference symbol_id for definitions (e.g., "py:src/auth.py#login(function)")
+   - Reference file:line for call sites / imports (e.g., "src/handler.py:42")
+2. If evidence is insufficient, write "Based on index analysis..." and note
+   the limitation explicitly.
+3. Example code MUST come from the repository (tests, README, examples);
+   if synthesized, mark as "[Synthetic example]".
+4. Do NOT invent function signatures, parameter types, or call chains
+   not supported by the provided symbol cards and edges.
+"""
+# ──────────────────────────────────────────────────────────────────────────────
+
 SYSTEM_PROMPT = """
 <ROLE>
 You are a senior software architect writing a technical book chapter about the `{module_name}` module. Your goal is not merely to catalog code — it is to make a reader **understand** the module the way its original author does: the problems it solves, the ideas behind it, and the tradeoffs that shaped it.
@@ -1262,7 +1278,8 @@ def format_system_prompt(module_name: str, custom_instructions: str = None, outp
         custom_section = f"\n\n<CUSTOM_INSTRUCTIONS>\n{custom_instructions}\n</CUSTOM_INSTRUCTIONS>"
     custom_section += _build_language_section(output_language)
 
-    return SYSTEM_PROMPT.format(module_name=module_name, custom_instructions=custom_section).strip()
+    result = SYSTEM_PROMPT.format(module_name=module_name, custom_instructions=custom_section).strip()
+    return result + EVIDENCE_RULES_BLOCK
 
 
 def format_leaf_system_prompt(module_name: str, custom_instructions: str = None, output_language: str = "en") -> str:
@@ -1282,7 +1299,8 @@ def format_leaf_system_prompt(module_name: str, custom_instructions: str = None,
         custom_section = f"\n\n<CUSTOM_INSTRUCTIONS>\n{custom_instructions}\n</CUSTOM_INSTRUCTIONS>"
     custom_section += _build_language_section(output_language)
 
-    return LEAF_SYSTEM_PROMPT.format(module_name=module_name, custom_instructions=custom_section).strip()
+    result = LEAF_SYSTEM_PROMPT.format(module_name=module_name, custom_instructions=custom_section).strip()
+    return result + EVIDENCE_RULES_BLOCK
 
 
 def format_overview_prompt(name: str, repo_structure: str, is_repo: bool = True, output_language: str = "en") -> str:
@@ -1311,4 +1329,4 @@ def format_overview_prompt(name: str, repo_structure: str, is_repo: bool = True,
     if lang_instruction:
         prompt = prompt + lang_instruction
 
-    return prompt
+    return prompt + EVIDENCE_RULES_BLOCK

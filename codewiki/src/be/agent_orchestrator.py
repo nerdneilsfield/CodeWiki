@@ -74,6 +74,7 @@ from codewiki.src.be.prompt_template import (
     format_leaf_system_prompt,
     format_overview_prompt,
 )
+from codewiki.src.be.generation.context_pack import build_context_pack, format_context_pack_section
 from codewiki.src.be.utils import is_complex_module, count_tokens, agent_progress_handler
 from codewiki.src.config import (
     Config,
@@ -94,6 +95,17 @@ class AgentOrchestrator:
         )
         self.custom_instructions = config.get_prompt_addition() if config else None
         self.output_language = config.output_language if config else "en"
+        # v2: late-injected after index build + clustering
+        self.index_products = None
+        self.global_assets = None
+
+    def set_generation_context(self, index_products, global_assets):
+        """Late injection of index products and global assets.
+
+        Called after index build + clustering completes, before doc generation starts.
+        """
+        self.index_products = index_products
+        self.global_assets = global_assets
     
     def create_agent(self, module_name: str, components: Dict[str, Any],
                     core_component_ids: List[str],
@@ -219,6 +231,21 @@ class AgentOrchestrator:
             components=components,
             module_tree=module_tree,
         )
+
+        # v2: append evidence-rich context pack to user prompt
+        glossary = self.global_assets.get("glossary") if self.global_assets else None
+        link_map = self.global_assets.get("link_map") if self.global_assets else None
+        context_pack = build_context_pack(
+            module_components=core_component_ids,
+            components=components,
+            index_products=self.index_products,
+            glossary=glossary,
+            link_map=link_map,
+        )
+        context_section = format_context_pack_section(context_pack)
+        if context_section:
+            user_prompt += "\n\n" + context_section
+
         estimated_tokens = count_tokens(user_prompt) + _TOKEN_OVERHEAD
 
         # Create agent
@@ -240,6 +267,8 @@ class AgentOrchestrator:
             module_tree_manager=tree_manager,
             fallback_models=self.fallback_models,
             long_context_model=self.long_context_model,
+            index_products=self.index_products,
+            global_assets=self.global_assets,
         )
 
         # Run agent

@@ -22,6 +22,9 @@ class CodeWikiDeps:
     module_tree_manager: Optional['ModuleTreeManager'] = None
     fallback_models: Any = None        # pre-built FallbackModel from AgentOrchestrator
     long_context_model: Any = None     # pre-built OpenAIModel (long context) or None
+    # v2: Index products and global assets for evidence-driven generation
+    index_products: Any = None         # IndexProducts or None
+    global_assets: Optional[dict] = None  # {"glossary": dict, "link_map": dict}
     # Tracks sub-module names already dispatched in this agent run to prevent
     # the LLM from processing the same sub-module twice via repeated tool calls.
     _dispatched_sub_modules: Set[str] = field(default_factory=set)

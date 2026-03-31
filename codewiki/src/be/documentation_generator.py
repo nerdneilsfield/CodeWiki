@@ -770,6 +770,19 @@ class DocumentationGenerator:
 
             logger.debug(f"Grouped components into {len(module_tree)} modules")
 
+            # v2: build global assets and inject into agent orchestrator
+            try:
+                from codewiki.src.be.generation.glossary import build_glossary, build_link_map
+                glossary = build_glossary(self.index_products) if self.index_products else {}
+                link_map = build_link_map(module_tree) if module_tree else {}
+                self.agent_orchestrator.set_generation_context(
+                    index_products=self.index_products,
+                    global_assets={"glossary": glossary, "link_map": link_map},
+                )
+                logger.info(f"Generation v2 context set: {len(glossary)} glossary terms, {len(link_map)} link map entries")
+            except Exception:
+                logger.warning("Failed to set generation v2 context; continuing without", exc_info=True)
+
             # Generate module documentation using dynamic programming approach
             # This processes leaf modules first, then parent modules
             working_dir = await self.generate_module_documentation(components, leaf_nodes)
