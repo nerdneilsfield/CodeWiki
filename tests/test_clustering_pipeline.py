@@ -749,3 +749,54 @@ class TestNamingFreezeReusesOldTitle:
         }
         result = _apply_naming_freeze(clusters, names, previous_tree)
         assert result[0]["title"] == "Child Frozen"
+
+    def test_freeze_includes_path(self):
+        """Frozen entry should include frozen_path from previous tree."""
+        clusters = [["comp_a", "comp_b"]]
+        names = [{"cluster_idx": 0, "title": "New", "description": ""}]
+        previous_tree = {
+            "Old": {
+                "path": "stable/old/path",
+                "components": ["comp_a", "comp_b"],
+                "children": {},
+            }
+        }
+        result = _apply_naming_freeze(clusters, names, previous_tree)
+        assert result[0].get("frozen_path") == "stable/old/path"
+
+    def test_non_frozen_entry_has_no_frozen_path(self):
+        """Non-frozen entries should not have frozen_path."""
+        clusters = [["comp_c"]]
+        names = [{"cluster_idx": 0, "title": "New", "description": ""}]
+        result = _apply_naming_freeze(clusters, names, {})
+        assert "frozen_path" not in result[0]
+
+
+# ---------------------------------------------------------------------------
+# Part 7: LLM naming validation edge cases
+# ---------------------------------------------------------------------------
+
+class TestLLMNamingValidation:
+    """Verify LLM naming rejects empty titles/descriptions."""
+
+    def test_empty_title_triggers_fallback(self):
+        from codewiki.src.be.clustering.naming import name_clusters
+        clusters = [["auth/a.py::A"]]
+        file_map = {"auth/a.py::A": "auth/a.py"}
+        config = type("C", (), {"cluster_model": "test-model"})()
+        response = json.dumps([{"cluster_idx": 0, "title": "", "description": "desc"}])
+        with patch("codewiki.src.be.clustering.naming.call_llm", return_value=response):
+            result = name_clusters(clusters, file_map, config)
+        # Empty title → LLM rejected → heuristic used
+        assert result[0]["title"] != ""
+
+    def test_empty_description_triggers_fallback(self):
+        from codewiki.src.be.clustering.naming import name_clusters
+        clusters = [["auth/a.py::A"]]
+        file_map = {"auth/a.py::A": "auth/a.py"}
+        config = type("C", (), {"cluster_model": "test-model"})()
+        response = json.dumps([{"cluster_idx": 0, "title": "Auth", "description": ""}])
+        with patch("codewiki.src.be.clustering.naming.call_llm", return_value=response):
+            result = name_clusters(clusters, file_map, config)
+        # Empty description → LLM rejected → heuristic used
+        assert result[0]["description"] != ""

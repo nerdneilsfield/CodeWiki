@@ -87,7 +87,8 @@ def cluster_modules_v2(
     for cluster, naming in zip(clusters, frozen_names):
         mid = module_id_from_members(cluster)
         title = naming["title"]
-        path = _compute_module_path(cluster, component_file_map)
+        # Use frozen path if available, otherwise compute fresh
+        path = naming.get("frozen_path") or _compute_module_path(cluster, component_file_map)
 
         # Ensure path uniqueness by appending a counter suffix if needed
         unique_path = path
@@ -232,6 +233,7 @@ def _apply_naming_freeze(
                 "cluster_idx": naming.get("cluster_idx", 0),
                 "title": prev["title"],
                 "description": prev.get("description", naming.get("description", "")),
+                "frozen_path": prev.get("path", ""),
             })
             frozen_count += 1
         else:

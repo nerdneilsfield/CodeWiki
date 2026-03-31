@@ -130,21 +130,36 @@ def _name_clusters_with_llm(
         )
         return None
 
-    # Validate each entry has required keys and correct cluster_idx
+    # Validate each entry has required keys, correct cluster_idx,
+    # non-empty title/description, and bilingual title format
     for i, entry in enumerate(parsed):
         if not isinstance(entry, dict):
             logger.warning("LLM naming entry %d is not a dict", i)
             return None
-        if "title" not in entry or "description" not in entry:
-            logger.warning("LLM naming entry %d missing title/description", i)
+        title = entry.get("title", "")
+        description = entry.get("description", "")
+        if not title or not description:
+            logger.warning("LLM naming entry %d has empty title or description", i)
             return None
         if entry.get("cluster_idx") != i:
             logger.warning(
                 "LLM naming entry %d has wrong cluster_idx %r", i, entry.get("cluster_idx")
             )
             return None
+        # Validate bilingual title: should contain "(" for "中文名 (English Name)" format
+        # If LLM returns monolingual title, still accept but log warning
+        if "(" not in title and not _is_cjk_only(title):
+            logger.info(
+                "LLM naming entry %d title lacks bilingual format: %r", i, title
+            )
 
     return parsed
+
+
+def _is_cjk_only(text: str) -> bool:
+    """Check if text is predominantly CJK characters (no need for bilingual parens)."""
+    cjk_count = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or '\u3400' <= c <= '\u4dbf')
+    return cjk_count > len(text) * 0.5
 
 
 def name_clusters(
