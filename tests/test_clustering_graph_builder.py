@@ -517,3 +517,39 @@ class TestRealAnalyzerComponentIds:
         assert g.has_edge(comp_a, comp_c)
         # ClassB should NOT have an edge to ClassC (precise mapping)
         assert not g.has_edge(comp_b, comp_c)
+
+    def test_method_level_component_id(self):
+        """JS analyzer produces 'module.path.ClassName.method_name' IDs for methods.
+        _extract_component_name should take the last segment ('method_name'),
+        matching the symbol name from the index.
+        """
+        # Method component from JS analyzer
+        comp_method = "src.app.AppService.handleRequest"
+        # Class component in same file
+        comp_class = "src.app.AppService"
+        comp_other = "src.other.OtherClass"
+        file_map = {
+            comp_method: "src/app.ts",
+            comp_class: "src/app.ts",
+            comp_other: "src/other.ts",
+        }
+        # Edge from method symbol to other class
+        edge = _edge(
+            "ts:src/app.ts#handleRequest(method)",
+            "ts:src/other.ts#OtherClass(class)",
+            EdgeType.CALLS, Confidence.HIGH,
+        )
+        g = build_clustering_graph([edge], {comp_method, comp_class, comp_other}, file_map)
+        # Method component should have an edge to other
+        assert g.has_edge(comp_method, comp_other)
+        # Class component should NOT (precise mapping: handleRequest ≠ AppService)
+        assert not g.has_edge(comp_class, comp_other)
+
+    def test_method_component_name_extraction(self):
+        """Verify _extract_component_name handles method-level dot-separated IDs."""
+        from codewiki.src.be.clustering.graph_builder import _extract_component_name
+        # Last segment for dot-separated
+        assert _extract_component_name("module.path.ClassName.method_name") == "method_name"
+        assert _extract_component_name("module.path.ClassName") == "ClassName"
+        # Test fixture format
+        assert _extract_component_name("src/a.py::Foo") == "Foo"
