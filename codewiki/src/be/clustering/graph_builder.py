@@ -75,42 +75,58 @@ def build_clustering_graph(
     for cid in sorted(component_ids):
         graph.add_node(cid)
 
-    # Step 2: build file → components index.
+    # Step 2: build symbol → component mapping.
+    # Component IDs have format "path::Name". Symbol IDs have format
+    # "lang:path#Name(kind)" or "file:path". We map each symbol to the
+    # component that owns it by matching (file, name).
     file_to_components: dict[str, list[str]] = defaultdict(list)
+    comp_by_file_name: dict[tuple[str, str], str] = {}
     for cid in component_ids:
         file_path = component_file_map.get(cid, "")
         if file_path:
             file_to_components[file_path].append(cid)
+            # Extract component name from "path::Name"
+            if "::" in cid:
+                comp_name = cid.split("::", 1)[1]
+                comp_by_file_name[(file_path, comp_name)] = cid
+
+    def _resolve_symbol_to_component(symbol_id: str) -> str | None:
+        """Map a symbol_id to its owning component_id.
+
+        Tries precise (file, name) match first. Falls back to first
+        component in the same file if no name match (single-component files).
+        Returns None if the symbol's file has no known components.
+        """
+        file = _extract_file_from_symbol(symbol_id)
+        name = _extract_name_from_symbol(symbol_id)
+        if name:
+            comp = comp_by_file_name.get((file, name))
+            if comp:
+                return comp
+        # Fallback: if the file has exactly one component, use it
+        comps = file_to_components.get(file, [])
+        if len(comps) == 1:
+            return comps[0]
+        return None
 
     # Accumulated weights keyed by canonical (sorted) component pair.
     pair_weights: dict[tuple[str, str], float] = defaultdict(float)
 
-    # Step 3: process symbol edges → component-pair weights.
+    # Step 3: process symbol edges → component-pair weights (precise mapping).
     for edge in edges:
         if not edge.to_symbol:
             continue  # unresolved edge — skip per spec
 
         weight = WEIGHT_MAP.get((edge.edge_type, edge.confidence), _DEFAULT_WEIGHT)
 
-        from_file = _extract_file_from_symbol(edge.from_symbol)
-        to_file = _extract_file_from_symbol(edge.to_symbol)
+        from_comp = _resolve_symbol_to_component(edge.from_symbol)
+        to_comp = _resolve_symbol_to_component(edge.to_symbol)
 
-        from_comps = file_to_components.get(from_file, [])
-        to_comps = file_to_components.get(to_file, [])
+        if not from_comp or not to_comp or from_comp == to_comp:
+            continue  # unresolvable or self-loop
 
-        # Cross product of components in source file × target file.
-        # Use a per-edge seen set to avoid double-counting when from_file == to_file
-        # (i.e. two symbols in the same file: both orderings collapse to the same pair).
-        seen_pairs_this_edge: set[tuple[str, str]] = set()
-        for fc in from_comps:
-            for tc in to_comps:
-                if fc == tc:
-                    continue  # no self-loops
-                pair = (min(fc, tc), max(fc, tc))
-                if pair in seen_pairs_this_edge:
-                    continue  # already counted for this edge
-                seen_pairs_this_edge.add(pair)
-                pair_weights[pair] += weight
+        pair = (min(from_comp, to_comp), max(from_comp, to_comp))
+        pair_weights[pair] += weight
 
     # Step 4: co-location edges — components in the same file are structurally coupled.
     for comps in file_to_components.values():
@@ -153,3 +169,21 @@ def _extract_file_from_symbol(symbol_id: str) -> str:
         return after_colon.split("#", 1)[0]
 
     return ""
+
+
+def _extract_name_from_symbol(symbol_id: str) -> str:
+    """Extract the symbol name from a symbol_id string.
+
+    ``"py:src/a.py#Foo(class)"``  →  ``"Foo"``
+    ``"py:src/a.py#Bar.baz(method)"``  →  ``"Bar"`` (top-level name)
+    ``"file:src/a.py"``  →  ``""``
+
+    Returns an empty string if no name can be extracted.
+    """
+    if not symbol_id or ":" not in symbol_id or "#" not in symbol_id:
+        return ""
+    after_hash = symbol_id.split("#", 1)[1]
+    # Remove kind suffix: "Foo(class)" → "Foo", "Bar.baz(method)" → "Bar.baz"
+    name_part = after_hash.split("(", 1)[0] if "(" in after_hash else after_hash
+    # For method symbols like "Bar.baz", take the top-level class name
+    return name_part.split(".")[0] if name_part else ""

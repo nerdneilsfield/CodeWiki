@@ -1,6 +1,7 @@
 """Clustering v2 pipeline orchestrator."""
 import logging
 import os
+import subprocess
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
@@ -13,10 +14,18 @@ from codewiki.src.be.clustering.models import (
     canonicalize_tree,
     validate_tree,
     to_legacy_dict,
+    TreeValidationError,
 )
 from codewiki.src.be.clustering.naming import name_clusters
 
 logger = logging.getLogger(__name__)
+
+
+_EXTRA_TOP_LEVEL_MODULES = [
+    {"module_id": "getting-started", "title": "Getting Started", "path": "getting-started"},
+    {"module_id": "tutorial", "title": "Tutorial", "path": "tutorial"},
+    {"module_id": "best-practices", "title": "Best Practices", "path": "best-practices"},
+]
 
 
 def cluster_modules_v2(
@@ -84,6 +93,40 @@ def cluster_modules_v2(
             counter += 1
         used_paths.add(unique_path)
 
+        # Populate members.symbols from IndexProducts symbol table
+        member_symbols: list[str] = []
+        if index_products and hasattr(index_products, 'symbol_table'):
+            for cid in cluster:
+                file_path = component_file_map.get(cid, "")
+                comp_name = cid.split("::", 1)[1] if "::" in cid else ""
+                for sym in index_products.symbol_table.by_file(file_path):
+                    if sym.name == comp_name or not comp_name:
+                        member_symbols.append(sym.symbol_id)
+
+        # Populate constraints from EdgeIndex
+        public_api: list[str] = []
+        boundary_edges_list: list[dict] = []
+        if index_products and hasattr(index_products, 'symbol_table'):
+            for sid in member_symbols:
+                sym = index_products.symbol_table.get(sid)
+                if sym and sym.export_status.value == "exported":
+                    public_api.append(sid)
+
+        if index_products and hasattr(index_products, 'edge_index'):
+            cluster_syms = set(member_symbols)
+            for sid in member_symbols:
+                for edge in index_products.edge_index.callees_of(sid):
+                    if edge.to_symbol and edge.to_symbol not in cluster_syms:
+                        boundary_edges_list.append({
+                            "from": edge.from_symbol,
+                            "to": edge.to_symbol or edge.to_unresolved or "",
+                            "type": edge.edge_type.value,
+                        })
+                        if len(boundary_edges_list) >= 10:
+                            break
+                if len(boundary_edges_list) >= 10:
+                    break
+
         node = ModuleNode(
             module_id=mid,
             title=title,
@@ -91,28 +134,42 @@ def cluster_modules_v2(
             description=naming.get("description", ""),
             members=ModuleMembers(
                 components=sorted(cluster),
+                symbols=sorted(set(member_symbols)),
                 files=sorted(
                     {component_file_map.get(c, "") for c in cluster} - {""}
                 ),
             ),
+            constraints=ModuleConstraints(
+                public_api_symbols=sorted(public_api),
+                boundary_edges=boundary_edges_list,
+            ),
         )
         children.append(node)
+
+    # Get commit hash for generated_from
+    commit_hash = _get_commit_hash(index_products)
 
     root = ModuleNode(
         module_id="root",
         title="Repository",
         path="",
         children=children,
+        extra_top_level_modules=_EXTRA_TOP_LEVEL_MODULES,
     )
 
-    tree = ModuleTree(root=root)
+    tree = ModuleTree(
+        root=root,
+        generated_from={
+            "commit": commit_hash or "",
+            "index_version": "2",
+        },
+    )
     tree = canonicalize_tree(tree)
 
-    # Validate (log warnings but never block the pipeline)
+    # Validate — raise on errors per v3.md L599
     errors = validate_tree(tree, set(leaf_nodes))
     if errors:
-        for err in errors:
-            logger.warning("Tree validation: %s", err)
+        raise TreeValidationError(errors)
 
     # Convert to legacy format and strip the root wrapper
     legacy = to_legacy_dict(tree)
@@ -139,3 +196,17 @@ def _compute_module_path(
         return "modules"
 
     return Counter(dirs).most_common(1)[0][0]
+
+
+def _get_commit_hash(index_products: Any) -> str | None:
+    """Extract commit hash from index_products cache or git."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None

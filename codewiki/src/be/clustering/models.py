@@ -9,6 +9,14 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+class TreeValidationError(Exception):
+    """Raised when validate_tree finds invariant violations."""
+
+    def __init__(self, errors: list[str]):
+        self.errors = errors
+        super().__init__(f"Tree validation failed with {len(errors)} error(s): {errors}")
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
