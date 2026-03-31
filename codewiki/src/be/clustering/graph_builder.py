@@ -76,18 +76,22 @@ def build_clustering_graph(
         graph.add_node(cid)
 
     # Step 2: build symbol → component mapping.
-    # Component IDs have format "path::Name". Symbol IDs have format
-    # "lang:path#Name(kind)" or "file:path". We map each symbol to the
-    # component that owns it by matching (file, name).
+    #
+    # Component IDs come in two formats depending on the analyzer:
+    # - Real analyzers: dot-separated like "module.path.ClassName"
+    #   (node.name is the last segment, node.relative_path is the file)
+    # - Test fixtures: "path::Name" format
+    #
+    # We index by (file_path, component_name) for precise symbol→component
+    # resolution, extracting component_name from either format.
     file_to_components: dict[str, list[str]] = defaultdict(list)
     comp_by_file_name: dict[tuple[str, str], str] = {}
     for cid in component_ids:
         file_path = component_file_map.get(cid, "")
         if file_path:
             file_to_components[file_path].append(cid)
-            # Extract component name from "path::Name"
-            if "::" in cid:
-                comp_name = cid.split("::", 1)[1]
+            comp_name = _extract_component_name(cid)
+            if comp_name:
                 comp_by_file_name[(file_path, comp_name)] = cid
 
     def _resolve_symbol_to_component(symbol_id: str) -> str | None:
@@ -187,3 +191,29 @@ def _extract_name_from_symbol(symbol_id: str) -> str:
     name_part = after_hash.split("(", 1)[0] if "(" in after_hash else after_hash
     # For method symbols like "Bar.baz", take the top-level class name
     return name_part.split(".")[0] if name_part else ""
+
+
+def _extract_component_name(component_id: str) -> str:
+    """Extract the component name from a component_id.
+
+    Handles both real analyzer format and test fixture format:
+    - ``"codewiki.src.be.cluster_modules.ClusterModules"``  →  ``"ClusterModules"``
+    - ``"src/auth/handler.py::AuthHandler"``                 →  ``"AuthHandler"``
+    - ``"module.path.ClassName.method_name"``                →  ``"ClassName"``
+
+    For dot-separated IDs, takes the last segment that starts with an uppercase
+    letter (class name). Falls back to the last segment if none is uppercase.
+    """
+    if not component_id:
+        return ""
+
+    # Test fixture format: "path::Name"
+    if "::" in component_id:
+        return component_id.split("::", 1)[1]
+
+    # Real analyzer format: dot-separated like "module.path.ClassName"
+    if "." in component_id:
+        parts = component_id.rsplit(".", 1)
+        return parts[-1] if parts else ""
+
+    return component_id

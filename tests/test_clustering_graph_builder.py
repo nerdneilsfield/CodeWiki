@@ -469,3 +469,51 @@ class TestEdgeCasesAndBoundary:
         assert comp in g.nodes
         assert g.number_of_edges() == 0
         assert nx.number_of_selfloops(g) == 0
+
+
+# ---------------------------------------------------------------------------
+# Real analyzer component_id format (dot-separated)
+# ---------------------------------------------------------------------------
+
+
+class TestRealAnalyzerComponentIds:
+    """Verify graph_builder works with real analyzer component_id format."""
+
+    def test_dot_separated_component_ids(self):
+        """Real Python analyzer produces 'module.path.ClassName' IDs."""
+        comp_a = "codewiki.src.be.auth.handler.AuthHandler"
+        comp_b = "codewiki.src.be.api.router.Router"
+        file_map = {
+            comp_a: "codewiki/src/be/auth/handler.py",
+            comp_b: "codewiki/src/be/api/router.py",
+        }
+        # Symbol from auth/handler.py referencing api/router.py
+        edge = _edge(
+            "py:codewiki/src/be/auth/handler.py#AuthHandler(class)",
+            "py:codewiki/src/be/api/router.py#Router(class)",
+            EdgeType.IMPORTS, Confidence.HIGH,
+        )
+        g = build_clustering_graph([edge], {comp_a, comp_b}, file_map)
+        assert g.has_edge(comp_a, comp_b)
+        assert g[comp_a][comp_b]["weight"] == pytest.approx(1.0)
+
+    def test_dot_separated_precise_mapping(self):
+        """Two classes in same file: edge should map to the correct component."""
+        comp_a = "module.path.ClassA"
+        comp_b = "module.path.ClassB"
+        comp_c = "module.other.ClassC"
+        file_map = {
+            comp_a: "module/path.py",
+            comp_b: "module/path.py",
+            comp_c: "module/other.py",
+        }
+        # Edge from ClassA to ClassC — should NOT create edge for ClassB
+        edge = _edge(
+            "py:module/path.py#ClassA(class)",
+            "py:module/other.py#ClassC(class)",
+            EdgeType.CALLS, Confidence.HIGH,
+        )
+        g = build_clustering_graph([edge], {comp_a, comp_b, comp_c}, file_map)
+        assert g.has_edge(comp_a, comp_c)
+        # ClassB should NOT have an edge to ClassC (precise mapping)
+        assert not g.has_edge(comp_b, comp_c)

@@ -32,6 +32,13 @@ def _leaf(module_id: str, title: str, path: str, components: list[str]) -> Modul
     )
 
 
+_REQUIRED_EXTRA_MODULES = [
+    {"module_id": "getting-started", "title": "Getting Started", "path": "getting-started"},
+    {"module_id": "tutorial", "title": "Tutorial", "path": "tutorial"},
+    {"module_id": "best-practices", "title": "Best Practices", "path": "best-practices"},
+]
+
+
 def _simple_tree(root_components: list[str] | None = None) -> ModuleTree:
     """Build a minimal valid single-node tree."""
     components = root_components or ["comp_a", "comp_b"]
@@ -40,7 +47,7 @@ def _simple_tree(root_components: list[str] | None = None) -> ModuleTree:
         title="Root",
         path="",
         members=ModuleMembers(components=components),
-        extra_top_level_modules=[],
+        extra_top_level_modules=_REQUIRED_EXTRA_MODULES,
     )
     return ModuleTree(root=root)
 
@@ -230,7 +237,11 @@ def _two_leaf_tree(
         path="",
         members=ModuleMembers(),
         children=[leaf1, leaf2],
-        extra_top_level_modules=[],
+        extra_top_level_modules=[
+            {"module_id": "getting-started", "title": "Getting Started", "path": "getting-started"},
+            {"module_id": "tutorial", "title": "Tutorial", "path": "tutorial"},
+            {"module_id": "best-practices", "title": "Best Practices", "path": "best-practices"},
+        ],
     )
     return ModuleTree(root=root)
 
@@ -278,46 +289,27 @@ class TestValidateTree:
             title="Root",
             path="",
             members=ModuleMembers(),
-            extra_top_level_modules=[],
+            extra_top_level_modules=_REQUIRED_EXTRA_MODULES,
         )
         tree = ModuleTree(root=root)
         errors = validate_tree(tree, set())
         assert errors == []
 
-    def test_validate_tree_missing_extra_top_level_modules(self):
-        """Root node without extra_top_level_modules attribute produces an error.
+    def test_validate_tree_empty_extra_top_level_modules_fails(self):
+        """Root with empty extra_top_level_modules produces an error.
 
-        Per v3.md L594, check_required_modules verifies this field exists.
-        We test that a root ModuleNode constructed without the field (using a
-        dict that omits it and then manually deleting the attribute) triggers
-        the validator.
+        Per v3.md L594, check_required_modules verifies required modules exist.
         """
-        # Construct root and manually remove the extra_top_level_modules field
-        # to simulate a node that somehow lacks it.
         root = ModuleNode(
             module_id="root",
             title="Root",
             path="",
             members=ModuleMembers(components=["comp_a"]),
-            extra_top_level_modules=[],
+            extra_top_level_modules=[],  # empty — should fail
         )
         tree = ModuleTree(root=root)
-        # Simulate missing field by using model_copy to create a node with
-        # no extra_top_level_modules — we'll use object.__delattr__
-        # Instead: patch the tree dict representation
-        raw = tree.model_dump()
-        del raw["root"]["extra_top_level_modules"]
-        # Reconstruct through dict without validation of extra_top_level_modules
-        tree_bad = ModuleTree.model_validate(
-            {**raw, "root": {**raw["root"]}},
-        )
-        # Expect no errors because Pydantic will supply the default []
-        # BUT validate_tree must check the root node has this field defined.
-        # Since Pydantic supplies default, the field is present — so this
-        # test verifies validate_tree does NOT raise a false positive.
-        errors = validate_tree(tree_bad, {"comp_a"})
-        # extra_top_level_modules defaults to [] so no error expected
-        assert errors == []
+        errors = validate_tree(tree, {"comp_a"})
+        assert any("extra_top_level_modules" in e for e in errors)
 
     def test_validate_tree_single_valid_leaf(self):
         """Tree with a single leaf containing all components passes validation."""
@@ -511,3 +503,51 @@ class TestModuleTreeSerializable:
         assert node.extra_top_level_modules == []
         assert node.constraints.public_api_symbols == []
         assert node.constraints.boundary_edges == []
+
+
+# ---------------------------------------------------------------------------
+# validate_tree: required modules check
+# ---------------------------------------------------------------------------
+
+
+class TestValidateTreeRequiredModules:
+    """Verify validate_tree checks for required extra_top_level_modules."""
+
+    def test_empty_extra_top_level_modules_fails(self):
+        root = ModuleNode(
+            module_id="root", title="Root", path="",
+            members=ModuleMembers(),
+            extra_top_level_modules=[],
+        )
+        tree = ModuleTree(root=root)
+        errors = validate_tree(tree, set())
+        assert any("extra_top_level_modules" in e for e in errors)
+
+    def test_missing_required_module_fails(self):
+        root = ModuleNode(
+            module_id="root", title="Root", path="",
+            members=ModuleMembers(),
+            extra_top_level_modules=[
+                {"module_id": "getting-started", "title": "Getting Started", "path": "getting-started"},
+                # missing tutorial and best-practices
+            ],
+        )
+        tree = ModuleTree(root=root)
+        errors = validate_tree(tree, set())
+        assert any("tutorial" in e for e in errors)
+        assert any("best-practices" in e for e in errors)
+
+    def test_all_required_modules_present_passes(self):
+        root = ModuleNode(
+            module_id="root", title="Root", path="",
+            members=ModuleMembers(),
+            extra_top_level_modules=[
+                {"module_id": "getting-started", "title": "Getting Started", "path": "getting-started"},
+                {"module_id": "tutorial", "title": "Tutorial", "path": "tutorial"},
+                {"module_id": "best-practices", "title": "Best Practices", "path": "best-practices"},
+            ],
+        )
+        tree = ModuleTree(root=root)
+        errors = validate_tree(tree, set())
+        assert not any("extra_top_level_modules" in e for e in errors)
+        assert not any("required" in e.lower() for e in errors)

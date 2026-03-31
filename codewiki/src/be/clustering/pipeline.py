@@ -16,6 +16,7 @@ from codewiki.src.be.clustering.models import (
     to_legacy_dict,
     TreeValidationError,
 )
+from codewiki.src.be.clustering.graph_builder import _extract_component_name
 from codewiki.src.be.clustering.naming import name_clusters
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ def cluster_modules_v2(
         if index_products and hasattr(index_products, 'symbol_table'):
             for cid in cluster:
                 file_path = component_file_map.get(cid, "")
-                comp_name = cid.split("::", 1)[1] if "::" in cid else ""
+                comp_name = _extract_component_name(cid)
                 for sym in index_products.symbol_table.by_file(file_path):
                     if sym.name == comp_name or not comp_name:
                         member_symbols.append(sym.symbol_id)

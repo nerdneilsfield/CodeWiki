@@ -205,12 +205,18 @@ def validate_tree(tree: ModuleTree, all_component_ids: set[str]) -> list[str]:
 
     errors.extend(_check_cycles(tree.root, {tree.root.module_id}))
 
-    # --- Check 6: root has extra_top_level_modules ---
-    # Pydantic ensures the field exists with default []; we verify it's present
-    # by checking the model has the attribute (always true with Pydantic defaults).
-    # Per v3.md L594, just confirm the field is accessible.
-    if not hasattr(tree.root, "extra_top_level_modules"):
-        errors.append("Root node is missing required 'extra_top_level_modules' field")
+    # --- Check 6: required top-level modules exist (v3.md L594) ---
+    _REQUIRED_MODULE_IDS = {"getting-started", "tutorial", "best-practices"}
+    if not tree.root.extra_top_level_modules:
+        errors.append(
+            "Root node must have non-empty extra_top_level_modules "
+            f"(required: {sorted(_REQUIRED_MODULE_IDS)})"
+        )
+    else:
+        present_ids = {m.get("module_id", "") for m in tree.root.extra_top_level_modules}
+        missing = _REQUIRED_MODULE_IDS - present_ids
+        if missing:
+            errors.append(f"Missing required top-level modules: {sorted(missing)}")
 
     return errors
 
