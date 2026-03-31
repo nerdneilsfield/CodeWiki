@@ -394,6 +394,7 @@ def cluster_modules(
     current_module_name: str = None,
     current_module_path: List[str] = [],
     _token_threshold: Optional[int] = None,
+    index_products=None,  # NEW: when provided, use v2 pipeline
 ) -> Dict[str, Any]:
     """
     Cluster the potential core components into modules.
@@ -413,6 +414,21 @@ def cluster_modules(
     documentation agents use to decide whether to call
     ``generate_sub_module_documentation``.
     """
+    # V2 dispatch: when index_products is provided, attempt graph-driven clustering
+    if index_products is not None:
+        try:
+            from codewiki.src.be.clustering.pipeline import cluster_modules_v2
+            result = cluster_modules_v2(
+                leaf_nodes, components, config, index_products,
+                current_module_tree, current_module_name,
+                current_module_path, _token_threshold,
+            )
+            if result:  # v2 produced valid output
+                return result
+            # Fall through to v1 if v2 returns empty
+        except Exception as e:
+            logger.warning("Clustering v2 failed, falling back to v1: %s", e)
+
     is_recursive_call = _token_threshold is not None
 
     if is_recursive_call:

@@ -759,7 +759,10 @@ class DocumentationGenerator:
                     file_manager.save_json(module_tree, module_tree_path)
             else:
                 logger.debug(f"Clustering modules (no valid cache at {first_module_tree_path})")
-                module_tree = cluster_modules(leaf_nodes, components, self.config)
+                module_tree = cluster_modules(
+                    leaf_nodes, components, self.config,
+                    index_products=self.index_products,
+                )
                 if module_tree:
                     file_manager.save_json(module_tree, first_module_tree_path)
                     file_manager.save_json(module_tree, module_tree_path)
