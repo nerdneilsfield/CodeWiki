@@ -68,15 +68,22 @@ class GenericIndexAdapter:
             confidence = Confidence.HIGH if both_resolved else Confidence.LOW
 
             # Build evidence ref from caller file + call line.
-            evidence: list[SourceRange] = []
+            # Always produce at least one SourceRange — use caller's file
+            # if resolved, otherwise extract file from the caller qname.
+            evidence_file = ""
             if caller_sym:
-                evidence.append(SourceRange(
-                    file_path=caller_sym.file_path,
-                    start_line=rel.call_line or 0,
-                    start_col=0,
-                    end_line=rel.call_line or 0,
-                    end_col=0,
-                ))
+                evidence_file = caller_sym.file_path
+            else:
+                # Best-effort: derive path from qualified caller name
+                parts = rel.caller.rsplit(".", 1)
+                evidence_file = parts[0].replace(".", "/") if parts else ""
+            evidence = [SourceRange(
+                file_path=evidence_file,
+                start_line=rel.call_line or 0,
+                start_col=0,
+                end_line=rel.call_line or 0,
+                end_col=0,
+            )]
 
             edges.append(SymbolEdge(
                 edge_type=EdgeType.CALLS,

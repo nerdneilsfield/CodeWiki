@@ -34,12 +34,24 @@ class ImportGraph:
         return dict(graph)
 
     def resolve(self, file_path: str, name: str, symbol_table: SymbolTable) -> Optional[Symbol]:
-        """Resolve an imported name to a Symbol via the import chain."""
+        """Resolve an imported name to a Symbol via the import chain.
+
+        Handles both direct names (``from mod import helper; helper()``)
+        and aliases (``from mod import helper as h; h()``).
+        """
         for imp in self._by_file.get(file_path, []):
-            if name in imp.imported_names and imp.resolved_path:
-                # Look up the symbol in the resolved file
+            if not imp.resolved_path:
+                continue
+            # Direct name match
+            if name in imp.imported_names:
                 for sym in symbol_table.by_file(imp.resolved_path):
                     if sym.name == name:
+                        return sym
+            # Alias match: ``from mod import X as Y`` — caller uses Y
+            if imp.alias and imp.alias == name and imp.imported_names:
+                original_name = imp.imported_names[0]
+                for sym in symbol_table.by_file(imp.resolved_path):
+                    if sym.name == original_name:
                         return sym
         return None
 

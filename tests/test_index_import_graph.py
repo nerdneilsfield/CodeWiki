@@ -154,3 +154,21 @@ def test_file_dependency_graph_only_includes_resolved():
     graph = ig.file_dependency_graph()
     assert "src/a.py" in graph
     assert graph["src/a.py"] == {"src/b.py"}  # only the resolved one
+
+
+def test_resolve_with_alias():
+    """from mod import helper as h; resolve(file, 'h') returns the helper symbol."""
+    imp = _imp("src/a.py", "src.b", names=["helper"], resolved="src/b.py", alias="h")
+    helper_sym = _sym("py:src/b.py#helper(function)", "helper", file_path="src/b.py")
+    ig = ImportGraph([imp])
+    st = SymbolTable([helper_sym])
+
+    # Resolve by alias name
+    result = ig.resolve("src/a.py", "h", st)
+    assert result is not None
+    assert result.name == "helper"
+
+    # Direct name should also still work
+    result_direct = ig.resolve("src/a.py", "helper", st)
+    assert result_direct is not None
+    assert result_direct.name == "helper"

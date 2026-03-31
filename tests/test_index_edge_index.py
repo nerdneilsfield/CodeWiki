@@ -228,3 +228,27 @@ def test_index_products_from_dict_has_edge_index():
     assert callees[0].from_symbol == "X"
     assert callees[0].to_symbol == "Y"
     assert callees[0].edge_type == EdgeType.IMPORTS
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Self-loop edge should not be duplicated in edges_of
+# ---------------------------------------------------------------------------
+
+def test_edges_of_self_loop_not_duplicated():
+    """A→A (self-loop / recursive call) must appear exactly once in edges_of('A')."""
+    self_edge = make_edge("A", "A", EdgeType.CALLS)
+    other_edge = make_edge("A", "B", EdgeType.CALLS)
+
+    idx = EdgeIndex([self_edge, other_edge])
+
+    result = idx.edges_of("A")
+    # self_edge appears in both _by_from["A"] and _by_to["A"] but must be deduped
+    assert result.count(self_edge) == 1
+    assert other_edge in result
+    # A→A (deduped) + A→B = 2 edges total
+    assert len(result) == 2
+
+    # With type filter
+    calls = idx.edges_of("A", edge_type=EdgeType.CALLS)
+    assert calls.count(self_edge) == 1
+    assert len(calls) == 2

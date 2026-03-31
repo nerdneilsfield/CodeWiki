@@ -706,3 +706,22 @@ def test_generic_calls_resolver_field():
         assert edge.resolver == "call_graph_analyzer", (
             f"Expected resolver='call_graph_analyzer', got '{edge.resolver}'"
         )
+
+
+def test_generic_calls_unresolved_caller_still_has_evidence():
+    """When caller is not in SymbolTable, edge must still have evidence_refs (data contract)."""
+    st = SymbolTable([])  # empty — caller won't resolve
+
+    rel = CallRelationship(
+        caller="unknown.module.func",
+        callee="other.func",
+        call_line=99,
+        is_resolved=False,
+    )
+    edges = GenericIndexAdapter.convert_calls([rel], st)
+
+    assert len(edges) == 1
+    edge = edges[0]
+    assert edge.from_symbol.startswith("unresolved:")
+    assert len(edge.evidence_refs) >= 1, "Evidence refs must not be empty even for unresolved caller"
+    assert edge.evidence_refs[0].start_line == 99

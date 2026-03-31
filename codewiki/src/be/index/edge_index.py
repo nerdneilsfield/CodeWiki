@@ -38,9 +38,14 @@ class EdgeIndex:
 
         Optionally filter by edge_type.
         """
-        result = self.callees_of(symbol_id) + self.callers_of(symbol_id)
-        if edge_type is not None:
-            result = [e for e in result if e.edge_type == edge_type]
+        seen: set[int] = set()
+        result: list[SymbolEdge] = []
+        for e in self.callees_of(symbol_id) + self.callers_of(symbol_id):
+            eid = id(e)
+            if eid not in seen:
+                seen.add(eid)
+                if edge_type is None or e.edge_type == edge_type:
+                    result.append(e)
         return result
 
     def dependency_subgraph(self, symbol_ids: set[str]) -> list[SymbolEdge]:
