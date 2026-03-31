@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from codewiki.src.be.index.models import (
@@ -17,12 +17,14 @@ from codewiki.src.be.index.symbol_table import SymbolTable
 from codewiki.src.be.index.import_graph import ImportGraph
 from codewiki.src.be.index.component_card import CardBuilder
 from codewiki.src.be.index.adapters.python_adapter import PythonIndexAdapter
+from codewiki.src.be.index.edge_index import EdgeIndex
+from codewiki.src.be.index.graph_stats import GraphStats
 from codewiki.src.be.dependency_analyzer.utils.patterns import CODE_EXTENSIONS
 from codewiki.src.be.dependency_analyzer.utils.security import safe_open_text
 
 logger = logging.getLogger(__name__)
 
-INDEX_VERSION = "1"
+INDEX_VERSION = "2"
 
 
 @dataclass
@@ -32,6 +34,11 @@ class IndexProducts:
     import_graph: ImportGraph
     edges: list[SymbolEdge]
     cards: list[ComponentCard]
+    stats: "GraphStats | None" = field(default=None)
+    edge_index: EdgeIndex = field(init=False, repr=False)
+
+    def __post_init__(self):
+        self.edge_index = EdgeIndex(self.edges)
 
     def to_dict(self) -> dict:
         return {
@@ -39,6 +46,7 @@ class IndexProducts:
             "imports": [i.model_dump() for i in self.import_graph.all_imports()],
             "edges": [e.model_dump() for e in self.edges],
             "cards": [c.model_dump() for c in self.cards],
+            "stats": self.stats.model_dump() if self.stats else None,
         }
 
     @classmethod
@@ -47,11 +55,14 @@ class IndexProducts:
         imports = [ImportStatement.model_validate(d) for d in data["imports"]]
         edges = [SymbolEdge.model_validate(d) for d in data["edges"]]
         cards = [ComponentCard.model_validate(d) for d in data["cards"]]
+        stats_data = data.get("stats")
+        stats = GraphStats.model_validate(stats_data) if stats_data else None
         return cls(
             symbol_table=SymbolTable(symbols),
             import_graph=ImportGraph(imports),
             edges=edges,
             cards=cards,
+            stats=stats,
         )
 
 
@@ -125,8 +136,12 @@ class IndexBuilder:
 
         all_symbols: list[Symbol] = []
         all_imports: list[ImportStatement] = []
+        # Pass 1: collect adapter references for two-pass call extraction.
+        adapters_by_file: dict[str, object] = {}
+        # Placeholder for generic adapter call relationships (Phase 2 data path).
+        all_call_rels: list = []
 
-        # Walk source files
+        # Pass 1: Walk source files, extract symbols + imports, save adapters.
         for file_path, lang in self._discover_files():
             abs_path = os.path.join(self.repo_path, file_path)
             try:
@@ -140,6 +155,7 @@ class IndexBuilder:
                 symbols, imports = adapter.extract()
                 all_symbols.extend(symbols)
                 all_imports.extend(imports)
+                adapters_by_file[file_path] = adapter
             elif lang in ("typescript", "javascript"):
                 try:
                     from codewiki.src.be.index.adapters.ts_js_adapter import TSJSIndexAdapter
@@ -147,53 +163,77 @@ class IndexBuilder:
                     symbols, imports = adapter.extract()
                     all_symbols.extend(symbols)
                     all_imports.extend(imports)
+                    adapters_by_file[file_path] = adapter
                 except ImportError:
                     logger.debug(f"TS/JS adapter not available, using generic for {file_path}")
-                    self._generic_fallback(abs_path, content, lang, all_symbols)
+                    self._generic_fallback(abs_path, content, lang, all_symbols, all_call_rels)
             else:
-                self._generic_fallback(abs_path, content, lang, all_symbols)
+                self._generic_fallback(abs_path, content, lang, all_symbols, all_call_rels)
 
-        # Build products
+        # Build cross-file indexes needed for Pass 2 resolution.
         symbol_table = SymbolTable(all_symbols)
         import_graph = ImportGraph(all_imports)
+
+        # IMPORTS + EXTENDS edges (unchanged from original single-pass).
         edges = self._build_edges(all_imports, symbol_table)
         edges.extend(self._build_extends_edges(symbol_table))
+
+        # Pass 2a: language-specific CALLS extraction (Python AST, TS tree-sitter, etc.).
+        for file_path, adapter in adapters_by_file.items():
+            if hasattr(adapter, "extract_calls"):
+                try:
+                    edges.extend(adapter.extract_calls(symbol_table, import_graph))
+                except Exception as e:
+                    logger.warning(f"extract_calls failed for {file_path}: {e}")
+
+        # Pass 2b: convert generic adapter CallRelationships collected in Pass 1.
+        # all_call_rels is populated by _generic_fallback via _analyze_with_existing.
+        if all_call_rels:
+            from codewiki.src.be.index.adapters.generic_adapter import GenericIndexAdapter
+            edges.extend(GenericIndexAdapter.convert_calls(all_call_rels, symbol_table))
+
         card_builder = CardBuilder()
         cards = [card_builder.build_card(s, edges) for s in all_symbols if s.parent_symbol_id is None]
 
+        stats = GraphStats.compute(all_symbols, edges)
         logger.info(
             f"Index built: {len(all_symbols)} symbols, {len(all_imports)} imports, "
             f"{len(edges)} edges, {len(cards)} cards"
         )
-        products = IndexProducts(symbol_table, import_graph, edges, cards)
+        products = IndexProducts(symbol_table, import_graph, edges, cards, stats=stats)
         self._save_cache(products)
         return products
 
     def _generic_fallback(self, abs_path: str, content: str, lang: str,
-                          all_symbols: list[Symbol]):
+                          all_symbols: list[Symbol], all_call_rels: list | None = None):
         """Parse with existing analyzer and convert via generic adapter."""
         from codewiki.src.be.index.adapters.generic_adapter import GenericIndexAdapter
 
-        nodes = self._analyze_with_existing(abs_path, content, lang)
+        nodes, relationships = self._analyze_with_existing(abs_path, content, lang)
         if nodes:
             adapter = GenericIndexAdapter(lang=lang)
             all_symbols.extend(adapter.convert(nodes))
+        if all_call_rels is not None and relationships:
+            all_call_rels.extend(relationships)
 
-    def _analyze_with_existing(self, abs_path: str, content: str, lang: str) -> list:
-        """Use existing language analyzers to get Node objects.
+    def _analyze_with_existing(self, abs_path: str, content: str, lang: str) -> tuple[list, list]:
+        """Use existing language analyzers to get (Node objects, CallRelationships).
 
         NOTE: This calls CallGraphAnalyzer._analyze_code_file, a private method.
         TODO: Replace with a public API wrapper once CallGraphAnalyzer exposes one.
+
+        Returns:
+            A (nodes, relationships) tuple.  Both are empty lists on failure.
         """
         try:
             from codewiki.src.be.dependency_analyzer.analysis.call_graph_analyzer import CallGraphAnalyzer
             analyzer = CallGraphAnalyzer()
             file_info = {"path": os.path.relpath(abs_path, self.repo_path), "language": lang}
-            funcs, _ = analyzer._analyze_code_file(self.repo_path, file_info)
-            return list(funcs.values())
+            funcs, relationships = analyzer._analyze_code_file(self.repo_path, file_info)
+            return list(funcs.values()), relationships
         except Exception as e:
             logger.debug(f"Existing analyzer failed for {abs_path}: {e}")
-            return []
+            return [], []
 
     def _should_include(self, rel_path: str) -> bool:
         """Check if a file passes include/exclude pattern filters."""

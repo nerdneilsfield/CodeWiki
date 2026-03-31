@@ -7,7 +7,23 @@ from typing import Optional
 
 from codewiki.src.be.index.models import (
     Symbol, ImportStatement, SymbolKind, Visibility, ExportStatus, SourceRange,
+    SymbolEdge, EdgeType, Confidence,
 )
+
+# Builtins that should never appear as CALLS edges.
+_PYTHON_BUILTINS: frozenset[str] = frozenset({
+    "print", "len", "range", "type", "isinstance", "issubclass",
+    "int", "str", "float", "bool", "list", "dict", "set", "tuple",
+    "bytes", "bytearray", "memoryview", "object", "super",
+    "getattr", "setattr", "hasattr", "delattr", "property",
+    "staticmethod", "classmethod", "abs", "max", "min", "sum",
+    "sorted", "reversed", "enumerate", "zip", "map", "filter",
+    "any", "all", "id", "hash", "repr", "format", "open",
+    "input", "round", "pow", "divmod", "chr", "ord", "hex", "oct", "bin",
+    "iter", "next", "callable", "vars", "dir",
+    "ValueError", "TypeError", "KeyError", "IndexError", "AttributeError",
+    "RuntimeError", "StopIteration", "Exception", "NotImplementedError",
+})
 
 
 class PythonIndexAdapter:
@@ -38,7 +54,11 @@ class PythonIndexAdapter:
                 warnings.filterwarnings("ignore", category=SyntaxWarning)
                 tree = ast.parse(self.content)
         except SyntaxError:
+            self._tree = None
             return [], []
+
+        # Save the AST for reuse in extract_calls()
+        self._tree: ast.Module | None = tree
 
         # First pass: find __all__
         self._all_names = self._find_dunder_all(tree)
@@ -214,6 +234,203 @@ class PythonIndexAdapter:
         )
         self._symbols.append(sym)
         return sym
+
+    # ── CALLS edge extraction ────────────────────────────────────────────────
+
+    def extract_calls(self, symbol_table, import_graph) -> list[SymbolEdge]:
+        """Walk the stored AST and emit CALLS edges for every call site.
+
+        Must be called after extract() has been run so that self._tree and
+        self._symbols are populated.
+
+        Args:
+            symbol_table: SymbolTable built from all files in the repo.
+            import_graph: ImportGraph built from all files in the repo.
+
+        Returns:
+            A list of SymbolEdge objects with edge_type=CALLS.
+        """
+        if not getattr(self, "_tree", None):
+            return []
+
+        edges: list[SymbolEdge] = []
+
+        # Build (name → Symbol) map restricted to this file for same-file resolution.
+        file_symbols_by_name: dict[str, Symbol] = {
+            s.name: s for s in symbol_table.by_file(self._rel_path)
+        }
+
+        for func_node in ast.walk(self._tree):
+            if not isinstance(func_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+
+            from_sym = self._resolve_enclosing_symbol(func_node)
+            if from_sym is None:
+                continue
+
+            # Determine parent class name if method lives inside a class.
+            parent_class_name = self._parent_class_name(func_node)
+
+            for call_node in self._iter_calls_shallow(func_node):
+                # call_node is an ast.Call not nested inside a child function
+
+                callee_name, is_self_call = self._extract_callee_name(call_node)
+                if callee_name is None:
+                    continue
+
+                # Filter Python builtins
+                simple_name = callee_name.split(".")[-1]
+                if callee_name in _PYTHON_BUILTINS or simple_name in _PYTHON_BUILTINS:
+                    continue
+
+                evidence = SourceRange(
+                    file_path=self._rel_path,
+                    start_line=call_node.lineno,
+                    start_col=call_node.col_offset,
+                    end_line=getattr(call_node, "end_lineno", call_node.lineno) or call_node.lineno,
+                    end_col=getattr(call_node, "end_col_offset", 0) or 0,
+                )
+
+                to_sym, confidence = self._resolve_callee(
+                    callee_name=callee_name,
+                    is_self_call=is_self_call,
+                    parent_class_name=parent_class_name,
+                    file_symbols_by_name=file_symbols_by_name,
+                    symbol_table=symbol_table,
+                    import_graph=import_graph,
+                )
+
+                edges.append(SymbolEdge(
+                    edge_type=EdgeType.CALLS,
+                    from_symbol=from_sym.symbol_id,
+                    to_symbol=to_sym.symbol_id if to_sym else None,
+                    to_unresolved=callee_name if not to_sym else None,
+                    evidence_refs=[evidence],
+                    confidence=confidence,
+                    resolver="ast",
+                ))
+
+        return edges
+
+    def _iter_calls_shallow(
+        self, func_node: ast.FunctionDef | ast.AsyncFunctionDef
+    ):
+        """Yield all ast.Call nodes directly inside func_node's body.
+
+        Unlike ast.walk, this does NOT descend into nested function/class
+        definitions, so each call site is attributed only to the immediately
+        enclosing function.
+        """
+        # We do a manual BFS/DFS, skipping nested FunctionDef/AsyncFunctionDef.
+        stack = list(ast.iter_child_nodes(func_node))
+        while stack:
+            node = stack.pop()
+            if isinstance(node, ast.Call):
+                yield node
+                # Still descend into the Call's sub-expressions (args, func)
+                # so that foo(bar()) yields both foo and bar calls.
+                stack.extend(ast.iter_child_nodes(node))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                # Stop descent into nested scopes — they will be handled as
+                # separate func_node iterations at the outer loop.
+                continue
+            else:
+                stack.extend(ast.iter_child_nodes(node))
+
+    def _resolve_enclosing_symbol(
+        self, func_node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> Optional["Symbol"]:
+        """Match an AST function node back to its Symbol in self._symbols."""
+        for sym in self._symbols:
+            if sym.kind not in (SymbolKind.FUNCTION, SymbolKind.METHOD):
+                continue
+            if sym.name == func_node.name and sym.range.start_line == func_node.lineno:
+                return sym
+        return None
+
+    def _parent_class_name(
+        self, func_node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> Optional[str]:
+        """Return the class name that directly contains func_node, or None."""
+        for class_node in ast.walk(self._tree):
+            if not isinstance(class_node, ast.ClassDef):
+                continue
+            for item in ast.iter_child_nodes(class_node):
+                if item is func_node:
+                    return class_node.name
+        return None
+
+    def _extract_callee_name(self, call_node: ast.Call) -> tuple[Optional[str], bool]:
+        """Return (callee_name, is_self_call) for a Call node.
+
+        is_self_call is True when the callee is `self.<method>`, which enables
+        same-class resolution.
+        """
+        func = call_node.func
+        if isinstance(func, ast.Name):
+            return func.id, False
+        if isinstance(func, ast.Attribute):
+            parts = self._unpack_attribute(func)
+            if parts and parts[0] == "self":
+                # self.method() → return just the method name for same-class lookup
+                return ".".join(parts), True
+            if parts:
+                return ".".join(parts), False
+        return None, False
+
+    def _unpack_attribute(self, node: ast.Attribute) -> list[str]:
+        """Unpack a.b.c into ['a', 'b', 'c']."""
+        parts: list[str] = []
+        current: ast.expr = node
+        while isinstance(current, ast.Attribute):
+            parts.append(current.attr)
+            current = current.value
+        if isinstance(current, ast.Name):
+            parts.append(current.id)
+        else:
+            # Complex expression — cannot extract a reliable name
+            return []
+        parts.reverse()
+        return parts
+
+    def _resolve_callee(
+        self,
+        callee_name: str,
+        is_self_call: bool,
+        parent_class_name: Optional[str],
+        file_symbols_by_name: dict[str, "Symbol"],
+        symbol_table: "SymbolTable",
+        import_graph: "ImportGraph",
+    ) -> tuple[Optional["Symbol"], Confidence]:
+        """Resolve a callee name to a Symbol and return (symbol_or_None, confidence)."""
+        # --- self.method() resolution: look for same-class sibling method ---
+        if is_self_call and parent_class_name:
+            # callee_name is like "self.helper" — extract the method name
+            method_name = callee_name.split(".")[-1]
+            for sym in symbol_table.by_file(self._rel_path):
+                if sym.kind == SymbolKind.METHOD and sym.name == method_name:
+                    # Verify it belongs to the same class via parent_symbol_id
+                    parent = symbol_table.get(sym.parent_symbol_id) if sym.parent_symbol_id else None
+                    if parent and parent.name == parent_class_name:
+                        return sym, Confidence.HIGH
+
+        # --- Simple name: same-file lookup ---
+        simple_name = callee_name.split(".")[-1] if "." in callee_name else callee_name
+        if not is_self_call:
+            # Try exact name match first (functions, classes in same file)
+            sym = file_symbols_by_name.get(simple_name)
+            if sym is not None:
+                return sym, Confidence.HIGH
+
+        # --- Imported symbol resolution ---
+        if not is_self_call:
+            # For dotted names like "module.func", use the last part as the imported name
+            resolved = import_graph.resolve(self._rel_path, simple_name, symbol_table)
+            if resolved is not None:
+                return resolved, Confidence.HIGH
+
+        # --- Unresolved ---
+        return None, Confidence.LOW
 
     def _resolve_import_path(self, module_path: str, level: int) -> Optional[str]:
         """Resolve a Python import to a repo-relative file path, or None if external.

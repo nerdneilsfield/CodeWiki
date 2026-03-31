@@ -9,6 +9,7 @@ from tree_sitter import Parser, Language
 
 from codewiki.src.be.index.models import (
     Symbol, ImportStatement, SymbolKind, Visibility, ExportStatus, SourceRange,
+    SymbolEdge, EdgeType, Confidence,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,7 @@ class TSJSIndexAdapter:
 
         self._symbols: list[Symbol] = []
         self._imports: list[ImportStatement] = []
+        self._root = None  # Stored during extract() for use in extract_calls()
 
     def extract(self) -> tuple[list[Symbol], list[ImportStatement]]:
         """Parse the file and return symbols and imports."""
@@ -89,6 +91,7 @@ class TSJSIndexAdapter:
         try:
             tree = parser.parse(bytes(self.content, "utf8"))
             root = tree.root_node
+            self._root = root
             self._visit_node(root, parent_class_sym=None)
         except Exception as e:
             logger.error(f"Error parsing {self.file_path}: {e}", exc_info=True)
@@ -432,3 +435,187 @@ class TSJSIndexAdapter:
         if len(s) >= 2 and s[0] in ('"', "'") and s[-1] in ('"', "'"):
             return s[1:-1]
         return s
+
+    # ── CALLS extraction (Pass 2) ───────────────────────────────────────────
+
+    # JS/TS builtins that are never worth recording as CALLS edges.
+    _JS_BUILTINS: frozenset[str] = frozenset({
+        "console.log", "console.warn", "console.error",
+        "setTimeout", "setInterval",
+        "parseInt", "parseFloat",
+        "JSON.stringify", "JSON.parse",
+        "Array.isArray", "Object.keys", "Object.values",
+        "Promise.resolve",
+    })
+
+    def extract_calls(self, symbol_table, import_graph) -> list[SymbolEdge]:
+        """Walk the stored AST and emit CALLS edges for every call_expression.
+
+        Requires that extract() was called first (sets self._root).
+
+        Resolution order per call site:
+          1. this.method()  → look up method in same-class siblings
+          2. imported name  → import_graph.resolve()
+          3. same-file name → symbol_table.by_file()
+          4. fallback       → to_unresolved, LOW confidence
+        """
+        if self._root is None:
+            return []
+
+        edges: list[SymbolEdge] = []
+        # Build a (name → Symbol) index for symbols in this file for O(1) lookup.
+        file_sym_by_name: dict[str, Symbol] = {
+            s.name: s for s in symbol_table.by_file(self._rel_path)
+        }
+
+        self._collect_calls(self._root, edges, symbol_table, import_graph, file_sym_by_name)
+        return edges
+
+    def _collect_calls(self, node, edges: list[SymbolEdge], symbol_table,
+                       import_graph, file_sym_by_name: dict) -> None:
+        """Recursively walk AST nodes and emit a SymbolEdge per call_expression."""
+        if node.type == "call_expression":
+            self._handle_call_expression(node, edges, symbol_table, import_graph, file_sym_by_name)
+            # Still recurse into children to catch nested calls (e.g. foo(bar())).
+
+        for child in node.children:
+            self._collect_calls(child, edges, symbol_table, import_graph, file_sym_by_name)
+
+    def _handle_call_expression(self, call_node, edges: list[SymbolEdge], symbol_table,
+                                 import_graph, file_sym_by_name: dict) -> None:
+        """Emit a SymbolEdge for a single call_expression node."""
+        function_node = self._find_child_by_type(call_node, "function")
+        if function_node is None:
+            # Try the first non-argument child as callee
+            for child in call_node.children:
+                if child.type not in ("arguments",):
+                    function_node = child
+                    break
+        if function_node is None:
+            return
+
+        callee_name, is_member = self._extract_callee_name(function_node)
+        if not callee_name:
+            return
+
+        # Filter builtins before any resolution.
+        if callee_name in self._JS_BUILTINS:
+            return
+
+        # Determine the enclosing function/method symbol.
+        from_sym = self._find_enclosing_symbol(call_node)
+        from_id = from_sym.symbol_id if from_sym else f"file:{self._rel_path}"
+
+        call_line = call_node.start_point[0] + 1
+        evidence = [SourceRange(
+            file_path=self._rel_path,
+            start_line=call_line,
+            start_col=call_node.start_point[1],
+            end_line=call_line,
+            end_col=call_node.end_point[1],
+        )]
+
+        to_sym: Optional[Symbol] = None
+        confidence = Confidence.LOW
+
+        # 1. this.method() resolution
+        if is_member and callee_name.startswith("this."):
+            method_name = callee_name[len("this."):]
+            to_sym = self._resolve_this_method(method_name, from_sym, symbol_table)
+            if to_sym:
+                confidence = Confidence.HIGH
+
+        # 2. imported name resolution (simple identifier, not member)
+        elif not is_member:
+            to_sym = import_graph.resolve(self._rel_path, callee_name, symbol_table)
+            if to_sym:
+                confidence = Confidence.HIGH
+            else:
+                # 3. same-file lookup
+                to_sym = file_sym_by_name.get(callee_name)
+                if to_sym:
+                    confidence = Confidence.HIGH
+
+        # 4. member expression (non-this) — attempt same-file then leave unresolved
+        else:
+            short_name = callee_name.split(".")[-1]
+            to_sym = file_sym_by_name.get(short_name)
+            if to_sym:
+                confidence = Confidence.HIGH
+
+        edges.append(SymbolEdge(
+            edge_type=EdgeType.CALLS,
+            from_symbol=from_id,
+            to_symbol=to_sym.symbol_id if to_sym else None,
+            to_unresolved=callee_name if to_sym is None else None,
+            evidence_refs=evidence,
+            confidence=confidence,
+            resolver="treesitter",
+        ))
+
+    def _extract_callee_name(self, function_node) -> tuple[str, bool]:
+        """Return (callee_name, is_member_expression).
+
+        For ``identifier`` nodes returns (text, False).
+        For ``member_expression`` nodes the tree-sitter shape is:
+            member_expression
+              object   -> identifier | this | member_expression
+              "."      -> .
+              property -> property_identifier
+
+        Returns ("", False) if the node cannot be interpreted.
+        """
+        ntype = function_node.type
+        if ntype in ("identifier", "property_identifier"):
+            return self._node_text(function_node), False
+        if ntype == "member_expression":
+            children = function_node.children
+            # Skip punctuation — first real child is the object, last is the property.
+            meaningful = [c for c in children if c.type not in (".", "optional_chain")]
+            if len(meaningful) >= 2:
+                obj_text = self._node_text(meaningful[0])
+                prop_text = self._node_text(meaningful[-1])
+                return f"{obj_text}.{prop_text}", True
+            # Fallback: return the whole node text.
+            return self._node_text(function_node), True
+        return "", False
+
+    def _resolve_this_method(self, method_name: str, from_sym: Optional[Symbol],
+                              symbol_table) -> Optional[Symbol]:
+        """Resolve this.method() by looking at sibling methods of the enclosing class."""
+        if from_sym is None:
+            return None
+        # from_sym is the calling method; its parent_symbol_id is the class.
+        class_id = from_sym.parent_symbol_id
+        if not class_id:
+            return None
+        class_sym = symbol_table.get(class_id)
+        if not class_sym:
+            return None
+        for child_id in class_sym.children:
+            child = symbol_table.get(child_id)
+            if child and child.name == method_name:
+                return child
+        return None
+
+    def _find_enclosing_symbol(self, node) -> Optional[Symbol]:
+        """Walk up AST parents to find the enclosing function_declaration or method_definition.
+
+        tree-sitter nodes don't carry a parent reference; we scan self._symbols
+        by matching on the line range instead.
+        """
+        call_line = node.start_point[0] + 1
+
+        # Candidates: symbols in this file whose range contains the call line.
+        candidates = [
+            s for s in self._symbols
+            if s.file_path == self._rel_path
+            and s.kind in (SymbolKind.FUNCTION, SymbolKind.METHOD)
+            and s.range.start_line <= call_line <= s.range.end_line
+        ]
+        if not candidates:
+            return None
+
+        # Pick the most tightly enclosing one (smallest line span).
+        candidates.sort(key=lambda s: s.range.end_line - s.range.start_line)
+        return candidates[0]
