@@ -336,12 +336,12 @@ class TestBuildLinkMap:
 
         result = build_link_map(tree)
 
-        # Top-level: module_doc_filename(["Auth Module"])
-        expected_top = module_doc_filename(["Auth Module"])
+        # Top-level: uses stable path "src/auth" → "src_auth" as segment
+        expected_top = module_doc_filename(["src_auth"])
         assert result["src/auth"] == expected_top
 
-        # Nested: module_doc_filename(["Auth Module", "Sub Module"])
-        expected_nested = module_doc_filename(["Auth Module", "Sub Module"])
+        # Nested: parent segment "src_auth" + child "src_auth_sub"
+        expected_nested = module_doc_filename(["src_auth", "src_auth_sub"])
         assert result["src/auth/sub"] == expected_nested
 
     def test_build_link_map_non_dict_values_skipped(self):

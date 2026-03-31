@@ -1,6 +1,7 @@
 """Context pack builder: assembles evidence-rich context for LLM prompts.
 
 Aligned with v3.md section 6.4 RETRIEVE_CONTEXT pseudocode.
+All filtering is component-level precise (not file-level).
 """
 from typing import Any
 
@@ -34,36 +35,25 @@ def build_context_pack(
     }
 
     if not index_products:
-        # Still populate glossary/link_map even without index
         if glossary:
             result["glossary_context"] = _format_glossary(glossary)
         if link_map:
             result["link_map_context"] = _format_link_map(link_map)
         return result
 
-    # Build component file set for boundary detection
-    component_files = set()
-    for cid in module_components:
-        node = components.get(cid)
-        if node:
-            component_files.add(getattr(node, 'relative_path', '').replace('\\', '/'))
+    # Build precise set of symbol_ids belonging to this module's components
+    module_sym_ids = _build_module_symbol_ids(module_components, components, index_products)
 
-    # 1. Symbol cards from IndexProducts.cards
-    result["symbol_cards"] = _build_symbol_cards(
-        module_components, components, index_products
-    )
+    # 1. Symbol cards (component-level precise)
+    result["symbol_cards"] = _build_symbol_cards(module_sym_ids, index_products)
 
-    # 2. Boundary and internal edges
-    boundary, internal = _classify_edges(
-        module_components, component_files, index_products
-    )
+    # 2. Boundary and internal edges (component-level precise)
+    boundary, internal = _classify_edges(module_sym_ids, index_products)
     result["boundary_edges"] = boundary
     result["internal_edges"] = internal
 
-    # 3. Evidence snippets from edge evidence_refs
-    result["evidence_snippets"] = _build_evidence_snippets(
-        module_components, index_products
-    )
+    # 3. Evidence snippets
+    result["evidence_snippets"] = _build_evidence_snippets(module_sym_ids, index_products)
 
     # 4. Glossary and link map
     if glossary:
@@ -74,21 +64,62 @@ def build_context_pack(
     return result
 
 
-def _build_symbol_cards(module_components, components, index_products) -> list[str]:
-    """Format ComponentCards for module's symbols."""
-    cards = []
-    # Build set of files this module owns
+def _build_module_symbol_ids(module_components, components, index_products) -> set[str]:
+    """Build set of symbol_ids that belong to this module's components (precise).
+
+    Maps each component to its symbols by matching (file, component_name)
+    against the symbol table, same logic as clustering/graph_builder.
+
+    Falls back to file-level matching if symbol_table is unavailable,
+    or to card-based matching if neither is available.
+    """
+    symbol_table = getattr(index_products, 'symbol_table', None)
+
+    if symbol_table:
+        from codewiki.src.be.clustering.graph_builder import _extract_component_name
+        symbol_ids: set[str] = set()
+        for cid in module_components:
+            node = components.get(cid)
+            if not node:
+                continue
+            file_path = getattr(node, 'relative_path', '').replace('\\', '/')
+            comp_name = _extract_component_name(cid)
+            for sym in symbol_table.by_file(file_path):
+                if sym.name == comp_name or not comp_name:
+                    symbol_ids.add(sym.symbol_id)
+        return symbol_ids
+
+    # Fallback: match cards by file path (less precise but works with mock)
     module_files = set()
     for cid in module_components:
         node = components.get(cid)
         if node:
             module_files.add(getattr(node, 'relative_path', '').replace('\\', '/'))
 
-    # Find cards whose symbols are in module files
-    for card in index_products.cards:
-        # Extract file from symbol_id
+    symbol_ids = set()
+    for card in getattr(index_products, 'cards', []):
         file_path = _extract_file(card.symbol_id)
         if file_path in module_files:
+            symbol_ids.add(card.symbol_id)
+
+    # Also include edge endpoints in module files
+    for edge in getattr(index_products, 'edges', []):
+        from_file = _extract_file(edge.from_symbol)
+        if from_file in module_files:
+            symbol_ids.add(edge.from_symbol)
+        if edge.to_symbol:
+            to_file = _extract_file(edge.to_symbol)
+            if to_file in module_files:
+                symbol_ids.add(edge.to_symbol)
+
+    return symbol_ids
+
+
+def _build_symbol_cards(module_sym_ids: set[str], index_products) -> list[str]:
+    """Format ComponentCards for module's symbols (component-level precise)."""
+    cards = []
+    for card in index_products.cards:
+        if card.symbol_id in module_sym_ids:
             formatted = (
                 f"**{card.signature}** ({card.kind.value}): "
                 f"{card.docstring_summary or 'No docstring'}"
@@ -97,25 +128,24 @@ def _build_symbol_cards(module_components, components, index_products) -> list[s
                 formatted += f" | Edges: {', '.join(card.key_edges[:3])}"
             formatted += f" | {card.file_context}"
             cards.append(formatted)
-
     return cards
 
 
-def _classify_edges(module_components, component_files, index_products):
-    """Split edges into boundary (cross-module) and internal."""
+def _classify_edges(module_sym_ids: set[str], index_products):
+    """Split edges into boundary (cross-module) and internal.
+
+    Uses component-level symbol_id set for precise classification.
+    """
     boundary = []
     internal = []
+    seen: set[tuple[str, str, str]] = set()
 
-    seen = set()
     for edge in index_products.edges:
         if not edge.to_symbol:
             continue
 
-        from_file = _extract_file(edge.from_symbol)
-        to_file = _extract_file(edge.to_symbol)
-
-        from_in = from_file in component_files
-        to_in = to_file in component_files
+        from_in = edge.from_symbol in module_sym_ids
+        to_in = edge.to_symbol in module_sym_ids
 
         edge_key = (edge.from_symbol, edge.to_symbol, edge.edge_type.value)
         if edge_key in seen:
@@ -131,34 +161,25 @@ def _classify_edges(module_components, component_files, index_products):
         elif from_in or to_in:
             boundary.append(desc)
 
-    # Cap at 15 each
     return boundary[:15], internal[:15]
 
 
-def _build_evidence_snippets(module_components, index_products) -> list[str]:
+def _build_evidence_snippets(module_sym_ids: set[str], index_products) -> list[str]:
     """Extract file:line evidence references for module symbols."""
     snippets = []
-    module_files = set()
-    # Collect files from cards belonging to this index's symbol space
-    for card in index_products.cards:
-        file_path = _extract_file(card.symbol_id)
-        module_files.add(file_path)
-
     for edge in index_products.edges:
-        from_file = _extract_file(edge.from_symbol)
-        if from_file not in module_files:
+        if edge.from_symbol not in module_sym_ids:
             continue
         for ref in edge.evidence_refs:
             snippet = f"{ref.file_path}:{ref.start_line} ({edge.edge_type.value})"
             snippets.append(snippet)
             if len(snippets) >= 20:
                 return snippets
-
     return snippets
 
 
 def _extract_file(symbol_id: str) -> str:
-    """Extract file path from symbol_id. Reuses graph_builder logic."""
+    """Extract file path from symbol_id."""
     if not symbol_id:
         return ""
     if symbol_id.startswith("file:"):

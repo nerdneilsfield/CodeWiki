@@ -63,15 +63,18 @@ def _walk_tree(
 
         path = info.get("path", "")
         if path:
-            # module_doc_filename takes a list of path segments
-            # In v1, the title is used as the segment name
-            current_path = parent_path + [title]
+            # Use the stable path field (split into segments) as input to
+            # module_doc_filename, NOT the title (which can drift with LLM naming).
+            # module_doc_filename joins segments with "-" and normalizes chars.
+            path_segments = parent_path + [path.replace("/", "_")]
             try:
-                doc_filename = module_doc_filename(current_path)
+                doc_filename = module_doc_filename(path_segments)
             except Exception:
                 doc_filename = path.replace("/", "_") + ".md"
             link_map[path] = doc_filename
 
         children = info.get("children", {})
         if children and isinstance(children, dict):
-            _walk_tree(children, parent_path + [title], link_map)
+            # Use path-derived segments for recursion, not title
+            child_parent = parent_path + [path.replace("/", "_")] if path else parent_path
+            _walk_tree(children, child_parent, link_map)
