@@ -119,18 +119,30 @@ def _fix_markdown_links(content: str, base_url: str = None) -> str:
 
 
 def _inject_heading_ids(html: str) -> str:
-    """Add id attributes to heading tags using stable slug function."""
+    """Add id attributes to heading tags using stable slug function.
+
+    Duplicate slugs get a numeric suffix (-1, -2, ...) to ensure uniqueness,
+    matching the convention used by GitHub and most Markdown renderers.
+    """
     import re
+
+    seen_slugs: dict[str, int] = {}
 
     def replacer(match):
         tag = match.group(1)
         inner = match.group(2)
-        # Extract visible text, stripping any HTML tags
         visible = re.sub(r'<[^>]+>', '', inner)
         slug = heading_to_slug(visible)
-        if slug:
-            return f'<{tag} id="{slug}">{inner}</{tag}>'
-        return match.group(0)
+        if not slug:
+            return match.group(0)
+        # Deduplicate: first occurrence gets bare slug, subsequent get -1, -2, ...
+        if slug in seen_slugs:
+            seen_slugs[slug] += 1
+            unique_slug = f"{slug}-{seen_slugs[slug]}"
+        else:
+            seen_slugs[slug] = 0
+            unique_slug = slug
+        return f'<{tag} id="{unique_slug}">{inner}</{tag}>'
 
     return re.sub(r'<(h[1-6])>(.*?)</\1>', replacer, html, flags=re.DOTALL)
 

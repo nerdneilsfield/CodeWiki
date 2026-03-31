@@ -64,6 +64,18 @@ class TestBuildAnchorRegistry:
         for i in range(1, 7):
             assert f"level-{i}" in registry["doc.md"]
 
+    def test_anchor_registry_extracts_setext_h1(self, tmp_path):
+        f = tmp_path / "doc.md"
+        f.write_text("Setext Title\n============\n")
+        registry = build_anchor_registry(str(tmp_path))
+        assert "setext-title" in registry["doc.md"]
+
+    def test_anchor_registry_extracts_setext_h2(self, tmp_path):
+        f = tmp_path / "doc.md"
+        f.write_text("Secondary Title\n----------------\n")
+        registry = build_anchor_registry(str(tmp_path))
+        assert "secondary-title" in registry["doc.md"]
+
 
 class TestValidateLinks:
     def test_validate_links_file_found(self, tmp_path):
@@ -159,6 +171,12 @@ class TestValidateLinks:
         sub.mkdir()
         (sub / "page.md").write_text("[link](../root.md)\n")
         (tmp_path / "root.md").write_text("# Root\n")
+        issues = validate_links(str(tmp_path))
+        assert issues == []
+
+    def test_validate_links_setext_heading_anchor_found(self, tmp_path):
+        (tmp_path / "source.md").write_text("[link](other.md#setext-title)\n")
+        (tmp_path / "other.md").write_text("Setext Title\n============\n")
         issues = validate_links(str(tmp_path))
         assert issues == []
 

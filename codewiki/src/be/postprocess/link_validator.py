@@ -30,14 +30,28 @@ def build_anchor_registry(docs_dir: str) -> dict[str, set[str]]:
             rel_path = os.path.relpath(filepath, docs_dir).replace('\\', '/')
             anchors = set()
             with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-                for line in f:
+                lines = f.readlines()
+                for i, line in enumerate(lines):
+                    stripped = line.strip()
                     # Match ATX headings: # Heading, ## Heading, etc.
-                    match = re.match(r'^(#{1,6})\s+(.+)$', line.strip())
-                    if match:
-                        heading_text = match.group(2).strip()
+                    atx_match = re.match(r'^(#{1,6})\s+(.+)$', stripped)
+                    if atx_match:
+                        heading_text = atx_match.group(2).strip()
                         slug = heading_to_slug(heading_text)
                         if slug:
                             anchors.add(slug)
+                        continue
+                    # Match Setext headings: line followed by === (h1) or --- (h2)
+                    if i > 0 and stripped:
+                        prev_line = lines[i - 1].strip()
+                        if prev_line and re.match(r'^={3,}$', stripped):
+                            slug = heading_to_slug(prev_line)
+                            if slug:
+                                anchors.add(slug)
+                        elif prev_line and re.match(r'^-{3,}$', stripped):
+                            slug = heading_to_slug(prev_line)
+                            if slug:
+                                anchors.add(slug)
             registry[rel_path] = anchors
     return registry
 
