@@ -193,3 +193,32 @@ class TestValidateLinks:
         assert issue.link_text == "text"
         assert issue.target == "b.md"
         assert issue.issue_type == "file_not_found"
+
+
+class TestDuplicateHeadingDedup:
+    """Verify anchor registry mirrors renderer's dedup suffix logic."""
+
+    def test_duplicate_headings_produce_suffixed_anchors(self, tmp_path):
+        """Two identical headings → anchors 'intro' and 'intro-1'."""
+        (tmp_path / "doc.md").write_text("# Intro\n\nText.\n\n# Intro\n\nMore text.\n")
+        registry = build_anchor_registry(str(tmp_path))
+        anchors = registry["doc.md"]
+        assert "intro" in anchors
+        assert "intro-1" in anchors
+
+    def test_triple_duplicate_headings(self, tmp_path):
+        """Three identical headings → 'faq', 'faq-1', 'faq-2'."""
+        (tmp_path / "doc.md").write_text("# FAQ\n\n# FAQ\n\n# FAQ\n")
+        registry = build_anchor_registry(str(tmp_path))
+        anchors = registry["doc.md"]
+        assert "faq" in anchors
+        assert "faq-1" in anchors
+        assert "faq-2" in anchors
+
+    def test_link_to_suffixed_anchor_is_valid(self, tmp_path):
+        """[text](#intro-1) pointing to the second 'Intro' heading is valid."""
+        (tmp_path / "doc.md").write_text(
+            "# Intro\n\nFirst.\n\n# Intro\n\nSecond.\n\n[link](#intro-1)\n"
+        )
+        issues = validate_links(str(tmp_path))
+        assert not any(i.target == "#intro-1" for i in issues)

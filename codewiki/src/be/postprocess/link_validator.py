@@ -28,29 +28,35 @@ def build_anchor_registry(docs_dir: str) -> dict[str, set[str]]:
                 continue
             filepath = os.path.join(root, fname)
             rel_path = os.path.relpath(filepath, docs_dir).replace('\\', '/')
-            anchors = set()
+            anchors: set[str] = set()
+            slug_counts: dict[str, int] = {}
             with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()
                 for i, line in enumerate(lines):
                     stripped = line.strip()
+                    heading_text = None
                     # Match ATX headings: # Heading, ## Heading, etc.
                     atx_match = re.match(r'^(#{1,6})\s+(.+)$', stripped)
                     if atx_match:
                         heading_text = atx_match.group(2).strip()
-                        slug = heading_to_slug(heading_text)
-                        if slug:
-                            anchors.add(slug)
-                        continue
                     # Match Setext headings: line followed by === (h1) or --- (h2)
-                    if i > 0 and stripped:
+                    elif i > 0 and stripped:
                         prev_line = lines[i - 1].strip()
                         if prev_line and re.match(r'^={3,}$', stripped):
-                            slug = heading_to_slug(prev_line)
-                            if slug:
-                                anchors.add(slug)
+                            heading_text = prev_line
                         elif prev_line and re.match(r'^-{3,}$', stripped):
-                            slug = heading_to_slug(prev_line)
-                            if slug:
+                            heading_text = prev_line
+
+                    if heading_text:
+                        slug = heading_to_slug(heading_text)
+                        if slug:
+                            # Mirror renderer's dedup: first gets bare slug,
+                            # duplicates get -1, -2, ... suffix
+                            if slug in slug_counts:
+                                slug_counts[slug] += 1
+                                anchors.add(f"{slug}-{slug_counts[slug]}")
+                            else:
+                                slug_counts[slug] = 0
                                 anchors.add(slug)
             registry[rel_path] = anchors
     return registry
