@@ -1,13 +1,17 @@
 # codewiki/src/be/index/index_builder.py
 """IndexBuilder: orchestrates index construction from source files."""
 import fnmatch
+import json
 import logging
 import os
+import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from codewiki.src.be.index.models import (
     Symbol, ImportStatement, SymbolEdge, ComponentCard, EdgeType, Confidence, SourceRange,
+    SymbolKind,
 )
 from codewiki.src.be.index.symbol_table import SymbolTable
 from codewiki.src.be.index.import_graph import ImportGraph
@@ -17,6 +21,8 @@ from codewiki.src.be.dependency_analyzer.utils.patterns import CODE_EXTENSIONS
 from codewiki.src.be.dependency_analyzer.utils.security import safe_open_text
 
 logger = logging.getLogger(__name__)
+
+INDEX_VERSION = "1"
 
 
 @dataclass
@@ -53,12 +59,70 @@ class IndexBuilder:
     """Builds index products from a repository's source files."""
 
     def __init__(self, repo_path: str, include_patterns: list[str] | None = None,
-                 exclude_patterns: list[str] | None = None):
+                 exclude_patterns: list[str] | None = None,
+                 output_dir: str | None = None):
         self.repo_path = os.path.abspath(repo_path)
         self.include_patterns = include_patterns
         self.exclude_patterns = exclude_patterns
+        self.output_dir = output_dir
+
+    # ── Caching ────────────────────────────────────────────────────────────
+
+    def _get_commit_hash(self) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True, cwd=self.repo_path, timeout=5,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return None
+
+    def _cache_path(self) -> Path | None:
+        if not self.output_dir:
+            return None
+        return Path(self.output_dir) / "_index_cache.json"
+
+    def _try_load_cache(self) -> "IndexProducts | None":
+        cache_file = self._cache_path()
+        if not cache_file or not cache_file.exists():
+            return None
+        try:
+            data = json.loads(cache_file.read_text(encoding="utf-8"))
+            cache_key = data.get("_cache_key", {})
+            if (cache_key.get("commit") == self._get_commit_hash()
+                    and cache_key.get("index_version") == INDEX_VERSION):
+                logger.info("Index cache hit — skipping rebuild")
+                return IndexProducts.from_dict(data)
+        except Exception as e:
+            logger.debug(f"Cache load failed: {e}")
+        return None
+
+    def _save_cache(self, products: "IndexProducts") -> None:
+        cache_file = self._cache_path()
+        if not cache_file:
+            return
+        try:
+            data = products.to_dict()
+            data["_cache_key"] = {
+                "commit": self._get_commit_hash(),
+                "index_version": INDEX_VERSION,
+            }
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            logger.info(f"Index cache saved to {cache_file}")
+        except Exception as e:
+            logger.warning(f"Cache save failed: {e}")
+
+    # ── Build ──────────────────────────────────────────────────────────────
 
     def build(self) -> IndexProducts:
+        cached = self._try_load_cache()
+        if cached is not None:
+            return cached
+
         all_symbols: list[Symbol] = []
         all_imports: list[ImportStatement] = []
 
@@ -93,6 +157,7 @@ class IndexBuilder:
         symbol_table = SymbolTable(all_symbols)
         import_graph = ImportGraph(all_imports)
         edges = self._build_edges(all_imports, symbol_table)
+        edges.extend(self._build_extends_edges(symbol_table))
         card_builder = CardBuilder()
         cards = [card_builder.build_card(s, edges) for s in all_symbols if s.parent_symbol_id is None]
 
@@ -100,7 +165,9 @@ class IndexBuilder:
             f"Index built: {len(all_symbols)} symbols, {len(all_imports)} imports, "
             f"{len(edges)} edges, {len(cards)} cards"
         )
-        return IndexProducts(symbol_table, import_graph, edges, cards)
+        products = IndexProducts(symbol_table, import_graph, edges, cards)
+        self._save_cache(products)
+        return products
 
     def _generic_fallback(self, abs_path: str, content: str, lang: str,
                           all_symbols: list[Symbol]):
@@ -192,3 +259,72 @@ class IndexBuilder:
                     resolver="ast",
                 ))
         return edges
+
+    def _build_extends_edges(self, symbol_table: SymbolTable) -> list[SymbolEdge]:
+        """Build EXTENDS edges from class inheritance relationships."""
+        edges: list[SymbolEdge] = []
+        # Build (file_path, name) → Symbol index for same-file lookup
+        name_index: dict[tuple[str, str], Symbol] = {
+            (s.file_path, s.name): s for s in symbol_table.all_symbols()
+        }
+
+        for sym in symbol_table.all_symbols():
+            if sym.kind != SymbolKind.CLASS:
+                continue
+            base_names = self._extract_base_classes(sym)
+            for base_name in base_names:
+                # Try same-file lookup first, then cross-file search
+                to_sym = name_index.get((sym.file_path, base_name))
+                if not to_sym:
+                    candidates = symbol_table.search(base_name)
+                    to_sym = next(
+                        (c for c in candidates if c.kind == SymbolKind.CLASS and c.name == base_name),
+                        None,
+                    )
+
+                edges.append(SymbolEdge(
+                    edge_type=EdgeType.EXTENDS,
+                    from_symbol=sym.symbol_id,
+                    to_symbol=to_sym.symbol_id if to_sym else None,
+                    to_unresolved=base_name if not to_sym else None,
+                    evidence_refs=[SourceRange(
+                        file_path=sym.file_path,
+                        start_line=sym.range.start_line,
+                        start_col=sym.range.start_col,
+                        end_line=sym.range.start_line,
+                        end_col=sym.range.end_col,
+                    )],
+                    confidence=Confidence.HIGH if to_sym else Confidence.LOW,
+                    resolver="ast" if sym.lang == "python" else "treesitter",
+                ))
+        return edges
+
+    def _extract_base_classes(self, sym: Symbol) -> list[str]:
+        """Extract base class names from a class symbol's signature.
+
+        Handles Python signatures of the form ``class Foo(Bar, Baz)``.
+        TS/JS signatures currently only carry ``class Foo`` (no extends info
+        until the TS/JS adapter is updated to embed it).
+        """
+        if not sym.signature:
+            return []
+        match = re.search(r'\(([^)]+)\)', sym.signature)
+        if not match:
+            return []
+        bases_str = match.group(1)
+        bases = [b.strip() for b in bases_str.split(',')]
+        # Filter out keyword args (metaclass=...), starred args, and generic
+        # type parameters (Generic[T], Protocol[T], etc.)
+        filtered = []
+        for b in bases:
+            if not b:
+                continue
+            if '=' in b:
+                continue
+            if b.startswith('*'):
+                continue
+            # Strip generic params: Generic[T] → Generic, but keep as base
+            bare = re.sub(r'\[.*\]$', '', b).strip()
+            if bare:
+                filtered.append(bare)
+        return filtered

@@ -372,3 +372,207 @@ def test_relative_import_empty_module():
     # module_path should just be "." (the dot prefix with empty module)
     assert imports[0].module_path == "."
     assert "foo" in imports[0].imported_names
+
+
+# ── kwonlyargs signature tests ────────────────────────────────────────────────
+
+def test_kwonly_bare_star_with_annotated_arg():
+    """def f(a, *, key: str) → bare * separator + key: str in signature."""
+    symbols, _ = _adapt('''
+        def f(a, *, key: str):
+            pass
+    ''')
+    funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
+    assert len(funcs) == 1
+    sig = funcs[0].signature
+    # bare * must appear before key
+    assert "*, key: str" in sig, f"Expected '*, key: str' in signature, got: {sig!r}"
+
+
+def test_kwonly_after_vararg_no_extra_star():
+    """def f(a, *args, key: str = 'x') → *args present, so no extra bare *.
+    The kwonly arg and its default must appear in the signature."""
+    symbols, _ = _adapt("""
+        def f(a, *args, key: str = 'x'):
+            pass
+    """)
+    funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
+    assert len(funcs) == 1
+    sig = funcs[0].signature
+    # *args comes first; no duplicate bare * should appear
+    assert "*args" in sig, f"Expected '*args' in signature, got: {sig!r}"
+    assert "key: str = 'x'" in sig, f"Expected \"key: str = 'x'\" in signature, got: {sig!r}"
+    assert sig.count("*,") == 0, f"Unexpected bare '*, ' in signature when *args is present: {sig!r}"
+
+
+def test_kwonly_multiple_args_only_bare_star():
+    """def f(*, key1: int, key2: str = 'y') → bare * + both kwonly args in order."""
+    symbols, _ = _adapt("""
+        def f(*, key1: int, key2: str = 'y'):
+            pass
+    """)
+    funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
+    assert len(funcs) == 1
+    sig = funcs[0].signature
+    assert "*, key1: int, key2: str = 'y'" in sig, (
+        f"Expected '*, key1: int, key2: str = \\'y\\'' in signature, got: {sig!r}"
+    )
+
+
+# ── Import path resolution ────────────────────────────────────────────────────
+
+def test_relative_import_resolves_to_sibling_py_file(tmp_path):
+    """from .utils import X in src/pkg/main.py resolves to src/pkg/utils.py"""
+    pkg = tmp_path / "src" / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "utils.py").write_text("def helper(): pass\n")
+    main_file = pkg / "main.py"
+    main_file.write_text("from .utils import helper\n")
+
+    adapter = PythonIndexAdapter(
+        file_path=str(main_file),
+        content="from .utils import helper\n",
+        repo_path=str(tmp_path),
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].module_path == ".utils"
+    assert imports[0].resolved_path == "src/pkg/utils.py"
+
+
+def test_relative_import_level2_resolves_correctly(tmp_path):
+    """from ..utils import X in src/pkg/sub/mod.py resolves to src/pkg/utils.py"""
+    pkg = tmp_path / "src" / "pkg"
+    sub = pkg / "sub"
+    sub.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (sub / "__init__.py").write_text("")
+    (pkg / "utils.py").write_text("def helper(): pass\n")
+    mod_file = sub / "mod.py"
+    mod_file.write_text("from ..utils import helper\n")
+
+    adapter = PythonIndexAdapter(
+        file_path=str(mod_file),
+        content="from ..utils import helper\n",
+        repo_path=str(tmp_path),
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].module_path == "..utils"
+    assert imports[0].resolved_path == "src/pkg/utils.py"
+
+
+def test_absolute_import_resolves_when_file_exists(tmp_path):
+    """from pkg.utils import X resolves to pkg/utils.py when that file exists"""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "utils.py").write_text("X = 1\n")
+    caller = tmp_path / "main.py"
+    caller.write_text("from pkg.utils import X\n")
+
+    adapter = PythonIndexAdapter(
+        file_path=str(caller),
+        content="from pkg.utils import X\n",
+        repo_path=str(tmp_path),
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path == "pkg/utils.py"
+
+
+def test_external_package_import_resolves_to_none(tmp_path):
+    """from os.path import join resolves to None (not present under repo root)"""
+    caller = tmp_path / "main.py"
+    caller.write_text("from os.path import join\n")
+
+    adapter = PythonIndexAdapter(
+        file_path=str(caller),
+        content="from os.path import join\n",
+        repo_path=str(tmp_path),
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path is None
+
+
+def test_relative_import_resolves_to_package_init(tmp_path):
+    """from .subpkg import X resolves to src/pkg/subpkg/__init__.py"""
+    pkg = tmp_path / "src" / "pkg"
+    subpkg = pkg / "subpkg"
+    subpkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (subpkg / "__init__.py").write_text("X = 42\n")
+    main_file = pkg / "main.py"
+    main_file.write_text("from .subpkg import X\n")
+
+    adapter = PythonIndexAdapter(
+        file_path=str(main_file),
+        content="from .subpkg import X\n",
+        repo_path=str(tmp_path),
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path == "src/pkg/subpkg/__init__.py"
+
+
+def test_plain_import_resolves_when_file_exists(tmp_path):
+    """import mymodule resolves to mymodule.py when that file is at repo root"""
+    (tmp_path / "mymodule.py").write_text("pass\n")
+    caller = tmp_path / "main.py"
+    caller.write_text("import mymodule\n")
+
+    adapter = PythonIndexAdapter(
+        file_path=str(caller),
+        content="import mymodule\n",
+        repo_path=str(tmp_path),
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path == "mymodule.py"
+
+
+def test_plain_import_external_resolves_to_none(tmp_path):
+    """import os resolves to None (standard library, not in repo)"""
+    caller = tmp_path / "main.py"
+    caller.write_text("import os\n")
+
+    adapter = PythonIndexAdapter(
+        file_path=str(caller),
+        content="import os\n",
+        repo_path=str(tmp_path),
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path is None
+
+
+def test_resolved_path_uses_forward_slashes(tmp_path):
+    """resolved_path must always use forward slashes, never backslashes"""
+    a = tmp_path / "a"
+    b = a / "b"
+    b.mkdir(parents=True)
+    (a / "__init__.py").write_text("")
+    (b / "__init__.py").write_text("")
+    (a / "target.py").write_text("x = 1\n")
+    caller = b / "caller.py"
+    caller.write_text("from ..target import x\n")
+
+    adapter = PythonIndexAdapter(
+        file_path=str(caller),
+        content="from ..target import x\n",
+        repo_path=str(tmp_path),
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path is not None
+    assert "\\" not in imports[0].resolved_path

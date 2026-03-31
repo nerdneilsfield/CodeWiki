@@ -244,3 +244,175 @@ def test_arrow_function_does_not_crash():
     # The class should still be extracted
     classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
     assert any(c.name == "Wrapper" for c in classes)
+
+
+# ── Import path resolution ────────────────────────────────────────────────────
+
+def test_relative_import_resolves_to_ts(tmp_path):
+    """Relative import './utils' resolves to utils.ts when that file exists."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "utils.ts").write_text("export const x = 1;")
+    importing_file = tmp_path / "src" / "app.ts"
+    importing_file.write_text("import { x } from './utils';")
+
+    adapter = TSJSIndexAdapter(
+        file_path=str(importing_file),
+        content=importing_file.read_text(),
+        repo_path=str(tmp_path),
+        language="typescript",
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path == "src/utils.ts"
+
+
+def test_relative_import_resolves_to_js_fallback(tmp_path):
+    """Relative import './utils' resolves to utils.js when no .ts file exists."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "utils.js").write_text("exports.x = 1;")
+    importing_file = tmp_path / "src" / "app.ts"
+    importing_file.write_text("import { x } from './utils';")
+
+    adapter = TSJSIndexAdapter(
+        file_path=str(importing_file),
+        content=importing_file.read_text(),
+        repo_path=str(tmp_path),
+        language="typescript",
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path == "src/utils.js"
+
+
+def test_relative_import_resolves_tsx_extension(tmp_path):
+    """Relative import './components/Button' resolves to components/Button.tsx."""
+    (tmp_path / "src" / "components").mkdir(parents=True)
+    (tmp_path / "src" / "components" / "Button.tsx").write_text(
+        "export const Button = () => null;"
+    )
+    importing_file = tmp_path / "src" / "app.ts"
+    importing_file.write_text("import { Button } from './components/Button';")
+
+    adapter = TSJSIndexAdapter(
+        file_path=str(importing_file),
+        content=importing_file.read_text(),
+        repo_path=str(tmp_path),
+        language="typescript",
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path == "src/components/Button.tsx"
+
+
+def test_relative_import_resolves_index_ts(tmp_path):
+    """Relative import './lib' resolves to lib/index.ts when that index file exists."""
+    (tmp_path / "src" / "lib").mkdir(parents=True)
+    (tmp_path / "src" / "lib" / "index.ts").write_text("export const lib = {};")
+    importing_file = tmp_path / "src" / "app.ts"
+    importing_file.write_text("import { lib } from './lib';")
+
+    adapter = TSJSIndexAdapter(
+        file_path=str(importing_file),
+        content=importing_file.read_text(),
+        repo_path=str(tmp_path),
+        language="typescript",
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path == "src/lib/index.ts"
+
+
+def test_relative_import_resolves_index_js_fallback(tmp_path):
+    """Relative import './lib' resolves to lib/index.js when only .js index exists."""
+    (tmp_path / "src" / "lib").mkdir(parents=True)
+    (tmp_path / "src" / "lib" / "index.js").write_text("module.exports = {};")
+    importing_file = tmp_path / "src" / "app.ts"
+    importing_file.write_text("import { lib } from './lib';")
+
+    adapter = TSJSIndexAdapter(
+        file_path=str(importing_file),
+        content=importing_file.read_text(),
+        repo_path=str(tmp_path),
+        language="typescript",
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path == "src/lib/index.js"
+
+
+def test_package_import_resolved_path_is_none(tmp_path):
+    """Non-relative imports (packages) must leave resolved_path as None."""
+    importing_file = tmp_path / "app.ts"
+    importing_file.write_text("import React from 'react';")
+
+    adapter = TSJSIndexAdapter(
+        file_path=str(importing_file),
+        content=importing_file.read_text(),
+        repo_path=str(tmp_path),
+        language="typescript",
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path is None
+
+
+def test_relative_import_with_explicit_extension(tmp_path):
+    """Relative import './utils.js' with explicit extension resolves directly."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "utils.js").write_text("exports.x = 1;")
+    importing_file = tmp_path / "src" / "app.ts"
+    importing_file.write_text("import { x } from './utils.js';")
+
+    adapter = TSJSIndexAdapter(
+        file_path=str(importing_file),
+        content=importing_file.read_text(),
+        repo_path=str(tmp_path),
+        language="typescript",
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path == "src/utils.js"
+
+
+def test_relative_import_unresolvable_returns_none(tmp_path):
+    """Relative import that points to a non-existent file leaves resolved_path as None."""
+    importing_file = tmp_path / "app.ts"
+    importing_file.write_text("import { ghost } from './does-not-exist';")
+
+    adapter = TSJSIndexAdapter(
+        file_path=str(importing_file),
+        content=importing_file.read_text(),
+        repo_path=str(tmp_path),
+        language="typescript",
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path is None
+
+
+def test_parent_directory_relative_import(tmp_path):
+    """Relative import '../shared/helpers' resolves correctly across directory levels."""
+    (tmp_path / "src" / "components").mkdir(parents=True)
+    (tmp_path / "src" / "shared").mkdir(parents=True)
+    (tmp_path / "src" / "shared" / "helpers.ts").write_text("export const help = () => {};")
+    importing_file = tmp_path / "src" / "components" / "Widget.ts"
+    importing_file.write_text("import { help } from '../shared/helpers';")
+
+    adapter = TSJSIndexAdapter(
+        file_path=str(importing_file),
+        content=importing_file.read_text(),
+        repo_path=str(tmp_path),
+        language="typescript",
+    )
+    _, imports = adapter.extract()
+
+    assert len(imports) == 1
+    assert imports[0].resolved_path == "src/shared/helpers.ts"

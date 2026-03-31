@@ -152,6 +152,23 @@ class TSJSIndexAdapter:
                     if child_sym:
                         child_ids.append(child_sym.symbol_id)
 
+        # Build signature including extends clause when present.
+        # tree-sitter-typescript uses `class_heritage` → `extends_clause`
+        # tree-sitter-javascript uses `class_heritage` as well.
+        signature = f"class {name}"
+        heritage = self._find_child_by_type(node, "class_heritage")
+        if heritage is not None:
+            extends_clause = self._find_child_by_type(heritage, "extends_clause")
+            if extends_clause is not None:
+                # The base class identifier immediately follows the `extends` keyword
+                base_node = (
+                    self._find_child_by_type(extends_clause, "type_identifier")
+                    or self._find_child_by_type(extends_clause, "identifier")
+                )
+                if base_node is not None:
+                    base_name = self._node_text(base_node)
+                    signature = f"class {name} extends {base_name}"
+
         sym = Symbol(
             symbol_id=sid,
             lang=self.language,
@@ -160,7 +177,7 @@ class TSJSIndexAdapter:
             qualified_name=f"{self._rel_path}#{name}",
             file_path=self._rel_path,
             range=self._make_range(node),
-            signature=f"class {name}",
+            signature=signature,
             visibility=Visibility.PUBLIC,
             export_status=ExportStatus.EXPORTED if exported else ExportStatus.NOT_EXPORTED,
             children=child_ids,
@@ -222,6 +239,50 @@ class TSJSIndexAdapter:
         )
         self._symbols.append(sym)
 
+    # ── Import path resolution ─────────────────────────────────────────────
+
+    _RESOLVE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx")
+
+    def _resolve_import_path(self, module_path: str) -> Optional[str]:
+        """Resolve a TS/JS import specifier to a repo-relative path.
+
+        Only relative imports (starting with '.' or '..') are resolved.
+        Package imports return None.
+
+        Resolution order for an extensionless specifier:
+          1. <specifier>.ts
+          2. <specifier>.tsx
+          3. <specifier>.js
+          4. <specifier>.jsx
+          5. <specifier>/index.ts
+          6. <specifier>/index.js
+
+        If the specifier already ends with a recognised extension the file is
+        tried directly first, before falling through to the probing sequence.
+        """
+        if not module_path.startswith("."):
+            return None
+
+        importing_dir = os.path.dirname(self.file_path)
+        base_abs = os.path.normpath(os.path.join(importing_dir, module_path))
+
+        # If the specifier already carries an explicit extension, try it first.
+        _, ext = os.path.splitext(base_abs)
+        if ext in self._RESOLVE_EXTENSIONS:
+            candidates = [base_abs]
+        else:
+            candidates = (
+                [base_abs + e for e in self._RESOLVE_EXTENSIONS]
+                + [os.path.join(base_abs, "index.ts"), os.path.join(base_abs, "index.js")]
+            )
+
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                rel = os.path.relpath(candidate, self.repo_path).replace("\\", "/")
+                return rel
+
+        return None
+
     # ── Import handling ────────────────────────────────────────────────────
 
     def _handle_import(self, node) -> None:
@@ -238,6 +299,7 @@ class TSJSIndexAdapter:
             return
 
         line = node.start_point[0] + 1
+        resolved_path = self._resolve_import_path(module_path)
 
         # Find the import_clause
         import_clause = self._find_child_by_type(node, "import_clause")
@@ -248,6 +310,7 @@ class TSJSIndexAdapter:
                 module_path=module_path,
                 imported_names=[],
                 alias=None,
+                resolved_path=resolved_path,
                 line=line,
             ))
             return
@@ -262,6 +325,7 @@ class TSJSIndexAdapter:
                 module_path=module_path,
                 imported_names=["*"],
                 alias=alias,
+                resolved_path=resolved_path,
                 line=line,
             ))
             return
@@ -275,6 +339,7 @@ class TSJSIndexAdapter:
                 module_path=module_path,
                 imported_names=names,
                 alias=None,
+                resolved_path=resolved_path,
                 line=line,
             ))
             return
@@ -291,6 +356,7 @@ class TSJSIndexAdapter:
             module_path=module_path,
             imported_names=[default_name] if default_name else [],
             alias=None,
+            resolved_path=resolved_path,
             line=line,
         ))
 

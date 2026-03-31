@@ -129,6 +129,19 @@ class PythonIndexAdapter:
                 p += f": {ast.unparse(args.vararg.annotation)}"
             parts.append(p)
 
+        # Keyword-only args (after * or *args)
+        if args.kwonlyargs:
+            # If there is no *args but there are kwonlyargs, emit a bare * separator
+            if not args.vararg:
+                parts.append("*")
+            for i, arg in enumerate(args.kwonlyargs):
+                p = arg.arg
+                if arg.annotation:
+                    p += f": {ast.unparse(arg.annotation)}"
+                if i < len(args.kw_defaults) and args.kw_defaults[i] is not None:
+                    p += f" = {ast.unparse(args.kw_defaults[i])}"
+                parts.append(p)
+
         # **kwargs
         if args.kwarg:
             p = f"**{args.kwarg.arg}"
@@ -202,20 +215,61 @@ class PythonIndexAdapter:
         self._symbols.append(sym)
         return sym
 
+    def _resolve_import_path(self, module_path: str, level: int) -> Optional[str]:
+        """Resolve a Python import to a repo-relative file path, or None if external.
+
+        Args:
+            module_path: The dotted module name (e.g. "pkg.utils" or "utils").
+            level: Number of leading dots for relative imports (0 = absolute).
+
+        Returns:
+            A forward-slash repo-relative path (e.g. "src/pkg/utils.py") if the
+            target file exists on disk, otherwise None.
+        """
+        if level > 0:
+            # Relative import: walk up `level` directories from the current file's dir.
+            # level=1 means same package (stay in current dir),
+            # level=2 means parent package (go up one), etc.
+            base_dir = os.path.dirname(self.file_path)
+            for _ in range(level - 1):
+                base_dir = os.path.dirname(base_dir)
+
+            if module_path:
+                candidate_base = os.path.join(base_dir, module_path.replace(".", os.sep))
+            else:
+                # `from . import foo` — no module component; base_dir is the package dir
+                candidate_base = base_dir
+        else:
+            # Absolute import: resolve from repo root
+            if not module_path:
+                return None
+            candidate_base = os.path.join(self.repo_path, module_path.replace(".", os.sep))
+
+        # Try <base>.py first, then <base>/__init__.py (package)
+        for candidate in (candidate_base + ".py", os.path.join(candidate_base, "__init__.py")):
+            if os.path.isfile(candidate):
+                rel = os.path.relpath(candidate, self.repo_path)
+                return rel.replace("\\", "/")
+
+        return None
+
     def _visit_import(self, node: ast.Import):
         for alias in node.names:
+            resolved = self._resolve_import_path(alias.name, level=0)
             self._imports.append(ImportStatement(
                 file_path=self._rel_path,
                 module_path=alias.name,
                 imported_names=[],
                 alias=alias.asname,
+                resolved_path=resolved,
                 line=node.lineno,
             ))
 
     def _visit_import_from(self, node: ast.ImportFrom):
         module = node.module or ""
+        level = node.level or 0
         # Encode relative imports: level dots + module
-        prefix = "." * (node.level or 0)
+        prefix = "." * level
         module_path = prefix + module
 
         names = []
@@ -230,11 +284,14 @@ class PythonIndexAdapter:
         if len(node.names) == 1 and node.names[0].asname:
             alias = node.names[0].asname
 
+        resolved = self._resolve_import_path(module, level=level)
+
         self._imports.append(ImportStatement(
             file_path=self._rel_path,
             module_path=module_path,
             imported_names=names,
             alias=alias,
+            resolved_path=resolved,
             is_reexport=False,
             line=node.lineno,
         ))

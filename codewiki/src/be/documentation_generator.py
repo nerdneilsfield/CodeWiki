@@ -701,6 +701,7 @@ class DocumentationGenerator:
                     repo_path=self.config.repo_path,
                     include_patterns=self.config.include_patterns,
                     exclude_patterns=self.config.exclude_patterns,
+                    output_dir=self.config.docs_dir,
                 )
                 self.index_products = index_builder.build()
             except Exception:
