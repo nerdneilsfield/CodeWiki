@@ -459,3 +459,293 @@ class TestComputeModulePath:
         file_map = {"flat_comp": "flat.py"}  # no directory component
         path = _compute_module_path(cluster, file_map)
         assert path == "modules"
+
+
+# ---------------------------------------------------------------------------
+# Part 5: LLM naming (RED — written before implementation)
+# ---------------------------------------------------------------------------
+
+import json
+
+
+def _make_config_with_cluster_model(model: str = "gpt-4o-mini"):
+    """Return a mock config that has cluster_model set."""
+    cfg = MagicMock()
+    cfg.cluster_model = model
+    return cfg
+
+
+def _make_config_without_cluster_model():
+    """Return a mock config where cluster_model is None."""
+    cfg = MagicMock()
+    cfg.cluster_model = None
+    return cfg
+
+
+_TWO_CLUSTER_SPEC = [
+    ["auth/login.py::Login", "auth/logout.py::Logout"],
+    ["api/handler.py::Handler", "api/router.py::Router"],
+]
+
+_FILE_MAP = {
+    "auth/login.py::Login": "auth/login.py",
+    "auth/logout.py::Logout": "auth/logout.py",
+    "api/handler.py::Handler": "api/handler.py",
+    "api/router.py::Router": "api/router.py",
+}
+
+_VALID_LLM_RESPONSE = json.dumps([
+    {"cluster_idx": 0, "title": "认证模块 (Auth Module)", "description": "Handles auth"},
+    {"cluster_idx": 1, "title": "接口模块 (API Module)", "description": "API routes"},
+])
+
+
+class TestLLMNamingHappyPath:
+    """mock call_llm returns valid JSON → titles from LLM are used."""
+
+    def test_llm_naming_happy_path(self):
+        from codewiki.src.be.clustering.naming import name_clusters
+
+        config = _make_config_with_cluster_model()
+        with patch(
+            "codewiki.src.be.clustering.naming.call_llm",
+            return_value=_VALID_LLM_RESPONSE,
+        ):
+            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
+
+        assert len(result) == 2
+        assert result[0]["title"] == "认证模块 (Auth Module)"
+        assert result[1]["title"] == "接口模块 (API Module)"
+        assert result[0]["cluster_idx"] == 0
+        assert result[1]["cluster_idx"] == 1
+
+
+class TestLLMNamingFallbackOnInvalidJson:
+    """mock returns garbage → heuristic titles used."""
+
+    def test_llm_naming_fallback_on_invalid_json(self):
+        from codewiki.src.be.clustering.naming import name_clusters
+
+        config = _make_config_with_cluster_model()
+        with patch(
+            "codewiki.src.be.clustering.naming.call_llm",
+            return_value="this is not json at all %%%",
+        ):
+            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
+
+        # Should fall back to heuristic — still returns 2 entries
+        assert len(result) == 2
+        for entry in result:
+            assert "cluster_idx" in entry
+            assert "title" in entry
+            assert "description" in entry
+        # Heuristic titles should NOT be the LLM titles
+        titles = {r["title"] for r in result}
+        assert "认证模块 (Auth Module)" not in titles
+        assert "接口模块 (API Module)" not in titles
+
+
+class TestLLMNamingFallbackOnException:
+    """mock raises → heuristic titles used."""
+
+    def test_llm_naming_fallback_on_exception(self):
+        from codewiki.src.be.clustering.naming import name_clusters
+
+        config = _make_config_with_cluster_model()
+        with patch(
+            "codewiki.src.be.clustering.naming.call_llm",
+            side_effect=RuntimeError("LLM call failed"),
+        ):
+            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
+
+        assert len(result) == 2
+        for entry in result:
+            assert isinstance(entry["title"], str) and len(entry["title"]) > 0
+
+
+class TestLLMNamingFallbackOnWrongCount:
+    """mock returns fewer items than clusters → heuristic used."""
+
+    def test_llm_naming_fallback_on_wrong_count(self):
+        from codewiki.src.be.clustering.naming import name_clusters
+
+        short_response = json.dumps([
+            {"cluster_idx": 0, "title": "Only One", "description": "Just one"},
+        ])
+        config = _make_config_with_cluster_model()
+        with patch(
+            "codewiki.src.be.clustering.naming.call_llm",
+            return_value=short_response,
+        ):
+            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
+
+        # Must still return 2 entries via heuristic fallback
+        assert len(result) == 2
+        titles = {r["title"] for r in result}
+        assert "Only One" not in titles
+
+
+class TestLLMNamingSkippedWithoutConfig:
+    """config=None → heuristic only, call_llm not called."""
+
+    def test_llm_naming_skipped_without_config(self):
+        from codewiki.src.be.clustering.naming import name_clusters
+
+        with patch(
+            "codewiki.src.be.clustering.naming.call_llm"
+        ) as mock_llm:
+            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config=None)
+
+        mock_llm.assert_not_called()
+        assert len(result) == 2
+
+
+class TestLLMNamingSkippedWithoutClusterModel:
+    """config with cluster_model=None → heuristic only."""
+
+    def test_llm_naming_skipped_without_cluster_model(self):
+        from codewiki.src.be.clustering.naming import name_clusters
+
+        config = _make_config_without_cluster_model()
+        with patch(
+            "codewiki.src.be.clustering.naming.call_llm"
+        ) as mock_llm:
+            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
+
+        mock_llm.assert_not_called()
+        assert len(result) == 2
+
+
+class TestNamingPromptConstraints:
+    """Verify prompt builder produces correct content."""
+
+    def test_naming_prompt_contains_constraints(self):
+        from codewiki.src.be.clustering.naming import _build_naming_prompt
+
+        prompt = _build_naming_prompt(_TWO_CLUSTER_SPEC, _FILE_MAP)
+        assert "Do NOT" in prompt, "Prompt must contain 'Do NOT' constraint"
+
+    def test_naming_prompt_contains_cluster_members(self):
+        from codewiki.src.be.clustering.naming import _build_naming_prompt
+
+        prompt = _build_naming_prompt(_TWO_CLUSTER_SPEC, _FILE_MAP)
+        # Each component ID should appear in the prompt
+        for cid in ["auth/login.py::Login", "api/handler.py::Handler"]:
+            assert cid in prompt, f"Prompt must list component '{cid}'"
+
+    def test_naming_prompt_requests_json(self):
+        from codewiki.src.be.clustering.naming import _build_naming_prompt
+
+        prompt = _build_naming_prompt(_TWO_CLUSTER_SPEC, _FILE_MAP)
+        prompt_lower = prompt.lower()
+        assert "json" in prompt_lower, "Prompt must request JSON output"
+
+
+class TestHeuristicStillWorks:
+    """Direct call to heuristic_cluster_name still returns valid tuple."""
+
+    def test_heuristic_still_works(self):
+        from codewiki.src.be.clustering.naming import heuristic_cluster_name
+
+        cluster = ["auth/login.py::Login", "auth/logout.py::Logout"]
+        file_map = {
+            "auth/login.py::Login": "auth/login.py",
+            "auth/logout.py::Logout": "auth/logout.py",
+        }
+        result = heuristic_cluster_name(cluster, file_map)
+
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        title, description = result
+        assert isinstance(title, str) and len(title) > 0
+        assert isinstance(description, str) and len(description) > 0
+        assert "auth" in title.lower() or "Auth" in title
+
+
+# ---------------------------------------------------------------------------
+# Part 6: Naming freeze
+# ---------------------------------------------------------------------------
+
+from codewiki.src.be.clustering.pipeline import _apply_naming_freeze
+from codewiki.src.be.clustering.models import module_id_from_members
+
+
+class TestNamingFreezeReusesOldTitle:
+    """When module_id matches previous tree, old title is reused."""
+
+    def test_freeze_replaces_title(self):
+        clusters = [["comp_a", "comp_b"]]
+        mid = module_id_from_members(["comp_a", "comp_b"])
+        names = [{"cluster_idx": 0, "title": "New Title", "description": "New desc"}]
+        previous_tree = {
+            "Old Title": {
+                "path": "old/path",
+                "components": ["comp_a", "comp_b"],
+                "children": {},
+            }
+        }
+        result = _apply_naming_freeze(clusters, names, previous_tree)
+        assert result[0]["title"] == "Old Title"
+
+    def test_freeze_keeps_new_title_when_no_match(self):
+        clusters = [["comp_c", "comp_d"]]
+        names = [{"cluster_idx": 0, "title": "New Title", "description": "desc"}]
+        previous_tree = {
+            "Old Title": {
+                "path": "old/path",
+                "components": ["comp_a", "comp_b"],
+                "children": {},
+            }
+        }
+        result = _apply_naming_freeze(clusters, names, previous_tree)
+        assert result[0]["title"] == "New Title"
+
+    def test_freeze_with_empty_previous_tree(self):
+        clusters = [["comp_a"]]
+        names = [{"cluster_idx": 0, "title": "New", "description": ""}]
+        result = _apply_naming_freeze(clusters, names, {})
+        assert result[0]["title"] == "New"
+
+    def test_freeze_with_none_previous_tree(self):
+        clusters = [["comp_a"]]
+        names = [{"cluster_idx": 0, "title": "New", "description": ""}]
+        result = _apply_naming_freeze(clusters, names, None)
+        assert result[0]["title"] == "New"
+
+    def test_freeze_partial_match(self):
+        """Two clusters: one matches previous tree, one doesn't."""
+        clusters = [["comp_a", "comp_b"], ["comp_c", "comp_d"]]
+        names = [
+            {"cluster_idx": 0, "title": "New A", "description": ""},
+            {"cluster_idx": 1, "title": "New C", "description": ""},
+        ]
+        previous_tree = {
+            "Frozen A": {
+                "path": "path/a",
+                "components": ["comp_a", "comp_b"],
+                "children": {},
+            }
+        }
+        result = _apply_naming_freeze(clusters, names, previous_tree)
+        assert result[0]["title"] == "Frozen A"  # frozen
+        assert result[1]["title"] == "New C"      # not frozen
+
+    def test_freeze_matches_nested_children(self):
+        """Previous tree with nested children: freeze still works."""
+        clusters = [["comp_x", "comp_y"]]
+        names = [{"cluster_idx": 0, "title": "New", "description": ""}]
+        previous_tree = {
+            "Parent": {
+                "path": "parent",
+                "components": [],
+                "children": {
+                    "Child Frozen": {
+                        "path": "parent/child",
+                        "components": ["comp_x", "comp_y"],
+                        "children": {},
+                    }
+                },
+            }
+        }
+        result = _apply_naming_freeze(clusters, names, previous_tree)
+        assert result[0]["title"] == "Child Frozen"

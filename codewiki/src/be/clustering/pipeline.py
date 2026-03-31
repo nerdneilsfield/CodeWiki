@@ -75,13 +75,16 @@ def cluster_modules_v2(
         return {}
 
     # Name clusters
-    names = name_clusters(clusters, component_file_map, config)
+    names = name_clusters(clusters, component_file_map, config, components)
+
+    # Naming freeze: if module_id matches previous tree, reuse old title/path/description
+    frozen_names = _apply_naming_freeze(clusters, names, current_module_tree)
 
     # Build ModuleNode tree
     children: list[ModuleNode] = []
     used_paths: set[str] = set()
 
-    for cluster, naming in zip(clusters, names):
+    for cluster, naming in zip(clusters, frozen_names):
         mid = module_id_from_members(cluster)
         title = naming["title"]
         path = _compute_module_path(cluster, component_file_map)
@@ -179,7 +182,83 @@ def cluster_modules_v2(
     # We want the children level so that the output matches the v1 shape:
     # {module_title: {path, components, children}}.
     root_entry = legacy.get("Repository", {})
-    return root_entry.get("children", {})
+    result = root_entry.get("children", {})
+
+    # Log stability metrics if a previous tree is available (non-blocking).
+    if current_module_tree:
+        try:
+            from codewiki.src.be.clustering.stability import measure_tree_stability
+            report = measure_tree_stability(current_module_tree, result)
+            logger.info(f"Clustering stability: {report.summary()}")
+        except Exception:
+            pass
+
+    return result
+
+
+def _apply_naming_freeze(
+    clusters: list[list[str]],
+    names: list[dict],
+    previous_tree: dict | None,
+) -> list[dict]:
+    """Apply naming freeze: reuse old title/path/description when module_id matches.
+
+    If a cluster's module_id (computed from sorted members) appears in the
+    previous tree, its naming is replaced with the previous values. This
+    prevents unnecessary title/path churn when members haven't changed.
+
+    Args:
+        clusters: current cluster member lists
+        names: current naming results (from LLM or heuristic)
+        previous_tree: v1 legacy format from last run, or None/empty
+
+    Returns:
+        New names list with frozen entries where applicable.
+    """
+    if not previous_tree:
+        return names
+
+    # Build module_id → {title, path, description} from previous tree
+    prev_by_id: dict[str, dict] = {}
+    _index_previous_tree(previous_tree, prev_by_id)
+
+    result = []
+    frozen_count = 0
+    for cluster, naming in zip(clusters, names):
+        mid = module_id_from_members(cluster)
+        if mid in prev_by_id:
+            prev = prev_by_id[mid]
+            result.append({
+                "cluster_idx": naming.get("cluster_idx", 0),
+                "title": prev["title"],
+                "description": prev.get("description", naming.get("description", "")),
+            })
+            frozen_count += 1
+        else:
+            result.append(naming)
+
+    if frozen_count:
+        logger.info(f"Naming freeze: reused {frozen_count}/{len(clusters)} module names from previous tree")
+
+    return result
+
+
+def _index_previous_tree(tree: dict, index: dict) -> None:
+    """Walk previous v1 tree, compute module_id for each module, store naming."""
+    for title, info in tree.items():
+        if not isinstance(info, dict):
+            continue
+        components = info.get("components", [])
+        if components:
+            mid = module_id_from_members(components)
+            index[mid] = {
+                "title": title,
+                "path": info.get("path", ""),
+                "description": "",  # v1 format doesn't store description
+            }
+        children = info.get("children", {})
+        if children and isinstance(children, dict):
+            _index_previous_tree(children, index)
 
 
 def _compute_module_path(
