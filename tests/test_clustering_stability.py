@@ -64,7 +64,7 @@ TREE_C = {
 def test_identical_trees():
     report = measure_tree_stability(TREE_A, TREE_B)
 
-    assert report.member_jaccard == pytest.approx(1.0)
+    assert report.common_module_jaccard == pytest.approx(1.0)
     assert report.path_stability == pytest.approx(1.0)
     assert report.module_id_consistency == pytest.approx(1.0)
     assert report.total_modules_a == 2
@@ -82,7 +82,7 @@ def test_completely_different_trees():
 
     assert report.module_id_consistency == pytest.approx(0.0)
     # No common modules → jaccard and path_stability are vacuously 1.0
-    assert report.member_jaccard == pytest.approx(1.0)
+    assert report.common_module_jaccard == pytest.approx(1.0)
     assert report.path_stability == pytest.approx(1.0)
     assert report.is_stable is False  # id_consistency < 0.9
 
@@ -109,7 +109,7 @@ def test_same_modules_different_paths():
     }
     report = measure_tree_stability(tree_x, tree_y)
 
-    assert report.member_jaccard == pytest.approx(1.0)
+    assert report.common_module_jaccard == pytest.approx(1.0)
     assert report.path_stability == pytest.approx(0.0)
     assert report.module_id_consistency == pytest.approx(1.0)
     assert report.is_stable is False  # path_stability < 0.9
@@ -158,7 +158,7 @@ def test_partial_overlap():
 # ---------------------------------------------------------------------------
 
 
-def test_member_jaccard_partial():
+def test_common_module_jaccard_partial():
     # Synthetic IDs come from sorted members, so we need matching keys.
     # Use same component list for one module to ensure it matches.
     tree_x = {
@@ -200,7 +200,7 @@ def test_member_jaccard_partial():
         },
     }
     report2 = measure_tree_stability(tree_p, tree_q)
-    assert report2.member_jaccard == pytest.approx(1.0)
+    assert report2.common_module_jaccard == pytest.approx(1.0)
 
     # For a true partial-jaccard test, we need trees whose synthetic IDs
     # collide deliberately.  The only way is to have the exact same components
@@ -215,7 +215,7 @@ def test_member_jaccard_partial():
     }
     report3 = measure_tree_stability(tree_r, tree_s)
     # Different component sets → different synthetic IDs → no common module → jaccard vacuously 1.0
-    assert report3.member_jaccard == pytest.approx(1.0)
+    assert report3.common_module_jaccard == pytest.approx(1.0)
     assert report3.module_id_consistency == pytest.approx(0.0)
 
 
@@ -227,7 +227,7 @@ def test_member_jaccard_partial():
 def test_empty_trees():
     report = measure_tree_stability({}, {})
 
-    assert report.member_jaccard == pytest.approx(1.0)
+    assert report.common_module_jaccard == pytest.approx(1.0)
     assert report.path_stability == pytest.approx(1.0)
     assert report.module_id_consistency == pytest.approx(1.0)
     assert report.total_modules_a == 0
@@ -261,7 +261,8 @@ def test_one_empty_tree():
 
 def test_stability_report_summary():
     report = StabilityReport(
-        member_jaccard=0.875,
+        common_module_jaccard=0.875,
+        module_coverage=0.800,
         path_stability=0.920,
         module_id_consistency=0.750,
         total_modules_a=8,
@@ -270,6 +271,7 @@ def test_stability_report_summary():
     summary = report.summary()
 
     assert "jaccard=0.875" in summary
+    assert "coverage=0.800" in summary
     assert "path=0.920" in summary
     assert "id_consistency=0.750" in summary
     assert summary.startswith("Stability:")
@@ -281,9 +283,10 @@ def test_stability_report_summary():
 
 
 def test_is_stable_threshold():
-    def make_report(j, p, i):
+    def make_report(j, p, i, cov=1.0):
         return StabilityReport(
-            member_jaccard=j,
+            common_module_jaccard=j,
+            module_coverage=cov,
             path_stability=p,
             module_id_consistency=i,
             total_modules_a=1,
@@ -296,6 +299,7 @@ def test_is_stable_threshold():
     assert make_report(0.9, 0.89, 0.9).is_stable is False  # path too low
     assert make_report(0.9, 0.9, 0.89).is_stable is False  # id_consistency too low
     assert make_report(0.0, 0.0, 0.0).is_stable is False
+    assert make_report(0.9, 0.9, 0.9, cov=0.89).is_stable is False  # coverage too low
 
 
 # ---------------------------------------------------------------------------

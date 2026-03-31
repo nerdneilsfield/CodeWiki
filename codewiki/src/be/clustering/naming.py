@@ -102,6 +102,10 @@ def _name_clusters_with_llm(
     Validates that the response is a list with the correct number of items
     and correct cluster_idx values.
     """
+    if call_llm is None:
+        logger.debug("call_llm not available; skipping LLM naming")
+        return None
+
     import json_repair
 
     prompt = _build_naming_prompt(clusters, component_file_map, components)

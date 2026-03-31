@@ -38,12 +38,12 @@ class EdgeIndex:
 
         Optionally filter by edge_type.
         """
-        seen: set[int] = set()
+        seen: set[tuple[str, str, str]] = set()
         result: list[SymbolEdge] = []
         for e in self.callees_of(symbol_id) + self.callers_of(symbol_id):
-            eid = id(e)
-            if eid not in seen:
-                seen.add(eid)
+            key = (e.from_symbol, e.to_symbol or "", e.edge_type.value)
+            if key not in seen:
+                seen.add(key)
                 if edge_type is None or e.edge_type == edge_type:
                     result.append(e)
         return result

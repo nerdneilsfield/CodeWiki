@@ -10,15 +10,17 @@ from dataclasses import dataclass
 class StabilityReport:
     """Comparison metrics between two module trees."""
 
-    member_jaccard: float        # Average Jaccard similarity of module members (0.0-1.0)
-    path_stability: float        # Fraction of modules with identical paths (0.0-1.0)
-    module_id_consistency: float  # Fraction of module_ids present in both trees (0.0-1.0)
+    common_module_jaccard: float  # Average Jaccard similarity of common modules' members (0.0-1.0)
+    module_coverage: float        # Fraction of total modules that are matched: len(common) / len(all) (0.0-1.0)
+    path_stability: float         # Fraction of modules with identical paths (0.0-1.0)
+    module_id_consistency: float   # Fraction of module_ids present in both trees (0.0-1.0)
     total_modules_a: int
     total_modules_b: int
 
     def summary(self) -> str:
         return (
-            f"Stability: jaccard={self.member_jaccard:.3f}, "
+            f"Stability: jaccard={self.common_module_jaccard:.3f}, "
+            f"coverage={self.module_coverage:.3f}, "
             f"path={self.path_stability:.3f}, "
             f"id_consistency={self.module_id_consistency:.3f}"
         )
@@ -27,7 +29,8 @@ class StabilityReport:
     def is_stable(self) -> bool:
         """Consider stable if all metrics >= 0.9."""
         return (
-            self.member_jaccard >= 0.9
+            self.common_module_jaccard >= 0.9
+            and self.module_coverage >= 0.9
             and self.path_stability >= 0.9
             and self.module_id_consistency >= 0.9
         )
@@ -75,8 +78,12 @@ def measure_tree_stability(tree_a: dict, tree_b: dict) -> StabilityReport:
             jaccard_count += 1
     member_jaccard = jaccard_sum / jaccard_count if jaccard_count > 0 else 1.0
 
+    # 4. Module coverage: what fraction of total modules are matched?
+    module_coverage = len(common_ids) / len(all_ids) if all_ids else 1.0
+
     return StabilityReport(
-        member_jaccard=member_jaccard,
+        common_module_jaccard=member_jaccard,
+        module_coverage=module_coverage,
         path_stability=path_stability,
         module_id_consistency=id_consistency,
         total_modules_a=len(modules_a),

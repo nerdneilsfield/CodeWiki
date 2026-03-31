@@ -546,10 +546,10 @@ class TestRealAnalyzerComponentIds:
         assert not g.has_edge(comp_class, comp_other)
 
     def test_method_component_name_extraction(self):
-        """Verify _extract_component_name handles method-level dot-separated IDs."""
-        from codewiki.src.be.clustering.graph_builder import _extract_component_name
+        """Verify extract_component_name handles method-level dot-separated IDs."""
+        from codewiki.src.be.clustering.graph_builder import extract_component_name
         # Last segment for dot-separated
-        assert _extract_component_name("module.path.ClassName.method_name") == "method_name"
-        assert _extract_component_name("module.path.ClassName") == "ClassName"
+        assert extract_component_name("module.path.ClassName.method_name") == "method_name"
+        assert extract_component_name("module.path.ClassName") == "ClassName"
         # Test fixture format
-        assert _extract_component_name("src/a.py::Foo") == "Foo"
+        assert extract_component_name("src/a.py::Foo") == "Foo"

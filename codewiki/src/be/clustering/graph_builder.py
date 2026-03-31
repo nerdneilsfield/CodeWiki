@@ -90,7 +90,7 @@ def build_clustering_graph(
         file_path = component_file_map.get(cid, "")
         if file_path:
             file_to_components[file_path].append(cid)
-            comp_name = _extract_component_name(cid)
+            comp_name = extract_component_name(cid)
             if comp_name:
                 comp_by_file_name[(file_path, comp_name)] = cid
 
@@ -193,7 +193,7 @@ def _extract_name_from_symbol(symbol_id: str) -> str:
     return name_part.split(".")[0] if name_part else ""
 
 
-def _extract_component_name(component_id: str) -> str:
+def extract_component_name(component_id: str) -> str:
     """Extract the component name from a component_id.
 
     Handles both real analyzer format and test fixture format:

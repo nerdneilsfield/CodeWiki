@@ -13,11 +13,13 @@ class SymbolTable:
         self._by_id: dict[str, Symbol] = {}
         self._by_file: dict[str, list[Symbol]] = defaultdict(list)
         self._by_qname: dict[str, Symbol] = {}
+        self._by_name: dict[str, list[Symbol]] = defaultdict(list)
 
         for s in symbols:
             self._by_id[s.symbol_id] = s
             self._by_file[s.file_path].append(s)
             self._by_qname[s.qualified_name] = s
+            self._by_name[s.name].append(s)
 
     def get(self, symbol_id: str) -> Optional[Symbol]:
         return self._by_id.get(symbol_id)
@@ -33,6 +35,10 @@ class SymbolTable:
         if not parent:
             return []
         return [self._by_id[cid] for cid in parent.children if cid in self._by_id]
+
+    def by_name(self, name: str) -> list[Symbol]:
+        """O(1) exact name lookup."""
+        return list(self._by_name.get(name, []))
 
     def public_api(self) -> list[Symbol]:
         return [s for s in self._by_id.values() if s.export_status == ExportStatus.EXPORTED]

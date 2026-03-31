@@ -86,11 +86,13 @@ class TestBuildGlossary:
 
         assert result == {}
 
-    def test_build_glossary_no_exported_symbols(self):
-        """Symbols with UNKNOWN export_status are excluded from glossary."""
+    def test_build_glossary_private_only_excluded(self):
+        """Symbols with Visibility.PRIVATE are excluded from glossary."""
         from codewiki.src.be.generation.glossary import build_glossary
 
-        sym = _make_symbol("Hidden", export_status=ExportStatus.UNKNOWN, docstring="Secret.")
+        sym = _make_symbol("Hidden", export_status=ExportStatus.EXPORTED, docstring="Secret.")
+        # Override visibility to PRIVATE
+        sym = sym.model_copy(update={"visibility": Visibility.PRIVATE})
         index_products = _FakeIndexProducts([sym])
 
         result = build_glossary(index_products)

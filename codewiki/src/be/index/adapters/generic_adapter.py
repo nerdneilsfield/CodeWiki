@@ -53,7 +53,7 @@ class GenericIndexAdapter:
                 return sym
             # 2. Fuzzy: search by simple name, restrict to callable kinds.
             short = qname.split(".")[-1]
-            candidates = symbol_table.search(short)
+            candidates = symbol_table.by_name(short)
             for c in candidates:
                 if c.kind in _CALLABLE_KINDS and c.name == short:
                     return c

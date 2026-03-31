@@ -2,15 +2,22 @@
 
 Aligned with v3.md section 3.4 L193-195.
 """
+import re
 from typing import Any
+
+from codewiki.src.be.index.models import Visibility, ExportStatus
 
 
 def build_glossary(
     index_products: Any | None,
 ) -> dict[str, str]:
-    """Build global glossary from public API symbols.
+    """Build global glossary from public/unknown-visibility symbols.
 
-    Terms: exported class/function names
+    Includes symbols with Visibility PUBLIC or UNKNOWN and ExportStatus
+    EXPORTED or UNKNOWN.  This ensures Python repos (which typically have
+    ExportStatus.UNKNOWN and Visibility.UNKNOWN) still produce glossary entries.
+
+    Terms: class/function names
     Definitions: first sentence of docstring + kind + file location
 
     Returns: {term: definition} sorted by term.
@@ -19,13 +26,23 @@ def build_glossary(
     if not index_products or not hasattr(index_products, "symbol_table"):
         return {}
 
+    _INCLUDED_VISIBILITY = {Visibility.PUBLIC, Visibility.UNKNOWN}
+    _INCLUDED_EXPORT = {ExportStatus.EXPORTED, ExportStatus.UNKNOWN}
+
     glossary: dict[str, str] = {}
-    for sym in index_products.symbol_table.public_api():
-        # First sentence of docstring
+    for sym in index_products.symbol_table.all_symbols():
+        if sym.visibility not in _INCLUDED_VISIBILITY:
+            continue
+        if sym.export_status not in _INCLUDED_EXPORT:
+            continue
+
+        # First sentence of docstring — use regex to avoid splitting on "e.g." or "i.e."
         doc_summary = ""
         if sym.docstring:
-            first_sentence = sym.docstring.strip().split(".")[0]
-            doc_summary = first_sentence.strip() + "."
+            first_sentence = re.split(r'(?<=[.!?])\s+', sym.docstring.strip())[0]
+            doc_summary = first_sentence.strip()
+            if not doc_summary.endswith((".", "!", "?")):
+                doc_summary += "."
 
         definition = f"{doc_summary} ({sym.kind.value}, {sym.file_path})".strip()
         glossary[sym.name] = definition

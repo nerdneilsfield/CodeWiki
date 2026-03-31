@@ -316,7 +316,7 @@ class IndexBuilder:
                 # Try same-file lookup first, then cross-file search
                 to_sym = name_index.get((sym.file_path, base_name))
                 if not to_sym:
-                    candidates = symbol_table.search(base_name)
+                    candidates = symbol_table.by_name(base_name)
                     to_sym = next(
                         (c for c in candidates if c.kind == SymbolKind.CLASS and c.name == base_name),
                         None,

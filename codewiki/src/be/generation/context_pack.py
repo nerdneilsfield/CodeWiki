@@ -3,7 +3,10 @@
 Aligned with v3.md section 6.4 RETRIEVE_CONTEXT pseudocode.
 All filtering is component-level precise (not file-level).
 """
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def build_context_pack(
@@ -76,17 +79,28 @@ def _build_module_symbol_ids(module_components, components, index_products) -> s
     symbol_table = getattr(index_products, 'symbol_table', None)
 
     if symbol_table:
-        from codewiki.src.be.clustering.graph_builder import _extract_component_name
+        from codewiki.src.be.clustering.graph_builder import extract_component_name
         symbol_ids: set[str] = set()
         for cid in module_components:
             node = components.get(cid)
             if not node:
                 continue
             file_path = getattr(node, 'relative_path', '').replace('\\', '/')
-            comp_name = _extract_component_name(cid)
+            comp_name = extract_component_name(cid)
             for sym in symbol_table.by_file(file_path):
-                if sym.name == comp_name or not comp_name:
+                if sym.name == comp_name:
                     symbol_ids.add(sym.symbol_id)
+                elif not comp_name:
+                    # Only include if this is the sole symbol in the file (unambiguous)
+                    file_syms = symbol_table.by_file(file_path)
+                    if len(file_syms) == 1:
+                        symbol_ids.add(sym.symbol_id)
+                    else:
+                        logger.warning(
+                            "Skipping ambiguous symbol %s: comp_name is empty "
+                            "but file %s has %d symbols",
+                            sym.symbol_id, file_path, len(file_syms),
+                        )
         return symbol_ids
 
     # Fallback: match cards by file path (less precise but works with mock)
