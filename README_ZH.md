@@ -28,27 +28,46 @@ pip install git+https://github.com/nerdneilsfield/CodeWiki.git
 
 ### 配置
 
-```bash
-# 设置 LLM API 凭证
-codewiki config set --api-key YOUR_KEY --base-url https://api.anthropic.com/v1
+创建一个 TOML 配置文件并填入 provider 凭证：
 
-# 设置模型
-codewiki config set --main-model claude-sonnet-4
+```bash
+codewiki config init          # 在当前目录生成 config.toml
+$EDITOR config.toml           # 填写 API key 环境变量和模型名
 ```
 
-API 密钥存储在系统钥匙链中（macOS Keychain、Windows 凭据管理器、Linux Secret Service）。
+生成的文件（单 provider 最小示例）：
+
+```toml
+[generation]
+main_model    = "openai/gpt-4o-mini"
+cluster_model = "openai/gpt-4o-mini"
+
+[[providers]]
+name      = "openai"
+type      = "openai_compatible"
+base_url  = "https://api.openai.com/v1"
+api_keys  = ["env:OPENAI_API_KEY"]
+model_list = ["gpt-4o-mini"]
+```
+
+导出对应环境变量后校验配置：
+
+```bash
+export OPENAI_API_KEY=sk-...
+codewiki config validate --config config.toml
+```
 
 ### 生成文档
 
 ```bash
 # 为本地仓库生成文档
-codewiki generate /path/to/your/repo
+codewiki generate /path/to/your/repo --config config.toml
 
 # 生成中文文档
-codewiki generate /path/to/repo --language zh
+codewiki generate /path/to/repo --config config.toml --language zh
 
 # 生成带 GitHub Pages 查看器的文档
-codewiki generate /path/to/repo --github-pages
+codewiki generate /path/to/repo --config config.toml --github-pages
 ```
 
 <details>
@@ -249,41 +268,78 @@ Web 界面地址：`http://localhost:8000`。
 <details>
 <summary><strong>全部配置选项</strong></summary>
 
-```bash
-# 模型
-codewiki config set --main-model claude-sonnet-4
-codewiki config set --cluster-model glm-4p5
-codewiki config set --long-context-model claude-sonnet-4
-codewiki config set --long-context-threshold 200000
+CodeWiki 通过一个 TOML 文件集中管理所有配置。运行 `codewiki config init` 获取带注释的模板文件，然后按需编辑。
 
-# Token 限制
-codewiki config set --max-tokens 32768
-codewiki config set --max-token-per-module 36369
-codewiki config set --max-token-per-leaf-module 16000
+```toml
+[runtime]
+output_dir         = "docs"       # Markdown 输出目录
+max_depth          = 2            # 模块树深度
+max_concurrent     = 3            # 并行 LLM worker 数
+max_retries        = 2            # 遗漏模块的补填轮数
+output_language    = "zh"         # "en" | "zh" | "ja" | …
+postprocess_strict = false        # 是否在 lint 问题无法修复时阻断构建
 
-# 并发
-codewiki config set --max-concurrent 3
-codewiki config set --max-retries 2
-codewiki config set --max-depth 2
+[tokens]
+max_tokens                = 32768
+max_token_per_module      = 36369
+max_token_per_leaf_module = 16000
+long_context_threshold    = 200000
 
-# 语言
-codewiki config set --language zh
+[generation]
+# 所有模型字段使用 "provider名/模型名" 格式
+main_model      = "openai/gpt-4o-mini"
+cluster_model   = "openai/gpt-4o-mini"
+fallback_models = ["openai/gpt-4o-mini"]
+# long_context_model = "openai/gpt-4o"   # 可选
 
-# Agent 指令
-codewiki config agent --include "src/**/*.py" --exclude "tests/**"
-codewiki config agent --focus "core,api"
-codewiki config agent --doc-type architecture
+[agent]
+# doc_type            = "architecture"   # api | architecture | user-guide | developer
+# focus_modules       = ["src/core"]
+# custom_instructions = ""
 
-# 查看当前配置
-codewiki config show
+# ── Providers ────────────────────────────────────────────────────────────────
+# api_keys 使用 env: 引用 —— 变量在生成时读取，不写入配置文件
+[[providers]]
+name       = "openai"
+type       = "openai_compatible"
+base_url   = "https://api.openai.com/v1"
+api_keys   = ["env:OPENAI_API_KEY"]
+model_list = ["gpt-4o-mini", "gpt-4o"]
 
-# 校验配置
-codewiki config validate
+# 多 provider 可以共存；模型通过 provider 名引用
+# [[providers]]
+# name              = "claude"
+# type              = "claude"
+# api_keys          = ["env:ANTHROPIC_API_KEY"]
+# anthropic_version = "2024-02-15"
+# model_list        = ["claude-sonnet-4-5-20250929"]
 ```
 
-**后处理选项：**
+**配置相关命令：**
 
-在配置中设置 `postprocess_strict: true` 可在 Mermaid/Math/Link 问题无法修复时阻断构建。
+```bash
+codewiki config init                                       # 生成 config.toml 模板
+codewiki config validate --config config.toml             # 结构校验
+codewiki config validate --config config.toml --check-secrets  # 同时验证 env 变量是否已设置
+codewiki config show     --config config.toml             # 显示已解析的配置
+```
+
+**传递配置到 generate：**
+
+```bash
+# 显式指定路径（推荐）
+codewiki generate /path/to/repo --config config.toml
+
+# 通过环境变量指定（适用于 Docker / CI）
+export CODEWIKI_CONFIG=/path/to/config.toml
+codewiki generate /path/to/repo
+```
+
+**旧版路径（已废弃）：**
+
+`codewiki config set` 和 `codewiki config agent` 仍然可用，写入
+`~/.codewiki/config.json + 系统钥匙链`，将在后续版本移除。
+迁移方式：运行 `codewiki config init` 后将原有设置复制进 TOML 文件。
 
 </details>
 
@@ -318,7 +374,7 @@ pip install -e ".[dev]"
 # 运行测试（536 个测试用例）
 python -m pytest tests/ -q
 
-# 只跑 v3 新增模块的测试
+# v3 专项测试：index / clustering / generation / postprocess
 python -m pytest tests/test_index_*.py tests/test_clustering_*.py \
     tests/test_generation_*.py tests/test_postprocess_*.py -q
 ```
@@ -327,7 +383,7 @@ python -m pytest tests/test_index_*.py tests/test_clustering_*.py \
 
 ## 性能
 
-下表为 30 个仓库的评测结果，涵盖 6 种编程语言，代码规模最大达 1.4M 行：
+测试集：30 个仓库，语言覆盖 Python / JS / TS / C# / Java / C / C++，单仓最大代码量 1.4M 行：
 
 | 类别 | CodeWiki | DeepWiki |
 |------|----------|----------|

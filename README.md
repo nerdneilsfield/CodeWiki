@@ -28,27 +28,46 @@ Requires Python 3.12+ and Node.js 14+ (for Mermaid validation).
 
 ### Configure
 
-```bash
-# Set your LLM API credentials
-codewiki config set --api-key YOUR_KEY --base-url https://api.anthropic.com/v1
+Create a TOML config file and fill in your provider credentials:
 
-# Set the model
-codewiki config set --main-model claude-sonnet-4
+```bash
+codewiki config init          # writes config.toml in the current directory
+$EDITOR config.toml           # set your API key env vars and models
 ```
 
-API keys are stored in your system keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+The generated file looks like this (minimal single-provider example):
+
+```toml
+[generation]
+main_model    = "openai/gpt-4o-mini"
+cluster_model = "openai/gpt-4o-mini"
+
+[[providers]]
+name      = "openai"
+type      = "openai_compatible"
+base_url  = "https://api.openai.com/v1"
+api_keys  = ["env:OPENAI_API_KEY"]
+model_list = ["gpt-4o-mini"]
+```
+
+Export the referenced env var, then validate:
+
+```bash
+export OPENAI_API_KEY=sk-...
+codewiki config validate --config config.toml
+```
 
 ### Generate
 
 ```bash
 # Generate documentation for a local repository
-codewiki generate /path/to/your/repo
+codewiki generate /path/to/your/repo --config config.toml
 
 # Generate with Chinese output
-codewiki generate /path/to/repo --language zh
+codewiki generate /path/to/repo --config config.toml --language zh
 
 # Generate with GitHub Pages viewer
-codewiki generate /path/to/repo --github-pages
+codewiki generate /path/to/repo --config config.toml --github-pages
 ```
 
 <details>
@@ -249,41 +268,79 @@ Submit a GitHub repository URL through the browser and view generated documentat
 <details>
 <summary><strong>All configuration options</strong></summary>
 
-```bash
-# Models
-codewiki config set --main-model claude-sonnet-4
-codewiki config set --cluster-model glm-4p5
-codewiki config set --long-context-model claude-sonnet-4
-codewiki config set --long-context-threshold 200000
+CodeWiki is configured through a single TOML file.  Run `codewiki config init`
+to get a commented starter file, then edit it.
 
-# Token limits
-codewiki config set --max-tokens 32768
-codewiki config set --max-token-per-module 36369
-codewiki config set --max-token-per-leaf-module 16000
+```toml
+[runtime]
+output_dir         = "docs"       # where generated Markdown goes
+max_depth          = 2            # module-tree depth
+max_concurrent     = 3            # parallel LLM workers
+max_retries        = 2            # fill-pass retries for skipped modules
+output_language    = "en"         # "en" | "zh" | "ja" | …
+postprocess_strict = false        # block build on unfixable lint issues
 
-# Concurrency
-codewiki config set --max-concurrent 3
-codewiki config set --max-retries 2
-codewiki config set --max-depth 2
+[tokens]
+max_tokens                = 32768
+max_token_per_module      = 36369
+max_token_per_leaf_module = 16000
+long_context_threshold    = 200000
 
-# Language
-codewiki config set --language zh
+[generation]
+# All model fields use "provider_name/model_name" format.
+main_model         = "openai/gpt-4o-mini"
+cluster_model      = "openai/gpt-4o-mini"
+fallback_models    = ["openai/gpt-4o-mini"]
+# long_context_model = "openai/gpt-4o"   # optional
 
-# Agent instructions
-codewiki config agent --include "src/**/*.py" --exclude "tests/**"
-codewiki config agent --focus "core,api"
-codewiki config agent --doc-type architecture
+[agent]
+# doc_type            = "architecture"   # api | architecture | user-guide | developer
+# focus_modules       = ["src/core"]
+# custom_instructions = ""
 
-# View current config
-codewiki config show
+# ── Providers ────────────────────────────────────────────────────────────────
+# API keys use env: references — the variable is read at generation time.
+[[providers]]
+name       = "openai"
+type       = "openai_compatible"
+base_url   = "https://api.openai.com/v1"
+api_keys   = ["env:OPENAI_API_KEY"]
+model_list = ["gpt-4o-mini", "gpt-4o"]
 
-# Validate config
-codewiki config validate
+# Multiple providers can coexist; models reference them by name.
+# [[providers]]
+# name              = "claude"
+# type              = "claude"
+# api_keys          = ["env:ANTHROPIC_API_KEY"]
+# anthropic_version = "2024-02-15"
+# model_list        = ["claude-sonnet-4-5-20250929"]
 ```
 
-**Post-processing:**
+**Config commands:**
 
-Set `postprocess_strict: true` in config to block builds when Mermaid/Math/Link issues cannot be fixed.
+```bash
+codewiki config init                          # create starter config.toml
+codewiki config validate --config config.toml             # structural check
+codewiki config validate --config config.toml --check-secrets  # + verify env vars
+codewiki config show     --config config.toml             # display parsed config
+```
+
+**Passing config to generate:**
+
+```bash
+# Explicit path (recommended)
+codewiki generate /path/to/repo --config config.toml
+
+# Via env var (useful in Docker / CI)
+export CODEWIKI_CONFIG=/path/to/config.toml
+codewiki generate /path/to/repo
+```
+
+**Legacy path (deprecated):**
+
+`codewiki config set` and `codewiki config agent` still work and write to
+`~/.codewiki/config.json + system keychain`.  They will be removed in a future
+release.  Migrate by running `codewiki config init` and copying your settings.
 
 </details>
 
@@ -327,7 +384,7 @@ python -m pytest tests/test_index_*.py tests/test_clustering_*.py \
 
 ## Performance
 
-Evaluated on 30 repositories across 6 programming languages (up to 1.4M LOC):
+Evaluated on 30 repositories — 6 languages, up to 1.4M LOC:
 
 | Category | CodeWiki | DeepWiki |
 |----------|----------|----------|
