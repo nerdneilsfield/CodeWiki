@@ -43,8 +43,9 @@ cache_manager = CacheManager(
     cache_expiry_days=WebAppConfig.CACHE_EXPIRY_DAYS
 )
 background_worker = BackgroundWorker(
-    cache_manager=cache_manager, 
-    temp_dir=WebAppConfig.TEMP_DIR
+    cache_manager=cache_manager,
+    temp_dir=WebAppConfig.TEMP_DIR,
+    config_path=WebAppConfig.CONFIG_PATH,
 )
 web_routes = WebRoutes(background_worker=background_worker, cache_manager=cache_manager)
 
@@ -112,12 +113,25 @@ def main():
         action="store_true",
         help="Enable auto-reload for development"
     )
-    
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Path to TOML config file (overrides CODEWIKI_CONFIG env var)"
+    )
+
     args = parser.parse_args()
-    
+
+    # Propagate --config so that worker processes (uvicorn reload) inherit it.
+    if args.config:
+        import os as _os
+        _os.environ["CODEWIKI_CONFIG"] = args.config
+        background_worker.config_path = args.config
+
     # Ensure required directories exist
     WebAppConfig.ensure_directories()
-    
+
     # Start background worker
     background_worker.start()
     

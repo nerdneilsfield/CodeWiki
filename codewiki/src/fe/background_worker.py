@@ -20,7 +20,7 @@ from dataclasses import asdict
 logger = logging.getLogger(__name__)
 
 from codewiki.src.be.documentation_generator import DocumentationGenerator
-from codewiki.src.config import Config, MAIN_MODEL
+from codewiki.src.config_loader import RuntimeOverrides, load_app_config
 from .models import JobStatus
 from .cache_manager import CacheManager
 from .github_processor import GitHubRepoProcessor
@@ -30,9 +30,10 @@ from codewiki.src.utils import file_manager
 class BackgroundWorker:
     """Background worker for processing documentation generation jobs."""
     
-    def __init__(self, cache_manager: CacheManager, temp_dir: str = None):
+    def __init__(self, cache_manager: CacheManager, temp_dir: str = None, config_path: str | None = None):
         self.cache_manager = cache_manager
         self.temp_dir = temp_dir or WebAppConfig.TEMP_DIR
+        self.config_path = config_path
         self.running = False
         self.processing_queue = Queue(maxsize=WebAppConfig.QUEUE_SIZE)
         self.job_status: Dict[str, JobStatus] = {}
@@ -45,7 +46,7 @@ class BackgroundWorker:
             self.running = True
             thread = threading.Thread(target=self._worker_loop, daemon=True)
             thread.start()
-            print("Background worker started")
+            logger.info("Background worker started")
     
     def stop(self):
         """Stop the background worker."""
@@ -95,9 +96,9 @@ class BackgroundWorker:
                         progress=job_data.get('progress', ''),
                         docs_path=job_data.get('docs_path')
                     )
-            print(f"Loaded {len([j for j in self.job_status.values() if j.status == 'completed'])} completed jobs from disk")
+            logger.info("Loaded %d completed jobs from disk", len([j for j in self.job_status.values() if j.status == 'completed']))
         except Exception as e:
-            print(f"Error loading job statuses: {e}")
+            logger.error("Error loading job statuses: %s", e)
     
     def _reconstruct_jobs_from_cache(self):
         """Reconstruct job statuses from cache entries for backward compatibility."""
@@ -125,14 +126,14 @@ class BackgroundWorker:
                         )
                         reconstructed_count += 1
                 except Exception as e:
-                    print(f"Failed to reconstruct job for {cache_entry.repo_url}: {e}")
-            
+                    logger.warning("Failed to reconstruct job for %s: %s", cache_entry.repo_url, e)
+
             if reconstructed_count > 0:
-                print(f"Reconstructed {reconstructed_count} job statuses from cache")
+                logger.info("Reconstructed %d job statuses from cache", reconstructed_count)
                 self.save_job_statuses()
-                
+
         except Exception as e:
-            print(f"Error reconstructing jobs from cache: {e}")
+            logger.error("Error reconstructing jobs from cache: %s", e)
     
     def save_job_statuses(self):
         """Save job statuses to disk."""
@@ -156,7 +157,7 @@ class BackgroundWorker:
             
             file_manager.save_json(data, self.jobs_file)
         except Exception as e:
-            print(f"Error saving job statuses: {e}")
+            logger.error("Error saving job statuses: %s", e)
     
     def _worker_loop(self):
         """Main worker loop."""
@@ -168,9 +169,27 @@ class BackgroundWorker:
                 else:
                     time.sleep(1)
             except Exception as e:
-                print(f"Worker error: {e}")
+                logger.error("Worker error: %s", e)
                 time.sleep(1)
     
+
+    def _load_app_config(self):
+        """Load AppConfig from self.config_path, raising RuntimeError on failure."""
+        if not self.config_path:
+            raise RuntimeError("BackgroundWorker requires config_path for generation")
+        try:
+            return load_app_config(Path(self.config_path))
+        except (FileNotFoundError, ValueError) as exc:
+            raise RuntimeError(f"Failed to load config '{self.config_path}': {exc}") from exc
+
+    def _build_runtime_config(self, temp_repo_dir: str, docs_dir: str, app_config=None):
+        if app_config is None:
+            app_config = self._load_app_config()
+        return app_config.to_runtime_config(
+            repo_path=temp_repo_dir,
+            overrides=RuntimeOverrides(output_dir=docs_dir),
+        )
+
     def _process_job(self, job_id: str):
         """Process a single documentation generation job."""
         if job_id not in self.job_status:
@@ -183,8 +202,11 @@ class BackgroundWorker:
             job.status = 'processing'
             job.started_at = datetime.now()
             job.progress = "Starting repository clone..."
-            job.main_model = MAIN_MODEL
-            
+
+            # Load app config once — used for both model metadata and runtime config.
+            app_config = self._load_app_config()
+            job.main_model = app_config.generation.main_model
+
             # Check cache first
             cached_docs = self.cache_manager.get_cached_docs(job.repo_url, job.commit_id)
             if cached_docs and Path(cached_docs).exists():
@@ -192,13 +214,11 @@ class BackgroundWorker:
                 job.completed_at = datetime.now()
                 job.docs_path = cached_docs
                 job.progress = "Documentation retrieved from cache"
-                if not job.main_model:  # Only set if not already set
-                    job.main_model = MAIN_MODEL
-                
+
                 # Save job status to disk
                 self.save_job_statuses()
-                
-                print(f"Job {job_id}: Using cached documentation")
+
+                logger.info("Job %s: using cached documentation", job_id)
                 return
             
             # Clone repository
@@ -214,12 +234,9 @@ class BackgroundWorker:
             # Generate documentation
             job.progress = "Analyzing repository structure..."
             
-            # Create config for documentation generation (using env vars)
-            import argparse
-            args = argparse.Namespace(repo_path=temp_repo_dir)
-            config = Config.from_args(args)
-            # Override docs_dir with job-specific directory
-            config.docs_dir = os.path.join("output", "docs", f"{job_id}-docs")
+            # Create runtime config for documentation generation from TOML
+            docs_dir = os.path.join("output", "docs", f"{job_id}-docs")
+            config = self._build_runtime_config(temp_repo_dir=temp_repo_dir, docs_dir=docs_dir, app_config=app_config)
             
             job.progress = "Generating documentation..."
             
@@ -247,7 +264,7 @@ class BackgroundWorker:
             # Save job status to disk
             self.save_job_statuses()
             
-            print(f"Job {job_id}: Documentation generated successfully")
+            logger.info("Job %s: documentation generated successfully", job_id)
             
         except Exception as e:
             # Update job status with error
@@ -256,7 +273,7 @@ class BackgroundWorker:
             job.error_message = str(e)
             job.progress = f"Failed: {str(e)}"
             
-            print(f"Job {job_id}: Failed with error: {e}")
+            logger.error("Job %s: failed with error: %s", job_id, e)
         
         finally:
             # Cleanup temporary repository

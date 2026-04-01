@@ -532,10 +532,17 @@ class DocumentationGenerator:
                     queue.task_done()
 
         workers = [asyncio.create_task(_worker(i)) for i in range(max_concurrent)]
-        await queue.join()
-        for w in workers:
-            w.cancel()
-        progress.close()
+        try:
+            await queue.join()
+        finally:
+            for w in workers:
+                w.cancel()
+            # Wait for workers to finish so their closures release the `progress`
+            # reference before we close it.  Without this gather the GC defers
+            # the tqdm __del__ to the next _run_module_queue call (fill pass),
+            # where sys.stderr may already be in a bad state.
+            await asyncio.gather(*workers, return_exceptions=True)
+            progress.close()
 
     async def _fill_missing_module_docs(
         self,
