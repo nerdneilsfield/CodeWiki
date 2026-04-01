@@ -380,7 +380,7 @@ def _build_nav_html(
     return "\n".join(lines)
 
 
-def _build_meta_html(metadata: Optional[Dict[str, Any]]) -> str:
+def _build_meta_html(metadata: Optional[Dict[str, Any]], hide_repo_links: bool = False) -> str:
     if not metadata:
         return ""
     gi = metadata.get("generation_info", {})
@@ -395,20 +395,21 @@ def _build_meta_html(metadata: Optional[Dict[str, Any]]) -> str:
     if st.get("total_components"):
         parts.append(f"<b>Components:</b> {st['total_components']}")
 
-    # External links: repo URL + DeepWiki
+    # External links: repo URL + DeepWiki (suppressed when hide_repo_links=True)
     link_parts = []
-    repo_url = gi.get("repo_url")
-    if repo_url:
-        link_parts.append(
-            f'<a href="{repo_url}" target="_blank" rel="noopener">'
-            f'&#128279; Repository</a>'
-        )
-        if 'github.com' in repo_url:
-            slug = repo_url.split('github.com/')[-1]
+    if not hide_repo_links:
+        repo_url = gi.get("repo_url")
+        if repo_url:
             link_parts.append(
-                f'<a href="https://deepwiki.com/{slug}" target="_blank" rel="noopener">'
-                f'&#127760; DeepWiki</a>'
+                f'<a href="{repo_url}" target="_blank" rel="noopener">'
+                f'&#128279; Repository</a>'
             )
+            if 'github.com' in repo_url:
+                slug = repo_url.split('github.com/')[-1]
+                link_parts.append(
+                    f'<a href="https://deepwiki.com/{slug}" target="_blank" rel="noopener">'
+                    f'&#127760; DeepWiki</a>'
+                )
 
     if not parts and not link_parts:
         return ""
@@ -561,9 +562,14 @@ class StaticHTMLGenerator:
     ``index.html`` (the GitHub Pages root page).
     """
 
-    def generate(self, docs_dir: Path) -> list[str]:
+    def generate(self, docs_dir: Path, hide_repo_links: bool = False) -> list[str]:
         """
         Generate static HTML files in *docs_dir*.
+
+        Args:
+            docs_dir: Directory containing the generated Markdown files.
+            hide_repo_links: When True, omit Repository and DeepWiki links
+                from the sidebar metadata panel.
 
         Returns a list of filenames that were written.
         """
@@ -588,7 +594,7 @@ class StaticHTMLGenerator:
                 logger.warning(f"Could not load metadata.json: {e}")
 
         repo_name = docs_dir.parent.name or "Docs"
-        meta_html = _build_meta_html(metadata)
+        meta_html = _build_meta_html(metadata, hide_repo_links=hide_repo_links)
 
         # Collect all .md files
         md_files = sorted(docs_dir.glob("*.md"))

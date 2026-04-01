@@ -212,6 +212,12 @@ def parse_patterns(patterns_str: str) -> List[str]:
     help="Force full regeneration, ignoring cache",
 )
 @click.option(
+    "--no-repo-links",
+    "hide_repo_links",
+    is_flag=True,
+    help="Omit Repository and DeepWiki links from the generated HTML viewer",
+)
+@click.option(
     "--include",
     "-i",
     type=str,
@@ -326,6 +332,7 @@ def generate_command(
     github_pages: bool,
     generate_static: bool,
     no_cache: bool,
+    hide_repo_links: bool,
     include: Optional[str],
     exclude: Optional[str],
     focus: Optional[str],
@@ -541,6 +548,7 @@ def generate_command(
             generate_html=github_pages,
             generate_static=generate_static,
             no_cache=no_cache,
+            hide_repo_links=hide_repo_links,
         )
         
         # Run generation

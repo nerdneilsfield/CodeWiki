@@ -89,7 +89,8 @@ class HTMLGenerator:
         github_pages_url: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
         docs_dir: Optional[Path] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        hide_repo_links: bool = False,
     ):
         """
         Generate HTML documentation viewer.
@@ -128,9 +129,9 @@ class HTMLGenerator:
         info_content = self._build_info_content(metadata)
         show_info = "block" if info_content else "none"
         
-        # Build repository link
+        # Build repository link (suppressed when hide_repo_links=True)
         repo_link = ""
-        if repository_url:
+        if repository_url and not hide_repo_links:
             repo_link = f'<a href="{repository_url}" class="repo-link" target="_blank">🔗 View Repository</a>'
         
         # Determine docs base path

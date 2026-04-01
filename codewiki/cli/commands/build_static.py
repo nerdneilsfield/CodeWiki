@@ -14,7 +14,13 @@ from pathlib import Path
     type=click.Path(file_okay=False),
     metavar="DOCS_DIR",
 )
-def build_static_command(docs_dir: str):
+@click.option(
+    "--no-repo-links",
+    "hide_repo_links",
+    is_flag=True,
+    help="Omit Repository and DeepWiki links from the generated HTML",
+)
+def build_static_command(docs_dir: str, hide_repo_links: bool):
     """Render markdown files in DOCS_DIR to standalone HTML pages.
 
     Converts every .md file found in DOCS_DIR into a self-contained .html
@@ -28,6 +34,7 @@ def build_static_command(docs_dir: str):
       codewiki build-static
       codewiki build-static ./public/wechat-decrypt
       codewiki build-static /abs/path/to/my-docs
+      codewiki build-static --no-repo-links
     """
     from codewiki.cli.static_generator import StaticHTMLGenerator
 
@@ -38,7 +45,7 @@ def build_static_command(docs_dir: str):
 
     click.echo(f"Building static HTML from {path} …")
     generator = StaticHTMLGenerator()
-    written = generator.generate(path)
+    written = generator.generate(path, hide_repo_links=hide_repo_links)
 
     if not written:
         click.secho("⚠  No .md files found — nothing generated.", fg="yellow")

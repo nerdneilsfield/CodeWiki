@@ -41,6 +41,7 @@ class CLIDocumentationGenerator:
         generate_html: bool = False,
         generate_static: bool = False,
         no_cache: bool = False,
+        hide_repo_links: bool = False,
     ):
         """
         Initialize the CLI documentation generator.
@@ -60,6 +61,7 @@ class CLIDocumentationGenerator:
         self.generate_html = generate_html
         self.generate_static = generate_static
         self.no_cache = no_cache
+        self.hide_repo_links = hide_repo_links
         self.progress_tracker = ProgressTracker(total_stages=5, verbose=verbose)
         self.job = DocumentationJob()
         
@@ -373,7 +375,8 @@ class CLIDocumentationGenerator:
             title=repo_info['name'],
             repository_url=repo_info['url'],
             github_pages_url=repo_info['github_pages_url'],
-            docs_dir=self.output_dir  # Auto-load module_tree and metadata from here
+            docs_dir=self.output_dir,  # Auto-load module_tree and metadata from here
+            hide_repo_links=self.hide_repo_links,
         )
         
         self.job.files_generated.append("index.html")
@@ -393,7 +396,7 @@ class CLIDocumentationGenerator:
             self.progress_tracker.update_stage(0.1, "Pre-rendering markdown files...")
 
         generator = StaticHTMLGenerator()
-        written = generator.generate(self.output_dir)
+        written = generator.generate(self.output_dir, hide_repo_links=self.hide_repo_links)
 
         for fname in written:
             if fname not in self.job.files_generated:
