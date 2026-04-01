@@ -4,7 +4,13 @@ from pathlib import Path
 import os
 
 from tree_sitter import Parser, Language
-import tree_sitter_cmake
+try:
+    import tree_sitter_cmake
+except ImportError as _exc:
+    raise ImportError(
+        "tree-sitter-cmake is required for CMake analysis. "
+        "Install it with: pip install 'codewiki[cmake]' or pip install tree-sitter-cmake"
+    ) from _exc
 from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationship
 
 logger = logging.getLogger(__name__)

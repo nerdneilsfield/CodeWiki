@@ -4,7 +4,13 @@ from pathlib import Path
 import os
 
 from tree_sitter import Parser, Language
-import tree_sitter_make
+try:
+    import tree_sitter_make
+except ImportError as _exc:
+    raise ImportError(
+        "tree-sitter-make is required for Makefile analysis. "
+        "Install it with: pip install 'codewiki[make]' or pip install tree-sitter-make"
+    ) from _exc
 from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationship
 
 logger = logging.getLogger(__name__)

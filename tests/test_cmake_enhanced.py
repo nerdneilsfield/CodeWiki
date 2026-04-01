@@ -1,4 +1,8 @@
 """Task 4: CMake analyzer enhancements — comprehensive tests"""
+import pytest
+
+pytest.importorskip("tree_sitter_cmake", reason="tree-sitter-cmake not installed; pip install 'codewiki[cmake]'")
+
 from codewiki.src.be.dependency_analyzer.analyzers.cmake import analyze_cmake_file
 
 SAMPLE_CMAKE = '''

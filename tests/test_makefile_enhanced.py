@@ -1,4 +1,8 @@
 """Task 5: Makefile analyzer enhancements — comprehensive tests"""
+import pytest
+
+pytest.importorskip("tree_sitter_make", reason="tree-sitter-make not installed; pip install 'codewiki[make]'")
+
 from codewiki.src.be.dependency_analyzer.analyzers.makefile import analyze_makefile_file
 
 SAMPLE_MAKE = '''
