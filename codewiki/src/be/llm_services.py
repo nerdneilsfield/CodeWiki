@@ -1,6 +1,7 @@
 """
 LLM service factory for creating configured LLM clients.
 """
+import sys
 import time
 import logging
 import random
@@ -295,17 +296,33 @@ def call_llm(prompt: str, config: Config, model: str = None, temperature: float 
     t0 = time.time()
     for attempt, delay in enumerate([0] + _RETRY_DELAYS):
         if delay:
-            _logger.warning(
-                f"call_llm [model={model}]: retrying in {delay}s "
-                f"(attempt {attempt}/{len(_RETRY_DELAYS)}) after: {last_exc}"
+            retry_after = _parse_retry_after(last_exc)
+            wait = retry_after if retry_after is not None else delay
+            msg = (
+                f"⚠  LLM retry {attempt}/{len(_RETRY_DELAYS)}"
+                f" — model={model}"
+                f" — waiting {wait}s"
+                f" — reason: {last_exc}"
                 + (" [streaming]" if use_streaming else "")
             )
-            retry_after = _parse_retry_after(last_exc)
+            _logger.warning(msg)
+            try:
+                from tqdm import tqdm as _tqdm
+                _tqdm.write(msg, file=sys.stderr)
+            except Exception:
+                print(msg, file=sys.stderr, flush=True)
             if retry_after is not None:
                 _logger.info(f"call_llm: honouring Retry-After: {retry_after}s")
                 time.sleep(retry_after)
             else:
                 _sleep_with_jitter(delay)
+            start_msg = f"↻  LLM retry {attempt}/{len(_RETRY_DELAYS)} starting — model={model}"
+            _logger.info(start_msg)
+            try:
+                from tqdm import tqdm as _tqdm
+                _tqdm.write(start_msg, file=sys.stderr)
+            except Exception:
+                print(start_msg, file=sys.stderr, flush=True)
         try:
             if provider_type in {"openai_compatible", "azure_openai"}:
                 if use_streaming:
