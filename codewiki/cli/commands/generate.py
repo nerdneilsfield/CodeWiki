@@ -28,8 +28,144 @@ from codewiki.cli.utils.repo_validator import (
 from codewiki.cli.utils.logging import create_logger
 from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
 from codewiki.cli.utils.instructions import display_post_generation_instructions
-from codewiki.cli.models.job import GenerationOptions
+from codewiki.cli.utils.errors import EXIT_CONFIG_ERROR
 from codewiki.cli.models.config import AgentInstructions
+from codewiki.src.config_loader import (
+    AppConfig,
+    AgentSection,
+    GenerationSection,
+    ProviderConfig,
+    RuntimeSection,
+    TokensSection,
+    RuntimeOverrides,
+    load_app_config,
+)
+
+
+
+
+def _legacy_model_ref(provider_name: str, model_name: str | None) -> str | None:
+    if not model_name:
+        return None
+    return f"{provider_name}/{model_name}"
+
+
+def _legacy_config_to_app_config(config, api_key: str) -> AppConfig:
+    provider_name = "legacy"
+    fallback_models = [
+        _legacy_model_ref(provider_name, name.strip())
+        for name in (config.fallback_model or "").split(",")
+        if name.strip()
+    ]
+    long_context_model = _legacy_model_ref(provider_name, config.long_context_model)
+
+    return AppConfig(
+        runtime=RuntimeSection(
+            output_dir=getattr(config, "default_output", "docs"),
+            max_depth=config.max_depth,
+            max_concurrent=config.max_concurrent,
+            max_retries=config.max_retries,
+            output_language=config.output_language,
+            postprocess_strict=False,
+        ),
+        tokens=TokensSection(
+            max_tokens=config.max_tokens,
+            max_token_per_module=config.max_token_per_module,
+            max_token_per_leaf_module=config.max_token_per_leaf_module,
+            long_context_threshold=config.long_context_threshold,
+        ),
+        generation=GenerationSection(
+            main_model=_legacy_model_ref(provider_name, config.main_model) or "",
+            cluster_model=_legacy_model_ref(provider_name, config.cluster_model) or "",
+            fallback_models=fallback_models,
+            long_context_model=long_context_model,
+        ),
+        agent=AgentSection(**(config.agent_instructions.to_dict() if getattr(config, "agent_instructions", None) and not config.agent_instructions.is_empty() else {})),
+        providers=[
+            ProviderConfig(
+                name=provider_name,
+                type="openai_compatible",
+                base_url=config.base_url,
+                api_keys=[api_key] if api_key else [],
+                model_list=[
+                    name for name in [config.main_model, config.cluster_model, config.long_context_model] if name
+                ] + [name.strip() for name in (config.fallback_model or "").split(",") if name.strip()],
+                extra_headers={},
+            )
+        ],
+    )
+
+
+def _load_generation_app_config(config_path: str | None) -> AppConfig:
+    if config_path:
+        return load_app_config(Path(config_path))
+
+    config_manager = ConfigManager()
+    if config_manager.load() and config_manager.is_configured():
+        return _legacy_config_to_app_config(
+            config_manager.get_config(),
+            config_manager.get_api_key() or "",
+        )
+
+    raise ConfigurationError(
+        "No TOML config provided and no legacy configuration found.\n\n"
+        "Run `codewiki config init` to create a starter config, then pass it with --config."
+    )
+
+
+
+
+def _normalize_model_override(app_config: AppConfig, model_ref: str | None) -> str | None:
+    if not model_ref:
+        return None
+    if "/" in model_ref:
+        return model_ref
+    if len(app_config.providers) == 1:
+        return f"{app_config.providers[0].name}/{model_ref}"
+    provider_names = ", ".join(provider.name for provider in app_config.providers)
+    raise ValueError(
+        f"Ambiguous model ref '{model_ref}': multiple providers configured. "
+        f"Use 'provider/model' format. Available providers: {provider_names}"
+    )
+
+
+def _build_runtime_overrides(
+    app_config: AppConfig,
+    output_dir: Path,
+    runtime_instructions: AgentInstructions | None,
+    max_tokens: int | None,
+    max_token_per_module: int | None,
+    max_token_per_leaf_module: int | None,
+    max_depth: int | None,
+    max_concurrent: int | None,
+    max_retries: int | None,
+    language: str | None,
+    main_model: str | None,
+    cluster_model: str | None,
+    long_context_model: str | None,
+    long_context_threshold: int | None,
+) -> RuntimeOverrides:
+    persistent = app_config.agent.to_dict()
+    merged_agent = persistent.copy()
+    if runtime_instructions and not runtime_instructions.is_empty():
+        for key, value in runtime_instructions.to_dict().items():
+            merged_agent[key] = value
+
+    return RuntimeOverrides(
+        output_dir=str(output_dir),
+        max_depth=max_depth,
+        max_tokens=max_tokens,
+        max_token_per_module=max_token_per_module,
+        max_token_per_leaf_module=max_token_per_leaf_module,
+        max_concurrent=max_concurrent,
+        max_retries=max_retries,
+        output_language=language.strip().lower() if language else None,
+        main_model=_normalize_model_override(app_config, main_model),
+        cluster_model=_normalize_model_override(app_config, cluster_model),
+        long_context_model=_normalize_model_override(app_config, long_context_model),
+        long_context_threshold=long_context_threshold,
+        agent_instructions=merged_agent if merged_agent is not None else None,
+    )
 
 
 def parse_patterns(patterns_str: str) -> List[str]:
@@ -40,6 +176,13 @@ def parse_patterns(patterns_str: str) -> List[str]:
 
 
 @click.command(name="generate")
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=str),
+    default=None,
+    help="Path to TOML config file. Falls back to legacy ~/.codewiki/config.json if omitted.",
+)
 @click.option(
     "--output",
     "-o",
@@ -177,6 +320,7 @@ def parse_patterns(patterns_str: str) -> List[str]:
 @click.pass_context
 def generate_command(
     ctx,
+    config_path: Optional[str],
     output: str,
     create_branch: bool,
     github_pages: bool,
@@ -264,24 +408,7 @@ def generate_command(
         logger.step("Validating configuration...", 1, 4)
         
         # Load configuration
-        config_manager = ConfigManager()
-        if not config_manager.load():
-            raise ConfigurationError(
-                "Configuration not found or invalid.\n\n"
-                "Please run 'codewiki config set' to configure your LLM API credentials:\n"
-                "  codewiki config set --api-key <your-api-key> --base-url <api-url> \\\n"
-                "    --main-model <model> --cluster-model <model>\n\n"
-                "For more help: codewiki config --help"
-            )
-        
-        if not config_manager.is_configured():
-            raise ConfigurationError(
-                "Configuration is incomplete. Please run 'codewiki config validate'"
-            )
-        
-        config = config_manager.get_config()
-        api_key = config_manager.get_api_key()
-        
+        app_config = _load_generation_app_config(config_path)
         logger.success("Configuration valid")
         
         # Validate repository
@@ -352,14 +479,6 @@ def generate_command(
         logger.step("Generating documentation...", 4, 4)
         click.echo()
         
-        # Create generation options
-        generation_options = GenerationOptions(
-            create_branch=create_branch,
-            github_pages=github_pages,
-            no_cache=no_cache,
-            custom_output=output if output != "docs" else None
-        )
-        
         # Create runtime agent instructions from CLI options
         runtime_instructions = None
         if any([include, exclude, focus, doc_type, instructions]):
@@ -383,62 +502,40 @@ def generate_command(
                 if instructions:
                     logger.debug(f"Custom instructions: {instructions}")
         
+        runtime_overrides = _build_runtime_overrides(
+            app_config=app_config,
+            output_dir=output_dir,
+            runtime_instructions=runtime_instructions,
+            max_tokens=max_tokens,
+            max_token_per_module=max_token_per_module,
+            max_token_per_leaf_module=max_token_per_leaf_module,
+            max_depth=max_depth,
+            max_concurrent=max_concurrent,
+            max_retries=max_retries,
+            language=language,
+            main_model=main_model,
+            cluster_model=cluster_model,
+            long_context_model=long_context_model,
+            long_context_threshold=long_context_threshold,
+        )
+        effective_config = app_config.to_runtime_config(str(repo_path), runtime_overrides)
+
         # Log max token settings if verbose
         if verbose:
-            logger.debug(f"Main model: {main_model or config.main_model}")
-            if main_model:
-                logger.debug(f"  (overridden from config: {config.main_model})")
-            effective_max_tokens = max_tokens if max_tokens is not None else config.max_tokens
-            effective_max_token_per_module = max_token_per_module if max_token_per_module is not None else config.max_token_per_module
-            effective_max_token_per_leaf = max_token_per_leaf_module if max_token_per_leaf_module is not None else config.max_token_per_leaf_module
-            effective_max_depth = max_depth if max_depth is not None else config.max_depth
-            logger.debug(f"Max tokens: {effective_max_tokens}")
-            logger.debug(f"Max token/module: {effective_max_token_per_module}")
-            logger.debug(f"Max token/leaf module: {effective_max_token_per_leaf}")
-            logger.debug(f"Max depth: {effective_max_depth}")
-            effective_max_concurrent = max_concurrent if max_concurrent is not None else config.max_concurrent
-            logger.debug(f"Max concurrent: {effective_max_concurrent}")
-        
-        # Get agent instructions (merge runtime with persistent)
-        agent_instructions_dict = None
-        if runtime_instructions and not runtime_instructions.is_empty():
-            # Merge with persistent settings
-            merged = AgentInstructions(
-                include_patterns=runtime_instructions.include_patterns or (config.agent_instructions.include_patterns if config.agent_instructions else None),
-                exclude_patterns=runtime_instructions.exclude_patterns or (config.agent_instructions.exclude_patterns if config.agent_instructions else None),
-                focus_modules=runtime_instructions.focus_modules or (config.agent_instructions.focus_modules if config.agent_instructions else None),
-                doc_type=runtime_instructions.doc_type or (config.agent_instructions.doc_type if config.agent_instructions else None),
-                custom_instructions=runtime_instructions.custom_instructions or (config.agent_instructions.custom_instructions if config.agent_instructions else None),
-            )
-            agent_instructions_dict = merged.to_dict()
-        elif config.agent_instructions and not config.agent_instructions.is_empty():
-            agent_instructions_dict = config.agent_instructions.to_dict()
-        
+            logger.debug(f"Main model: {effective_config.main_model}")
+            logger.debug(f"Max tokens: {effective_config.max_tokens}")
+            logger.debug(f"Max token/module: {effective_config.max_token_per_module}")
+            logger.debug(f"Max token/leaf module: {effective_config.max_token_per_leaf_module}")
+            logger.debug(f"Max depth: {effective_config.max_depth}")
+            logger.debug(f"Max concurrent: {effective_config.max_concurrent}")
+
         # Create generator
         generator = CLIDocumentationGenerator(
             repo_path=repo_path,
             output_dir=output_dir,
             config={
-                'main_model': main_model if main_model else config.main_model,
-                'cluster_model': cluster_model if cluster_model else config.cluster_model,
-                'fallback_model': config.fallback_model,
-                'long_context_model': long_context_model if long_context_model else config.long_context_model,
-                'base_url': config.base_url,
-                'api_key': api_key,
-                'agent_instructions': agent_instructions_dict,
-                # Max token settings (runtime overrides take precedence)
-                'max_tokens': max_tokens if max_tokens is not None else config.max_tokens,
-                'max_token_per_module': max_token_per_module if max_token_per_module is not None else config.max_token_per_module,
-                'max_token_per_leaf_module': max_token_per_leaf_module if max_token_per_leaf_module is not None else config.max_token_per_leaf_module,
-                # Max depth setting (runtime override takes precedence)
-                'max_depth': max_depth if max_depth is not None else config.max_depth,
-                # Concurrency
-                'max_concurrent': max_concurrent if max_concurrent is not None else config.max_concurrent,
-                'max_retries': max_retries if max_retries is not None else config.max_retries,
-                # Output language (runtime override takes precedence)
-                'output_language': language.strip().lower() if language else config.output_language,
-                # Long-context threshold (runtime override takes precedence)
-                'long_context_threshold': long_context_threshold if long_context_threshold is not None else config.long_context_threshold,
+                'app_config': app_config,
+                'runtime_overrides': runtime_overrides,
             },
             verbose=verbose,
             generate_html=github_pages,
@@ -482,6 +579,9 @@ def generate_command(
             }
         )
         
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(EXIT_CONFIG_ERROR)
     except ConfigurationError as e:
         logger.error(e.message)
         logger.error(f"Traceback: {traceback.format_exc()}")
@@ -499,4 +599,3 @@ def generate_command(
         sys.exit(130)
     except Exception as e:
         sys.exit(handle_error(e, verbose=verbose))
-

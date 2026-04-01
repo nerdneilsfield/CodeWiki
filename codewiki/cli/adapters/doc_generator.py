@@ -21,6 +21,7 @@ from codewiki.cli.utils.errors import APIError
 # Import backend modules
 from codewiki.src.be.documentation_generator import DocumentationGenerator
 from codewiki.src.config import Config as BackendConfig, set_cli_context
+from codewiki.src.config_loader import RuntimeOverrides
 
 
 class CLIDocumentationGenerator:
@@ -66,15 +67,56 @@ class CLIDocumentationGenerator:
         self.job.repository_path = str(repo_path)
         self.job.repository_name = repo_path.name
         self.job.output_directory = str(output_dir)
-        self.job.llm_config = LLMConfig(
-            main_model=config.get('main_model', ''),
-            cluster_model=config.get('cluster_model', ''),
-            base_url=config.get('base_url', '')
-        )
+        app_config = config.get('app_config')
+        if app_config is not None:
+            self.job.llm_config = LLMConfig(
+                main_model=app_config.generation.main_model,
+                cluster_model=app_config.generation.cluster_model,
+                base_url='multi-provider'
+            )
+        else:
+            self.job.llm_config = LLMConfig(
+                main_model=config.get('main_model', ''),
+                cluster_model=config.get('cluster_model', ''),
+                base_url=config.get('base_url', '')
+            )
         
         # Configure backend logging
         self._configure_backend_logging()
     
+
+    def _build_backend_config(self) -> BackendConfig:
+        """Build backend runtime config from either legacy dict config or new AppConfig path."""
+        app_config = self.config.get("app_config")
+        if app_config is not None:
+            overrides = self.config.get("runtime_overrides") or RuntimeOverrides()
+            if overrides.output_dir is None:
+                overrides.output_dir = str(self.output_dir)
+            return app_config.to_runtime_config(
+                repo_path=str(self.repo_path),
+                overrides=overrides,
+            )
+
+        return BackendConfig.from_cli(
+            repo_path=str(self.repo_path),
+            output_dir=str(self.output_dir),
+            llm_base_url=self.config.get('base_url'),
+            llm_api_key=self.config.get('api_key'),
+            main_model=self.config.get('main_model'),
+            cluster_model=self.config.get('cluster_model'),
+            fallback_model=self.config.get('fallback_model'),
+            long_context_model=self.config.get('long_context_model') or None,
+            long_context_threshold=self.config.get('long_context_threshold', 200000),
+            max_tokens=self.config.get('max_tokens', 32768),
+            max_token_per_module=self.config.get('max_token_per_module', 36369),
+            max_token_per_leaf_module=self.config.get('max_token_per_leaf_module', 16000),
+            max_depth=self.config.get('max_depth', 2),
+            max_concurrent=self.config.get('max_concurrent', 3),
+            max_retries=self.config.get('max_retries', 2),
+            output_language=self.config.get('output_language', 'en'),
+            agent_instructions=self.config.get('agent_instructions')
+        )
+
     def _configure_backend_logging(self):
         """Configure backend logger for CLI use with colored output."""
         from codewiki.src.be.dependency_analyzer.utils.logging_config import ColoredFormatter
@@ -138,25 +180,7 @@ class CLIDocumentationGenerator:
             set_cli_context(True)
             
             # Create backend config with CLI settings
-            backend_config = BackendConfig.from_cli(
-                repo_path=str(self.repo_path),
-                output_dir=str(self.output_dir),
-                llm_base_url=self.config.get('base_url'),
-                llm_api_key=self.config.get('api_key'),
-                main_model=self.config.get('main_model'),
-                cluster_model=self.config.get('cluster_model'),
-                fallback_model=self.config.get('fallback_model'),
-                long_context_model=self.config.get('long_context_model') or None,
-                long_context_threshold=self.config.get('long_context_threshold', 200000),
-                max_tokens=self.config.get('max_tokens', 32768),
-                max_token_per_module=self.config.get('max_token_per_module', 36369),
-                max_token_per_leaf_module=self.config.get('max_token_per_leaf_module', 16000),
-                max_depth=self.config.get('max_depth', 2),
-                max_concurrent=self.config.get('max_concurrent', 3),
-                max_retries=self.config.get('max_retries', 2),
-                output_language=self.config.get('output_language', 'en'),
-                agent_instructions=self.config.get('agent_instructions')
-            )
+            backend_config = self._build_backend_config()
             
             # Run backend documentation generation
             asyncio.run(self._run_backend_generation(backend_config))

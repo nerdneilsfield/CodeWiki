@@ -12,6 +12,7 @@ import logging
 import argparse
 import asyncio
 import traceback
+from pathlib import Path
 
 # Configure logging and monitoring
 from codewiki.src.be.dependency_analyzer.utils.logging_config import setup_logging
@@ -26,6 +27,7 @@ from codewiki.src.be.documentation_generator import DocumentationGenerator
 from codewiki.src.config import (
     Config,
 )
+from codewiki.src.config_loader import load_app_config
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -39,8 +41,22 @@ def parse_arguments() -> argparse.Namespace:
         required=True,
         help='Path to the repository'
     )
-    
+    parser.add_argument(
+        '--config',
+        type=str,
+        required=True,
+        help='Path to TOML config file'
+    )
+
     return parser.parse_args()
+
+
+def _build_runtime_config_from_args(args: argparse.Namespace):
+    try:
+        app_config = load_app_config(Path(args.config))
+    except (FileNotFoundError, ValueError) as exc:
+        raise RuntimeError(f"Failed to load config '{args.config}': {exc}") from exc
+    return app_config.to_runtime_config(args.repo_path)
 
 
 async def main() -> None:
@@ -48,7 +64,7 @@ async def main() -> None:
     try:
         # Parse arguments and create configuration
         args = parse_arguments()
-        config = Config.from_args(args)
+        config = _build_runtime_config_from_args(args)
         
         # Create and run documentation generator
         doc_generator = DocumentationGenerator(config)

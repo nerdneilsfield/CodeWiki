@@ -28,6 +28,11 @@ class WebAppConfig:
     # Server settings
     DEFAULT_HOST = "127.0.0.1"
     DEFAULT_PORT = 8000
+
+    # TOML config path — set via env var CODEWIKI_CONFIG or --config CLI arg.
+    # The web app reads this at module-import time; override via
+    # background_worker.config_path before start() if needed.
+    CONFIG_PATH: str | None = os.getenv("CODEWIKI_CONFIG")
     
     # Git settings
     CLONE_TIMEOUT = 300

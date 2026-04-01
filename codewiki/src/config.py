@@ -56,10 +56,10 @@ class Config:
     docs_dir: str
     max_depth: int
     # LLM configuration
-    llm_base_url: str
-    llm_api_key: str
-    main_model: str
-    cluster_model: str
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    main_model: str = ""
+    cluster_model: str = ""
     fallback_model: str = FALLBACK_MODEL_1
     long_context_model: Optional[str] = None
     long_context_threshold: int = DEFAULT_LONG_CONTEXT_THRESHOLD
@@ -76,6 +76,8 @@ class Config:
     postprocess_strict: bool = False
     # Agent instructions for customization
     agent_instructions: Optional[Dict[str, Any]] = None
+    # Multi-provider registry for the TOML-based config system
+    providers: Optional[List[Any]] = None
     
     @property
     def include_patterns(self) -> Optional[List[str]]:
