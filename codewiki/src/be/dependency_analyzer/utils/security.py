@@ -23,11 +23,8 @@ def safe_open_text(base_dir: Path, target: Path, encoding="utf-8"):
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     fd = os.open(str(target), flags)
-    try:
-        with os.fdopen(fd, "r", encoding=encoding, errors="replace") as f:
-            return f.read()
-    finally:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
+    # os.fdopen takes ownership of fd — it closes fd when the file object
+    # is closed.  Do NOT call os.close(fd) again; that causes EBADF in
+    # concurrent scenarios where the fd number gets reused by another thread.
+    with os.fdopen(fd, "r", encoding=encoding, errors="replace") as f:
+        return f.read()
