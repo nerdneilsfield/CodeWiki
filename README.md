@@ -1,475 +1,354 @@
-<h1 align="center">CodeWiki: Evaluating AI's Ability to Generate Holistic Documentation for Large-Scale Codebases</h1>
+# CodeWiki
 
-<p align="center">
-  <strong>AI-Powered Repository Documentation Generation</strong> • <strong>Multi-Language Support</strong> • <strong>Architecture-Aware Analysis</strong>
-</p>
+**Turn any codebase into structured, navigable documentation — powered by static analysis and LLM agents.**
 
-<p align="center">
-  Generate holistic, structured documentation for large-scale codebases • Cross-module interactions • Visual artifacts and diagrams
-</p>
+CodeWiki parses your repository with language-aware analyzers (AST + tree-sitter), builds a symbol table and dependency graph, clusters related components into modules, then dispatches LLM agents to write documentation grounded in code evidence. The output is a set of interconnected Markdown files with architecture diagrams, API references, and cross-module links.
 
-<p align="center">
-  <a href="https://python.org/"><img alt="Python version" src="https://img.shields.io/badge/python-3.12+-blue?style=flat-square" /></a>
-  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg?style=flat-square" /></a>
-  <a href="https://github.com/FSoft-AI4Code/CodeWiki/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FSoft-AI4Code/CodeWiki?style=flat-square" /></a>
-  <a href="https://arxiv.org/abs/2510.24428"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2510.24428-b31b1b?style=flat-square" /></a>
-</p>
-
-<p align="center">
-  <a href="#quick-start"><strong>Quick Start</strong></a> •
-  <a href="#cli-commands"><strong>CLI Commands</strong></a> •
-  <a href="#documentation-output"><strong>Output Structure</strong></a> •
-  <a href="https://arxiv.org/abs/2510.24428"><strong>Paper</strong></a>
-</p>
-
-<p align="center">
-  <img src="./img/framework-overview.png" alt="CodeWiki Framework" width="600" style="border: 2px solid #e1e4e8; border-radius: 12px; padding: 20px;"/>
-</p>
+[Chinese Documentation (中文文档)](README_ZH.md) | [Paper](https://arxiv.org/abs/2510.24428)
 
 ---
+
+## What It Does
+
+1. **Analyzes** your code across 9 languages (Python, TypeScript, JavaScript, Java, C, C++, C#, Go, Rust)
+2. **Indexes** symbols, imports, calls, and inheritance relationships with confidence levels and source evidence
+3. **Clusters** components into logical modules using graph algorithms (directory priors, SCC contraction, Louvain community detection), then names them with a constrained LLM call
+4. **Generates** module documentation with evidence-driven prompts — every behavioral assertion cites a symbol ID or source location
+5. **Validates** output with link checking, heading anchor consistency, Mermaid/Math lint, and configurable strict gates
 
 ## Quick Start
 
-### 1. Install CodeWiki
+### Install
 
 ```bash
-# Install from source
 pip install git+https://github.com/nerdneilsfield/CodeWiki.git
-
-# Verify installation
-codewiki --version
 ```
 
-### 2. Configure Your Environment
+Requires Python 3.12+ and Node.js 14+ (for Mermaid validation).
 
-CodeWiki supports multiple models via an OpenAI-compatible SDK layer.
+### Configure
 
 ```bash
-codewiki config set \
-  --api-key YOUR_API_KEY \
-  --base-url https://api.anthropic.com \
-  --main-model claude-sonnet-4 \
-  --cluster-model claude-sonnet-4 \
-  --fallback-model "glm-4p5,gpt-4o-mini"
+# Set your LLM API credentials
+codewiki config set --api-key YOUR_KEY --base-url https://api.anthropic.com/v1
+
+# Set the model
+codewiki config set --main-model claude-sonnet-4
 ```
 
-### 3. Generate Documentation
+API keys are stored in your system keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+
+### Generate
 
 ```bash
-# Navigate to your project
-cd /path/to/your/project
+# Generate documentation for a local repository
+codewiki generate /path/to/your/repo
 
-# Generate documentation
-codewiki generate
+# Generate with Chinese output
+codewiki generate /path/to/repo --language zh
 
-# Generate with HTML viewer for GitHub Pages
-codewiki generate --github-pages --create-branch
-
-# Speed up generation with parallel processing
-codewiki generate --max-concurrent 5
+# Generate with GitHub Pages viewer
+codewiki generate /path/to/repo --github-pages
 ```
 
-**That's it!** Your documentation will be generated in `./docs/` with comprehensive repository-level analysis.
+<details>
+<summary><strong>Full CLI options</strong></summary>
 
-### Usage Example
+```
+codewiki generate [REPO_PATH] [OPTIONS]
 
-![CLI Usage Example](https://github.com/FSoft-AI4Code/CodeWiki/releases/download/assets/cli-usage-example.gif)
+Output:
+  --output DIR              Output directory (default: ./docs)
+  --create-branch           Create a git branch for generated docs
+  --github-pages            Generate index.html viewer
+  --static                  Pre-render standalone HTML pages
+  --no-cache                Force full regeneration
+
+Language:
+  --language CODE           Output language: en, zh, zh-tw, ja, ko, fr, de, es
+
+Model:
+  --main-model NAME         Primary LLM model
+  --cluster-model NAME      Model for module naming
+  --long-context-model NAME Model for oversized prompts
+  --long-context-threshold N Token threshold for long-context switch
+
+Limits:
+  --max-tokens N            Max response tokens (default: 32768)
+  --max-depth N             Hierarchical decomposition depth (default: 2)
+  --max-concurrent N        Parallel module workers (default: 3)
+  --max-retries N           Fill-pass retries (default: 2)
+
+Filtering:
+  --include PATTERNS        Comma-separated file patterns to include
+  --exclude PATTERNS        Comma-separated file patterns to exclude
+  --focus MODULES           Modules to document in detail
+
+Customization:
+  --doc-type TYPE           api, architecture, user-guide, developer
+  --instructions TEXT       Custom agent instructions
+  --verbose                 Show detailed progress
+```
+
+</details>
+
+### Output
+
+```
+docs/
+├── overview.md              # Start here — repo architecture and entry points
+├── module_name.md           # Per-module documentation
+├── module_tree.json         # Hierarchical module structure
+├── metadata.json            # Generation metadata
+├── _lint_report.json        # Post-processing lint results
+└── index.html               # Interactive viewer (with --github-pages)
+```
 
 ---
 
-## What is CodeWiki?
+## Architecture
 
-CodeWiki is an open-source framework for **automated repository-level documentation** across nine programming languages. It generates holistic, architecture-aware documentation that captures not only individual functions but also their cross-file, cross-module, and system-level interactions.
+CodeWiki processes a repository through five layers, each building on the previous:
 
-### Key Innovations
+```
+Source Code
+    │
+    ▼
+┌─────────────────────┐
+│ 1. Index Layer       │  AST + tree-sitter → SymbolTable, ImportGraph,
+│                      │  ComponentCards, IMPORTS/CALLS/EXTENDS edges
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐
+│ 2. Graph Layer       │  Typed edges with confidence + evidence_refs,
+│                      │  EdgeIndex (callers_of / callees_of / edges_of)
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐
+│ 3. Clustering Layer  │  Directory priors → SCC contraction → Louvain →
+│                      │  LLM naming → naming freeze → stability metrics
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐
+│ 4. Generation Layer  │  Evidence-driven prompts with symbol cards,
+│                      │  boundary edges, glossary, link map
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐
+│ 5. Post Layer        │  Link validation, heading anchor consistency,
+│                      │  Mermaid/Math lint + degradation, LintReport
+└─────────────────────┘
+```
 
-| Innovation | Description | Impact |
-|------------|-------------|--------|
-| **Hierarchical Decomposition** | Dynamic programming-inspired strategy that preserves architectural context | Handles codebases of arbitrary size (86K-1.4M LOC tested) |
-| **Graph-Based Clustering** | Louvain community detection on dependency graphs, refined by LLM | Structurally-aware module grouping, not just semantic |
-| **Dynamic Task-Queue Parallelism** | `asyncio.Queue` with N workers; parents enqueued as soon as children finish | Eliminates idle time from level-based blocking |
-| **Recursive Agentic System** | Adaptive multi-agent processing with dynamic delegation capabilities | Maintains quality while scaling to repository-level scope |
-| **Multi-Modal Synthesis** | Generates textual documentation, architecture diagrams, data flows, and sequence diagrams | Comprehensive understanding from multiple perspectives |
-| **Incremental Resume** | `_completed` flags track finished modules; interrupted runs resume automatically | No wasted work on re-runs |
-| **Multi-Fallback Models** | Comma-separated fallback chain with automatic long-context model switching | Robust against API failures and token limits |
-| **Real-Time Progress** | `tqdm` progress bar with ETA across the dynamic task queue and fill passes | Instant visibility into generation status |
-| **Math Notation (KaTeX)** | Agents use LaTeX `$...$` / `$$...$$` when formulas genuinely clarify (complexity, ML objectives, etc.); both viewers render via KaTeX | Precise, readable documentation for algorithm-heavy modules |
+<details>
+<summary><strong>Layer details</strong></summary>
 
-### Supported Languages
+### Index Layer
 
-**🐍 Python** • **☕ Java** • **🟨 JavaScript** • **🔷 TypeScript** • **⚙️ C** • **🔧 C++** • **🪟 C#** • **🦀 Rust** • **🐹 Go**
+Parses source files with language-specific adapters:
+- **PythonIndexAdapter** — uses `ast` module for classes, methods, imports, signatures (including kwonlyargs), visibility (`__all__` detection), and import path resolution
+- **TSJSIndexAdapter** — uses tree-sitter for TypeScript/JavaScript class/function/import extraction with relative import resolution (.ts/.tsx/.js/.jsx probing)
+- **GenericIndexAdapter** — fallback that converts existing dependency analyzer `Node` objects to `Symbol` format
+
+Products: `SymbolTable` (O(1) lookup by id/file/name/qualified_name), `ImportGraph` (file-level import tracking with resolution), `ComponentCard` (LLM-facing summaries with truncated docstrings and top-5 edges).
+
+### Graph Layer
+
+Builds typed relationship edges from the index:
+- **IMPORTS** — from resolved import statements (HIGH confidence)
+- **CALLS** — from function/method call sites (confidence varies by resolution quality)
+- **EXTENDS** — from class inheritance (parsed from signatures)
+
+Every edge carries `evidence_refs` (file + line range) and `confidence` (HIGH/MEDIUM/LOW). Unresolved references are preserved with `to_unresolved` instead of being discarded.
+
+`EdgeIndex` provides O(1) queries: `callers_of(symbol)`, `callees_of(symbol)`, `edges_of(symbol, type_filter)`, `dependency_subgraph(symbol_set)`.
+
+### Clustering Layer
+
+Replaces LLM-driven grouping with a deterministic graph algorithm pipeline:
+1. **Directory priors** — groups components by top-level package directory
+2. **SCC contraction** — merges cyclic dependencies into super-nodes (Tarjan)
+3. **Louvain community detection** — with directory-prior edge injection (weight 2.0) and fixed seed (42) for determinism
+4. **LLM naming** — constrained to title + description only (no member rearrangement); falls back to heuristic naming on failure
+5. **Naming freeze** — when module members haven't changed, reuses previous title/path to prevent churn
+6. **Stability metrics** — Jaccard similarity, path stability, module ID consistency across runs
+
+Output validated against `ModuleTree` schema with fail-fast on invariant violations (duplicate components, missing assignments, non-unique paths).
+
+### Generation Layer
+
+Injects evidence-rich context into LLM prompts:
+- **Context pack** — component-level precise symbol cards, boundary/internal edges, evidence snippets
+- **Glossary** — public API terms with docstring definitions, injected as shared context
+- **Link map** — stable path-based module cross-references using `module_doc_filename()`
+- **Evidence rules** — system prompt block requiring every assertion to cite `symbol_id` or `file:line`
+
+All three prompt paths (system, leaf, overview) receive evidence rules. Recursive sub-module generation inherits `global_assets` via `CodeWikiDeps`.
+
+### Post Layer
+
+Validates and repairs generated documentation:
+- **Link validation** — scans internal `[text](file.md#anchor)` links, verifies file existence and heading anchor presence
+- **Heading anchors** — `heading_to_slug()` as single source of truth, used by both renderer and validator, with duplicate heading dedup (-1, -2 suffixes)
+- **Mermaid degradation** — unfixable diagrams replaced with `text` code blocks + error comments
+- **Math degradation** — inline math → backtick code; display math → `latex` fenced block
+- **LintReport** — JSON report saved to `_lint_report.json` with all failures
+- **Strict gate** — `Config.postprocess_strict = True` raises `LintError` on unfixable issues
+
+</details>
 
 ---
 
-## CLI Commands
+## Docker Deployment
 
-### Configuration Management
+<details>
+<summary><strong>Docker setup</strong></summary>
 
 ```bash
-# Set up your API configuration
-codewiki config set \
-  --api-key <your-api-key> \
-  --base-url <provider-url> \
-  --main-model <model-name> \
-  --cluster-model <model-name> \
-  --fallback-model "model1,model2"          # comma-separated fallback chain
+cd docker
+cp env.example .env
+# Edit .env with your API credentials
+docker compose up -d
+```
 
-# Configure a long-context model for very large prompts
-codewiki config set --long-context-model gemini-2.5-flash --long-context-threshold 200000
+The web interface is available at `http://localhost:8000`.
 
-# Configure max token settings
-codewiki config set --max-tokens 32768 --max-token-per-module 36369 --max-token-per-leaf-module 16000
+**Environment variables:**
 
-# Configure max depth for hierarchical decomposition
-codewiki config set --max-depth 3
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_API_KEY` | (required) | API key for LLM provider |
+| `LLM_BASE_URL` | (required) | API base URL |
+| `MAIN_MODEL` | `claude-sonnet-4` | Primary model |
+| `FALLBACK_MODEL_1` | `glm-4p5` | Fallback model |
+| `CLUSTER_MODEL` | (same as MAIN_MODEL) | Module naming model |
+| `APP_PORT` | `8000` | Web interface port |
 
-# Configure concurrent module processing (default: 3)
-codewiki config set --max-concurrent 5
+</details>
 
-# Show current configuration
+---
+
+## Web Interface
+
+Submit a GitHub repository URL through the browser and view generated documentation with:
+- Dark/light mode (follows OS preference)
+- Collapsible sidebar with module tree navigation
+- Auto-generated table of contents per page
+- Syntax highlighting (highlight.js)
+- Math rendering (KaTeX)
+- Mobile-responsive layout
+
+---
+
+## Configuration Reference
+
+<details>
+<summary><strong>All configuration options</strong></summary>
+
+```bash
+# Models
+codewiki config set --main-model claude-sonnet-4
+codewiki config set --cluster-model glm-4p5
+codewiki config set --long-context-model claude-sonnet-4
+codewiki config set --long-context-threshold 200000
+
+# Token limits
+codewiki config set --max-tokens 32768
+codewiki config set --max-token-per-module 36369
+codewiki config set --max-token-per-leaf-module 16000
+
+# Concurrency
+codewiki config set --max-concurrent 3
+codewiki config set --max-retries 2
+codewiki config set --max-depth 2
+
+# Language
+codewiki config set --language zh
+
+# Agent instructions
+codewiki config agent --include "src/**/*.py" --exclude "tests/**"
+codewiki config agent --focus "core,api"
+codewiki config agent --doc-type architecture
+
+# View current config
 codewiki config show
 
-# Validate your configuration
+# Validate config
 codewiki config validate
 ```
 
-### Documentation Generation
+**Post-processing:**
 
-```bash
-# Basic generation
-codewiki generate
+Set `postprocess_strict: true` in config to block builds when Mermaid/Math/Link issues cannot be fixed.
 
-# Custom output directory
-codewiki generate --output ./documentation
-
-# Create git branch for documentation
-codewiki generate --create-branch
-
-# Generate HTML viewer for GitHub Pages
-codewiki generate --github-pages
-
-# Generate pre-rendered static HTML pages (one per module, no JS required)
-codewiki generate --static
-
-# Speed up generation with concurrent module processing
-codewiki generate --max-concurrent 5
-
-# Enable verbose logging
-codewiki generate --verbose
-
-# Full-featured generation
-codewiki generate --create-branch --github-pages --verbose
-
-# Override model for this run only (without changing config)
-codewiki generate --main-model gpt-4o
-codewiki generate --main-model gpt-4o --long-context-model gpt-4o-128k --long-context-threshold 100000
-```
-
-### Customization Options
-
-CodeWiki supports customization for language-specific projects and documentation styles:
-
-```bash
-# C# project: only analyze .cs files, exclude test directories
-codewiki generate --include "*.cs" --exclude "Tests,Specs,*.test.cs"
-
-# Focus on specific modules with architecture-style docs
-codewiki generate --focus "src/core,src/api" --doc-type architecture
-
-# Add custom instructions for the AI agent
-codewiki generate --instructions "Focus on public APIs and include usage examples"
-```
-
-#### Pattern Behavior (Important!)
-
-- **`--include`**: When specified, **ONLY** these patterns are used (replaces defaults completely)
-  - Example: `--include "*.cs"` will analyze ONLY `.cs` files
-  - If omitted, all supported file types are analyzed
-  - Supports glob patterns: `*.py`, `src/**/*.ts`, `*.{js,jsx}`
-  
-- **`--exclude`**: When specified, patterns are **MERGED** with default ignore patterns
-  - Example: `--exclude "Tests,Specs"` will exclude these directories AND still exclude `.git`, `__pycache__`, `node_modules`, etc.
-  - Default patterns include: `.git`, `node_modules`, `__pycache__`, `*.pyc`, `bin/`, `dist/`, and many more
-  - Supports multiple formats:
-    - Exact names: `Tests`, `.env`, `config.local`
-    - Glob patterns: `*.test.js`, `*_test.py`, `*.min.*`
-    - Directory patterns: `build/`, `dist/`, `coverage/`
-
-#### Setting Persistent Defaults
-
-Save your preferred settings as defaults:
-
-```bash
-# Set include patterns for C# projects
-codewiki config agent --include "*.cs"
-
-# Exclude test projects by default (merged with default excludes)
-codewiki config agent --exclude "Tests,Specs,*.test.cs"
-
-# Set focus modules
-codewiki config agent --focus "src/core,src/api"
-
-# Set default documentation type
-codewiki config agent --doc-type architecture
-
-# View current agent settings
-codewiki config agent
-
-# Clear all agent settings
-codewiki config agent --clear
-```
-
-| Option | Description | Behavior | Example |
-|--------|-------------|----------|---------|
-| `--include` | File patterns to include | **Replaces** defaults | `*.cs`, `*.py`, `src/**/*.ts` |
-| `--exclude` | Patterns to exclude | **Merges** with defaults | `Tests,Specs`, `*.test.js`, `build/` |
-| `--focus` | Modules to document in detail | Standalone option | `src/core,src/api` |
-| `--doc-type` | Documentation style | Standalone option | `api`, `architecture`, `user-guide`, `developer` |
-| `--instructions` | Custom agent instructions | Standalone option | Free-form text |
-
-### Multilingual Documentation
-
-CodeWiki can generate documentation in languages other than English. Use the `--language` flag or set a persistent default via `codewiki config set`.
-
-**Supported language codes** (any IETF/BCP 47 code is accepted; common ones below):
-
-| Code | Language |
-|------|----------|
-| `en` | English (default) |
-| `zh` | Chinese (Simplified) |
-| `zh-tw` | Chinese (Traditional) |
-| `ja` | Japanese |
-| `ko` | Korean |
-| `fr` | French |
-| `de` | German |
-| `es` | Spanish |
-
-```bash
-# Generate documentation in Chinese for this run only
-codewiki generate --language zh
-
-# Set Chinese as the persistent default
-codewiki config set --language zh
-
-# Override the persistent default back to English
-codewiki generate --language en
-```
-
-> **Note:** Code snippets, file names, and identifiers always remain in their original language; only the descriptive prose is translated.
-
-### Token Settings
-
-CodeWiki allows you to configure maximum token limits for LLM calls. This is useful for:
-- Adapting to different model context windows
-- Controlling costs by limiting response sizes
-- Optimizing for faster response times
-
-```bash
-# Set max tokens for LLM responses (default: 32768)
-codewiki config set --max-tokens 16384
-
-# Set max tokens for module clustering (default: 36369)
-codewiki config set --max-token-per-module 40000
-
-# Set max tokens for leaf modules (default: 16000)
-codewiki config set --max-token-per-leaf-module 20000
-
-# Set max depth for hierarchical decomposition (default: 2)
-codewiki config set --max-depth 3
-
-# Set max concurrent modules processed in parallel (default: 3)
-codewiki config set --max-concurrent 5
-
-# Override at runtime for a single generation
-codewiki generate --max-tokens 16384 --max-token-per-module 40000 --max-depth 3 --max-concurrent 5
-
-# Override model at runtime (takes precedence over config for this run only)
-codewiki generate --main-model gpt-4o --long-context-model gpt-4o-128k --long-context-threshold 100000
-```
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--max-tokens` | Maximum output tokens for LLM response | 32768 |
-| `--max-token-per-module` | Input tokens threshold for module clustering | 36369 |
-| `--max-token-per-leaf-module` | Input tokens threshold for leaf modules | 16000 |
-| `--max-depth` | Maximum depth for hierarchical decomposition | 2 |
-| `--max-concurrent` | Maximum number of modules processed in parallel | 3 |
-| `--fallback-model` | Comma-separated fallback model chain | `glm-4p5` |
-| `--long-context-model` | Model for prompts exceeding the threshold | _(none)_ |
-| `--long-context-threshold` | Token count to trigger long-context model switch | 200000 |
-| `--language` | Language code for generated documentation | `en` |
-
-> **Runtime-only overrides** (available on `codewiki generate`, do not persist to config):
-> `--main-model`, `--long-context-model`, `--long-context-threshold`, `--max-tokens`, `--max-token-per-module`, `--max-token-per-leaf-module`, `--max-depth`, `--max-concurrent`, `--language`
-
-### Configuration Storage
-
-- **API keys**: Securely stored in system keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
-- **Settings & Agent Instructions**: `~/.codewiki/config.json`
+</details>
 
 ---
 
-## Documentation Output
+## Supported Languages
 
-Generated documentation includes both **textual descriptions** and **visual artifacts** for comprehensive understanding.
+| Language | Adapter | Extraction |
+|----------|---------|------------|
+| Python | `ast` module | Classes, methods, imports, signatures, visibility, `__all__` |
+| TypeScript | tree-sitter | Classes, methods, functions, imports, exports |
+| JavaScript | tree-sitter | Classes, methods, functions, imports |
+| Java | tree-sitter | Classes, methods, interfaces |
+| C | tree-sitter | Functions, structs, includes |
+| C++ | tree-sitter | Classes, functions, namespaces, includes |
+| C# | tree-sitter | Classes, methods, interfaces |
+| Go | tree-sitter | Functions, structs, interfaces |
+| Rust | tree-sitter | Functions, structs, traits, impls |
 
-### Textual Documentation
-- Repository overview with architecture guide
-- Module-level documentation with API references
-- Usage examples and implementation patterns
-- Cross-module interaction analysis
-
-### Visual Artifacts
-- System architecture diagrams (Mermaid)
-- Data flow visualizations
-- Dependency graphs and module relationships
-- Sequence diagrams for complex interactions
-
-### Output Structure
-
-```
-./docs/
-├── overview.md              # Repository overview (start here!)
-├── module1.md               # Module documentation
-├── module2.md               # Additional modules...
-├── module_tree.json         # Hierarchical module structure
-├── first_module_tree.json   # Initial clustering result
-├── metadata.json            # Generation metadata
-├── index.html               # Interactive viewer (with --github-pages)
-└── module1.html             # Pre-rendered static pages (with --static)
-```
-
-### HTML Viewer Features
-
-The interactive HTML viewer (`--github-pages`) and static pages (`--static`) include:
-- **Dark / light mode** with automatic OS preference detection and manual toggle
-- **Collapsible sidebar** with full module tree navigation
-- **Auto-generated table of contents** from document headings
-- **Syntax highlighting** for code blocks via highlight.js
-- **Math rendering** via KaTeX — `$inline$` and `$$block$$` LaTeX formulas render natively
-- **Mobile-responsive** layout with touch-friendly controls
-- **Back-to-top** button for long documents
-- **DeepWiki integration** — links to the corresponding DeepWiki page for quick comparison
+Python and TypeScript/JavaScript have enhanced adapters with import resolution and call extraction. Other languages use the generic adapter with basic symbol extraction.
 
 ---
 
-## Experimental Results
+## Development
 
-CodeWiki has been evaluated on **CodeWikiBench**, the first benchmark specifically designed for repository-level documentation quality assessment.
+```bash
+# Clone and install in development mode
+git clone https://github.com/nerdneilsfield/CodeWiki.git
+cd CodeWiki
+pip install -e ".[dev]"
 
-### Performance by Language Category
+# Run tests (536 tests)
+python -m pytest tests/ -q
 
-| Language Category | CodeWiki (Sonnet-4) | DeepWiki | Improvement |
-|-------------------|---------------------|----------|-------------|
-| High-Level (Python, JS, TS) | **79.14%** | 68.67% | **+10.47%** |
-| Managed (C#, Java) | **68.84%** | 64.80% | **+4.04%** |
-| Systems (C, C++) | 53.24% | 56.39% | -3.15% |
-| **Overall Average** | **68.79%** | **64.06%** | **+4.73%** |
-
-### Results on Representative Repositories
-
-| Repository | Language | LOC | CodeWiki-Sonnet-4 | DeepWiki | Improvement |
-|------------|----------|-----|-------------------|----------|-------------|
-| All-Hands-AI--OpenHands | Python | 229K | **82.45%** | 73.04% | **+9.41%** |
-| puppeteer--puppeteer | TypeScript | 136K | **83.00%** | 64.46% | **+18.54%** |
-| sveltejs--svelte | JavaScript | 125K | **71.96%** | 68.51% | **+3.45%** |
-| Unity-Technologies--ml-agents | C# | 86K | **79.78%** | 74.80% | **+4.98%** |
-| elastic--logstash | Java | 117K | **57.90%** | 54.80% | **+3.10%** |
-
-**View comprehensive results:** See [paper](https://arxiv.org/abs/2510.24428) for complete evaluation on 21 repositories spanning all supported languages.
-
----
-
-## How It Works
-
-### Architecture Overview
-
-CodeWiki employs a multi-stage pipeline for comprehensive documentation generation:
-
-1. **Dependency Analysis & Graph-Based Clustering**: Builds a dependency graph from the codebase and applies Louvain community detection to pre-cluster components by actual dependency and co-location structure. The LLM then refines these graph clusters into semantically named modules.
-
-2. **Hierarchical Decomposition**: Uses dynamic programming-inspired algorithms to recursively partition large modules until each fits within a context window, preserving architectural context across multiple granularity levels.
-
-3. **Recursive Multi-Agent Processing**: Implements adaptive multi-agent processing with dynamic task delegation. Each agent has access to tools for reading code, editing documentation, and delegating to sub-agents for complex modules.
-
-4. **Dynamic Task-Queue Concurrency**: Instead of level-by-level processing, a dynamic `asyncio.Queue` with N workers processes modules as they become ready. When all children of a parent complete, the parent is immediately enqueued — no waiting for unrelated modules. This significantly reduces idle time compared to traditional level-based parallelism.
-
-5. **Multi-Modal Synthesis**: Integrates textual descriptions with visual artifacts including architecture diagrams, data-flow representations, and sequence diagrams for comprehensive understanding.
-
-6. **Incremental Resume**: Completed modules are tracked with `_completed` flags in the module tree. If generation is interrupted, re-running `codewiki generate` automatically skips finished modules and resumes from where it left off.
-
-### Data Flow
-
-```
-┌─────────────┐    ┌───────────────┐    ┌──────────────┐    ┌──────────────┐
-│  Dependency  │───▶│ Graph-Based   │───▶│ Hierarchical │───▶│  Dynamic     │
-│  Analysis    │    │ Clustering    │    │ Decomposition│    │  Task Queue  │
-│              │    │ (Louvain)     │    │              │    │  (N workers) │
-└─────────────┘    └───────────────┘    └──────────────┘    └──────┬───────┘
-                                                                   │
-                    ┌───────────────┐    ┌──────────────┐          │
-                    │  Visual       │◀───│  Multi-Agent │◀─────────┘
-                    │  Artifacts    │    │  Processing  │
-                    └───────────────┘    └──────────────┘
+# Run index/clustering/generation/postprocess tests
+python -m pytest tests/test_index_*.py tests/test_clustering_*.py \
+    tests/test_generation_*.py tests/test_postprocess_*.py -q
 ```
 
 ---
 
-## Requirements
+## Performance
 
-- **Python 3.12+**
-- **Node.js** (for Mermaid diagram validation)
-- **LLM API access** (Anthropic Claude, OpenAI, etc.)
-- **Git** (for branch creation features)
+Evaluated on 30 repositories across 6 programming languages (up to 1.4M LOC):
 
----
-
-## Additional Resources
-
-### Documentation & Guides
-- **[Docker Deployment](docker/DOCKER_README.md)** - Containerized deployment instructions
-- **[Development Guide](DEVELOPMENT.md)** - Project structure, architecture, and contributing guidelines
-- **[CodeWikiBench](https://github.com/FSoft-AI4Code/CodeWikiBench)** - Repository-level documentation benchmark
-- **[Live Demo](https://fsoft-ai4code.github.io/codewiki-demo/)** - Interactive demo and examples
-
-### Academic Resources
-- **[Paper](https://arxiv.org/abs/2510.24428)** - Full research paper with detailed methodology and results
-- **[Citation](#citation)** - How to cite CodeWiki in your research
+| Category | CodeWiki | DeepWiki |
+|----------|----------|----------|
+| High-Level (Python, JS, TS) | **79.14%** | 68.67% |
+| Managed (C#, Java) | **68.84%** | 64.80% |
+| Systems (C, C++) | 53.24% | 56.39% |
+| **Overall** | **68.79%** | 64.06% |
 
 ---
 
 ## Citation
 
-If you use CodeWiki in your research, please cite:
-
 ```bibtex
-@misc{hoang2025codewikievaluatingaisability,
-      title={CodeWiki: Evaluating AI's Ability to Generate Holistic Documentation for Large-Scale Codebases},
-      author={Anh Nguyen Hoang and Minh Le-Anh and Bach Le and Nghi D. Q. Bui},
-      year={2025},
-      eprint={2510.24428},
-      archivePrefix={arXiv},
-      primaryClass={cs.SE},
-      url={https://arxiv.org/abs/2510.24428},
+@article{codewiki2025,
+  title={Evaluating AI's Ability to Generate Holistic Documentation for Large-Scale Codebases},
+  author={...},
+  journal={arXiv preprint arXiv:2510.24428},
+  year={2025}
 }
 ```
 
----
-
-## Star History
-
-<p align="center">
-  <a href="https://star-history.com/#FSoft-AI4Code/CodeWiki&Date">
-   <picture>
-     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=FSoft-AI4Code/CodeWiki&type=Date&theme=dark" />
-     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=FSoft-AI4Code/CodeWiki&type=Date" />
-     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=FSoft-AI4Code/CodeWiki&type=Date" />
-   </picture>
-  </a>
-</p>
-
----
-
 ## License
 
-This project is licensed under the MIT License.
+MIT
