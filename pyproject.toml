@@ -57,6 +57,7 @@ dependencies = [
     "mermaid-py>=0.8.0",
     "markdown-it-py>=3.0.0",
     "json_repair>=0.30.0",
+    "tomli_w>=1.0.0",
 ]
 
 [external]
@@ -66,6 +67,16 @@ build-requires = [
 ]
 
 [project.optional-dependencies]
+cmake = [
+    "tree-sitter-cmake>=0.7.2",
+]
+make = [
+    "tree-sitter-make>=1.1.0",
+]
+build-analyzers = [
+    "tree-sitter-cmake>=0.7.2",
+    "tree-sitter-make>=1.1.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
@@ -73,6 +84,9 @@ dev = [
     "black>=23.0.0",
     "mypy>=1.5.0",
     "ruff>=0.1.0",
+    "ipython>=8.0.0",
+    "tree-sitter-cmake>=0.7.2",
+    "tree-sitter-make>=1.1.0",
 ]
 
 [project.scripts]
