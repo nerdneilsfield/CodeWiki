@@ -1,5 +1,6 @@
 # tests/test_index_integration.py
 """Integration test: IndexBuilder works with the existing pipeline."""
+
 import textwrap
 import pytest
 from codewiki.src.be.index.index_builder import IndexBuilder
@@ -10,7 +11,8 @@ def python_repo(tmp_path):
     pkg = tmp_path / "mypackage"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("")
-    (pkg / "service.py").write_text(textwrap.dedent('''
+    (pkg / "service.py").write_text(
+        textwrap.dedent('''
         from .models import User
 
         class AuthService:
@@ -26,8 +28,10 @@ def python_repo(tmp_path):
 
             def _validate_token(self, token: str) -> bool:
                 return len(token) > 0
-    '''))
-    (pkg / "models.py").write_text(textwrap.dedent('''
+    ''')
+    )
+    (pkg / "models.py").write_text(
+        textwrap.dedent('''
         class User:
             """A user model."""
 
@@ -40,7 +44,8 @@ def python_repo(tmp_path):
             @staticmethod
             def find(username: str) -> "User":
                 return User(username)
-    '''))
+    ''')
+    )
     return str(tmp_path)
 
 
@@ -88,6 +93,7 @@ def test_serialization_roundtrip(python_repo):
     data = products.to_dict()
 
     from codewiki.src.be.index.index_builder import IndexProducts
+
     restored = IndexProducts.from_dict(data)
     assert len(restored.symbol_table.all_symbols()) == len(products.symbol_table.all_symbols())
     assert len(restored.import_graph.all_imports()) == len(products.import_graph.all_imports())
@@ -95,27 +101,32 @@ def test_serialization_roundtrip(python_repo):
 
 # ── New edge-case tests ───────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def mixed_repo(tmp_path):
     """Repo with both Python and TypeScript files."""
     py_pkg = tmp_path / "backend"
     py_pkg.mkdir()
     (py_pkg / "__init__.py").write_text("")
-    (py_pkg / "server.py").write_text(textwrap.dedent('''
+    (py_pkg / "server.py").write_text(
+        textwrap.dedent('''
         class Server:
             """Backend server."""
             def start(self):
                 pass
-    '''))
+    ''')
+    )
     ts_dir = tmp_path / "frontend"
     ts_dir.mkdir()
-    (ts_dir / "app.ts").write_text(textwrap.dedent('''
+    (ts_dir / "app.ts").write_text(
+        textwrap.dedent("""
         export class AppComponent {
             render() {
                 return null;
             }
         }
-    '''))
+    """)
+    )
     return str(tmp_path)
 
 
@@ -161,7 +172,8 @@ def test_syntax_error_in_one_file_does_not_prevent_others(tmp_path):
     pkg.mkdir()
     (pkg / "__init__.py").write_text("")
     (pkg / "broken.py").write_text("def broken_func(:\n    # syntax error\n    pass\n")
-    (pkg / "good.py").write_text(textwrap.dedent('''
+    (pkg / "good.py").write_text(
+        textwrap.dedent('''
         def working_function():
             """Works correctly."""
             return True
@@ -170,7 +182,8 @@ def test_syntax_error_in_one_file_does_not_prevent_others(tmp_path):
             """A working class."""
             def method(self):
                 pass
-    '''))
+    ''')
+    )
     builder = IndexBuilder(repo_path=str(tmp_path))
     products = builder.build()
 

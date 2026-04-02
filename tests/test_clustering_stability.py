@@ -3,6 +3,7 @@
 TDD: tests written before implementation.
 Covers StabilityReport and measure_tree_stability from stability.py.
 """
+
 import pytest
 
 from codewiki.src.be.clustering.stability import (

@@ -33,20 +33,10 @@ from codewiki.src.config_loader import load_app_config
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='Generate comprehensive documentation for Python components in dependency order.'
+        description="Generate comprehensive documentation for Python components in dependency order."
     )
-    parser.add_argument(
-        '--repo-path',
-        type=str,
-        required=True,
-        help='Path to the repository'
-    )
-    parser.add_argument(
-        '--config',
-        type=str,
-        required=True,
-        help='Path to TOML config file'
-    )
+    parser.add_argument("--repo-path", type=str, required=True, help="Path to the repository")
+    parser.add_argument("--config", type=str, required=True, help="Path to TOML config file")
 
     return parser.parse_args()
 
@@ -65,11 +55,11 @@ async def main() -> None:
         # Parse arguments and create configuration
         args = parse_arguments()
         config = _build_runtime_config_from_args(args)
-        
+
         # Create and run documentation generator
         doc_generator = DocumentationGenerator(config)
         await doc_generator.run()
-        
+
     except KeyboardInterrupt:
         logger.debug("Documentation generation interrupted by user")
     except Exception as e:

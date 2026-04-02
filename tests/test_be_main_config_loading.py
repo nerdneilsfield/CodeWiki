@@ -7,7 +7,10 @@ def test_build_runtime_config_from_args_uses_toml_loader(tmp_path):
     from codewiki.src.be import main as mod
 
     config_path = tmp_path / "codewiki.toml"
-    config_path.write_text("[runtime]\noutput_dir='docs'\n[generation]\nmain_model='openai/gpt-4o-mini'\ncluster_model='openai/gpt-4o-mini'\n[[providers]]\nname='openai'\ntype='openai_compatible'\nmodel_list=['gpt-4o-mini']\napi_keys=[]\n", encoding="utf-8")
+    config_path.write_text(
+        "[runtime]\noutput_dir='docs'\n[generation]\nmain_model='openai/gpt-4o-mini'\ncluster_model='openai/gpt-4o-mini'\n[[providers]]\nname='openai'\ntype='openai_compatible'\nmodel_list=['gpt-4o-mini']\napi_keys=[]\n",
+        encoding="utf-8",
+    )
 
     app_config = MagicMock()
     sentinel_runtime = object()

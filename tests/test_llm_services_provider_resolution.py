@@ -19,8 +19,12 @@ def test_create_model_from_ref_uses_openai_model_for_openai_provider(runtime_con
 
     sentinel_provider = object()
     sentinel_model = object()
-    with patch.object(llm_services, "_make_provider_for_model", return_value=sentinel_provider) as mock_provider, \
-         patch.object(llm_services, "OpenAIModel", return_value=sentinel_model) as mock_model:
+    with (
+        patch.object(
+            llm_services, "_make_provider_for_model", return_value=sentinel_provider
+        ) as mock_provider,
+        patch.object(llm_services, "OpenAIModel", return_value=sentinel_model) as mock_model,
+    ):
         result = llm_services.create_model_from_ref(runtime_config, "openai/gpt-4o-mini")
 
     assert result is sentinel_model
@@ -35,9 +39,15 @@ def test_create_model_from_ref_uses_anthropic_model_for_claude_provider(runtime_
 
     sentinel_provider = object()
     sentinel_model = object()
-    with patch.object(llm_services, "_make_provider_for_model", return_value=sentinel_provider) as mock_provider, \
-         patch.object(llm_services, "AnthropicModel", return_value=sentinel_model) as mock_model:
-        result = llm_services.create_model_from_ref(runtime_config, "claude/claude-sonnet-4-5-20250929")
+    with (
+        patch.object(
+            llm_services, "_make_provider_for_model", return_value=sentinel_provider
+        ) as mock_provider,
+        patch.object(llm_services, "AnthropicModel", return_value=sentinel_model) as mock_model,
+    ):
+        result = llm_services.create_model_from_ref(
+            runtime_config, "claude/claude-sonnet-4-5-20250929"
+        )
 
     assert result is sentinel_model
     mock_provider.assert_called_once()
@@ -50,7 +60,9 @@ def test_create_model_from_ref_rejects_unsupported_provider_type(runtime_config)
     from codewiki.src.be import llm_services
 
     runtime_config.providers.append(
-        ProviderConfig(name="bad", type="unsupported", model_list=["x"], api_keys=[], extra_headers={})
+        ProviderConfig(
+            name="bad", type="unsupported", model_list=["x"], api_keys=[], extra_headers={}
+        )
     )
 
     with pytest.raises(ValueError, match="unsupported"):
@@ -65,8 +77,12 @@ def test_create_fallback_models_supports_cross_provider_chain(runtime_config):
     runtime_config.long_context_model = None
 
     created = [object(), object(), object()]
-    with patch.object(llm_services, "create_model_from_ref", side_effect=created) as mock_create, \
-         patch.object(llm_services, "FallbackModel", side_effect=lambda *args: args) as mock_fallback:
+    with (
+        patch.object(llm_services, "create_model_from_ref", side_effect=created) as mock_create,
+        patch.object(
+            llm_services, "FallbackModel", side_effect=lambda *args: args
+        ) as mock_fallback,
+    ):
         result = llm_services.create_fallback_models(runtime_config)
 
     assert result == tuple(created)

@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 
 from tree_sitter import Parser, Language
+
 try:
     import tree_sitter_make
 except ImportError as _exc:
@@ -61,9 +62,7 @@ class TreeSitterMakefileAnalyzer:
         target_names = set()
         for node in root.children:
             if node.type == "rule":
-                targets_node = next(
-                    (c for c in node.children if c.type == "targets"), None
-                )
+                targets_node = next((c for c in node.children if c.type == "targets"), None)
                 if targets_node:
                     for word in targets_node.children:
                         if word.type == "word":
@@ -72,9 +71,7 @@ class TreeSitterMakefileAnalyzer:
         # First pass continued: create Node objects for each target
         for node in root.children:
             if node.type == "rule":
-                targets_node = next(
-                    (c for c in node.children if c.type == "targets"), None
-                )
+                targets_node = next((c for c in node.children if c.type == "targets"), None)
                 if targets_node:
                     for word in targets_node.children:
                         if word.type == "word":
@@ -88,7 +85,7 @@ class TreeSitterMakefileAnalyzer:
                                     file_path=str(self.file_path),
                                     relative_path=self._get_relative_path(),
                                     source_code="\n".join(
-                                        lines[node.start_point[0]:node.end_point[0] + 1]
+                                        lines[node.start_point[0] : node.end_point[0] + 1]
                                     ),
                                     start_line=node.start_point[0] + 1,
                                     end_line=node.end_point[0] + 1,
@@ -106,12 +103,8 @@ class TreeSitterMakefileAnalyzer:
         # Second pass: extract target → prerequisite relationships
         for node in root.children:
             if node.type == "rule":
-                targets_node = next(
-                    (c for c in node.children if c.type == "targets"), None
-                )
-                prereqs_node = next(
-                    (c for c in node.children if c.type == "prerequisites"), None
-                )
+                targets_node = next((c for c in node.children if c.type == "targets"), None)
+                prereqs_node = next((c for c in node.children if c.type == "prerequisites"), None)
                 if targets_node and prereqs_node:
                     target_text = " ".join(
                         self._node_text(w).strip()
@@ -143,31 +136,33 @@ class TreeSitterMakefileAnalyzer:
                                 rel_type = "prerequisite"
                                 callee = prereq
                                 is_resolved = False
-                            self.call_relationships.append(CallRelationship(
-                                caller=caller_id,
-                                callee=callee,
-                                call_line=node.start_point[0] + 1,
-                                is_resolved=is_resolved,
-                                relationship_type=rel_type,
-                            ))
+                            self.call_relationships.append(
+                                CallRelationship(
+                                    caller=caller_id,
+                                    callee=callee,
+                                    call_line=node.start_point[0] + 1,
+                                    is_resolved=is_resolved,
+                                    relationship_type=rel_type,
+                                )
+                            )
 
                 # Detect v++/vitis_hls in recipe
-                recipe_node = next(
-                    (c for c in node.children if c.type == "recipe"), None
-                )
+                recipe_node = next((c for c in node.children if c.type == "recipe"), None)
                 if recipe_node and targets_node:
                     recipe_text = self._node_text(recipe_node)
                     if "v++" in recipe_text or "vitis_hls" in recipe_text:
                         for word in targets_node.children:
                             if word.type == "word":
                                 target_name = self._node_text(word).strip()
-                                self.call_relationships.append(CallRelationship(
-                                    caller=self._get_component_id(target_name),
-                                    callee="v++",
-                                    call_line=node.start_point[0] + 1,
-                                    is_resolved=False,
-                                    relationship_type="hls_compile",
-                                ))
+                                self.call_relationships.append(
+                                    CallRelationship(
+                                        caller=self._get_component_id(target_name),
+                                        callee="v++",
+                                        call_line=node.start_point[0] + 1,
+                                        is_resolved=False,
+                                        relationship_type="hls_compile",
+                                    )
+                                )
 
 
 def analyze_makefile_file(

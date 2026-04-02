@@ -15,24 +15,36 @@ from typing import Dict, List, Optional, Any
 logger = logging.getLogger(__name__)
 
 _EXCLUDED_DIRS = {
-    "node_modules", ".git", "__pycache__", ".venv", "venv",
-    ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
-    ".eggs", "*.egg-info",
+    "node_modules",
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    "dist",
+    "build",
+    ".eggs",
+    "*.egg-info",
 }
 _DOC_EXTENSIONS = {".md", ".rst", ".txt"}
 # Internal guide files that should not be collected as "generated docs"
 _GUIDE_PREFIXES = (
-    "guide-",           # all guide output files
-    "_guide_cache", "_parent_doc_hashes", "_tree_cache_meta",
+    "guide-",  # all guide output files
+    "_guide_cache",
+    "_parent_doc_hashes",
+    "_tree_cache_meta",
 )
 
 
 @dataclass
 class DocSnippet:
     """A single documentation snippet with metadata."""
-    path: str           # relative path or identifier
-    content: str        # text content
-    source: str         # "repo" | "generated" | "docstring"
+
+    path: str  # relative path or identifier
+    content: str  # text content
+    source: str  # "repo" | "generated" | "docstring"
     token_estimate: int = 0
 
     def __post_init__(self):
@@ -44,12 +56,15 @@ class DocSnippet:
 @dataclass
 class DocsBundle:
     """Unified bundle of documentation from all three layers."""
+
     repo_docs: List[DocSnippet] = field(default_factory=list)
     generated_docs: List[DocSnippet] = field(default_factory=list)
     docstrings: List[DocSnippet] = field(default_factory=list)
 
     def select_relevant(
-        self, topic: str, max_tokens: int,
+        self,
+        topic: str,
+        max_tokens: int,
     ) -> List[DocSnippet]:
         """Select most relevant doc snippets for a given topic.
 
@@ -149,9 +164,11 @@ class RepoDocsCollector:
             doc = getattr(node, "docstring", None) or ""
             if len(doc.strip()) < 20:
                 continue
-            snippets.append(DocSnippet(
-                path=comp_id,
-                content=doc.strip(),
-                source="docstring",
-            ))
+            snippets.append(
+                DocSnippet(
+                    path=comp_id,
+                    content=doc.strip(),
+                    source="docstring",
+                )
+            )
         return snippets

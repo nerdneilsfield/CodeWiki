@@ -940,15 +940,20 @@ EXTENSION_TO_LANGUAGE = {
 }
 
 
-def format_user_prompt(module_name: str, core_component_ids: list[str], components: Dict[str, Any], module_tree: dict[str, any]) -> str:
+def format_user_prompt(
+    module_name: str,
+    core_component_ids: list[str],
+    components: Dict[str, Any],
+    module_tree: dict[str, any],
+) -> str:
     """
     Format the user prompt with module name and organized core component codes.
-    
+
     Args:
         module_name: Name of the module to document
         core_component_ids: List of component IDs to include
         components: Dictionary mapping component IDs to CodeComponent objects
-    
+
     Returns:
         Formatted user prompt string
     """
@@ -962,7 +967,9 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
             is_current = key == module_name
             if is_current:
                 lines.append(f"{'  ' * indent}{key} (current module)")
-                lines.append(f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}")
+                lines.append(
+                    f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}"
+                )
             else:
                 lines.append(f"{'  ' * indent}{key}")
             if isinstance(value["children"], dict) and len(value["children"]) > 0:
@@ -1010,14 +1017,20 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
                 if node.component_type in ("kernel_instance", "hls_project"):
                     core_component_codes += f"  HLS Kernel: yes (Vitis kernel instance)\n"
                 else:
-                    core_component_codes += f"  HLS Kernel: yes (extern \"C\" / Vitis top)\n"
+                    core_component_codes += f'  HLS Kernel: yes (extern "C" / Vitis top)\n'
             hls_pragmas = getattr(node, "hls_pragmas", None)
             if hls_pragmas:
                 for pragma in hls_pragmas:
                     ptype = getattr(pragma, "pragma_type", "") or pragma.get("pragma_type", "")
-                    semantic = getattr(pragma, "hardware_semantic", "") or pragma.get("hardware_semantic", "") or ptype
+                    semantic = (
+                        getattr(pragma, "hardware_semantic", "")
+                        or pragma.get("hardware_semantic", "")
+                        or ptype
+                    )
                     params_d = getattr(pragma, "params", {}) or pragma.get("params", {})
-                    param_str = ", ".join(f"{k}={v}" for k, v in params_d.items()) if params_d else ""
+                    param_str = (
+                        ", ".join(f"{k}={v}" for k, v in params_d.items()) if params_d else ""
+                    )
                     core_component_codes += f"  #pragma HLS {ptype}"
                     if param_str:
                         core_component_codes += f" ({param_str})"
@@ -1026,7 +1039,7 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
                     core_component_codes += "\n"
             # Docstring (truncated)
             if node.docstring:
-                doc = node.docstring.strip().split('\n')[0][:200]
+                doc = node.docstring.strip().split("\n")[0][:200]
                 core_component_codes += f"  Summary: {doc}\n"
             # Dependencies within this module
             deps_in_module = node.depends_on & module_ids
@@ -1037,13 +1050,15 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
             if deps_external:
                 core_component_codes += f"  External deps: {', '.join(sorted(deps_external))}\n"
 
-        ext = '.' + path.split('.')[-1] if '.' in path else ''
-        lang = EXTENSION_TO_LANGUAGE.get(ext, ext.lstrip('.') or 'text')
+        ext = "." + path.split(".")[-1] if "." in path else ""
+        lang = EXTENSION_TO_LANGUAGE.get(ext, ext.lstrip(".") or "text")
         core_component_codes += f"\n## File Content:\n```{lang}\n"
 
         # Read content of the file using the first component's file path
         try:
-            core_component_codes += file_manager.load_text(components[component_ids_in_file[0]].file_path)
+            core_component_codes += file_manager.load_text(
+                components[component_ids_in_file[0]].file_path
+            )
         except (FileNotFoundError, IOError) as e:
             core_component_codes += f"# Error reading file: {e}\n"
 
@@ -1116,10 +1131,8 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
     # Find components outside this module that depend on it, extract their
     # source_code snippet (the function body), and inject as usage examples.
     _MAX_CALLER_SNIPPETS = 4
-    _MAX_SNIPPET_CHARS   = 1000
-    _EXAMPLE_PATH_RE = re.compile(
-        r'(?:test|example|demo|sample|bench)', re.IGNORECASE
-    )
+    _MAX_SNIPPET_CHARS = 1000
+    _EXAMPLE_PATH_RE = re.compile(r"(?:test|example|demo|sample|bench)", re.IGNORECASE)
 
     caller_snippets: list[dict] = []
     for ext_cid, ext_node in components.items():
@@ -1135,14 +1148,16 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
         if truncated:
             snippet = snippet[:_MAX_SNIPPET_CHARS]
         path = ext_node.relative_path or ""
-        caller_snippets.append({
-            "path":      path,
-            "name":      ext_node.name,
-            "calls":     sorted(called),
-            "snippet":   snippet,
-            "truncated": truncated,
-            "is_test":   bool(_EXAMPLE_PATH_RE.search(path)),
-        })
+        caller_snippets.append(
+            {
+                "path": path,
+                "name": ext_node.name,
+                "calls": sorted(called),
+                "snippet": snippet,
+                "truncated": truncated,
+                "is_test": bool(_EXAMPLE_PATH_RE.search(path)),
+            }
+        )
 
     # Prioritise test/example files; keep only the top N
     caller_snippets.sort(key=lambda x: (not x["is_test"], x["path"]))
@@ -1168,12 +1183,16 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
             )
         callers_section += "</REAL_USAGE_EXAMPLES>\n"
 
-    return USER_PROMPT.format(
-        module_name=module_name,
-        formatted_core_component_codes=core_component_codes,
-        module_tree=formatted_module_tree,
-    ) + dependency_section + extra_guides + callers_section
-
+    return (
+        USER_PROMPT.format(
+            module_name=module_name,
+            formatted_core_component_codes=core_component_codes,
+            module_tree=formatted_module_tree,
+        )
+        + dependency_section
+        + extra_guides
+        + callers_section
+    )
 
 
 def format_cluster_prompt(
@@ -1195,10 +1214,16 @@ def format_cluster_prompt(
             is_current = key == module_name
             if is_current:
                 lines.append(f"{'  ' * indent}{key} (current module)")
-                lines.append(f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}")
+                lines.append(
+                    f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}"
+                )
             else:
                 lines.append(f"{'  ' * indent}{key}")
-            if ("children" in value) and isinstance(value["children"], dict) and len(value["children"]) > 0:
+            if (
+                ("children" in value)
+                and isinstance(value["children"], dict)
+                and len(value["children"]) > 0
+            ):
                 lines.append(f"{'  ' * (indent + 1)} Children:")
                 _format_module_tree(value["children"], indent + 2)
 
@@ -1261,7 +1286,9 @@ def _build_language_section(output_language: str) -> str:
     )
 
 
-def format_system_prompt(module_name: str, custom_instructions: str = None, output_language: str = "en") -> str:
+def format_system_prompt(
+    module_name: str, custom_instructions: str = None, output_language: str = "en"
+) -> str:
     """
     Format the system prompt with module name and optional custom instructions.
 
@@ -1278,11 +1305,15 @@ def format_system_prompt(module_name: str, custom_instructions: str = None, outp
         custom_section = f"\n\n<CUSTOM_INSTRUCTIONS>\n{custom_instructions}\n</CUSTOM_INSTRUCTIONS>"
     custom_section += _build_language_section(output_language)
 
-    result = SYSTEM_PROMPT.format(module_name=module_name, custom_instructions=custom_section).strip()
+    result = SYSTEM_PROMPT.format(
+        module_name=module_name, custom_instructions=custom_section
+    ).strip()
     return result + EVIDENCE_RULES_BLOCK
 
 
-def format_leaf_system_prompt(module_name: str, custom_instructions: str = None, output_language: str = "en") -> str:
+def format_leaf_system_prompt(
+    module_name: str, custom_instructions: str = None, output_language: str = "en"
+) -> str:
     """
     Format the leaf system prompt with module name and optional custom instructions.
 
@@ -1299,11 +1330,15 @@ def format_leaf_system_prompt(module_name: str, custom_instructions: str = None,
         custom_section = f"\n\n<CUSTOM_INSTRUCTIONS>\n{custom_instructions}\n</CUSTOM_INSTRUCTIONS>"
     custom_section += _build_language_section(output_language)
 
-    result = LEAF_SYSTEM_PROMPT.format(module_name=module_name, custom_instructions=custom_section).strip()
+    result = LEAF_SYSTEM_PROMPT.format(
+        module_name=module_name, custom_instructions=custom_section
+    ).strip()
     return result + EVIDENCE_RULES_BLOCK
 
 
-def format_overview_prompt(name: str, repo_structure: str, is_repo: bool = True, output_language: str = "en") -> str:
+def format_overview_prompt(
+    name: str, repo_structure: str, is_repo: bool = True, output_language: str = "en"
+) -> str:
     """
     Format the overview prompt for repo or module with optional language instruction.
 

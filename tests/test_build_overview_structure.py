@@ -44,4 +44,3 @@ def test_build_overview_structure_falls_back_to_existing_file_when_ledger_target
     result = gen.build_overview_structure(tree, [], str(tmp_path))
 
     assert result["CLI Transport"]["docs"] == "# CLI Transport\nActual docs"
-

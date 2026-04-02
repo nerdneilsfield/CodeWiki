@@ -2,6 +2,7 @@
 
 Aligned with v3.md section 4.3 three-step pipeline (L333-L347).
 """
+
 import logging
 from collections import defaultdict
 from typing import Any
@@ -184,9 +185,7 @@ def _merge_small_communities(
         for tiny in small:
             best_idx, best_score = 0, -1
             for idx, big in enumerate(large):
-                score = sum(
-                    1 for n in tiny for nbr in graph.neighbors(n) if nbr in big
-                )
+                score = sum(1 for n in tiny for nbr in graph.neighbors(n) if nbr in big)
                 if score > best_score:
                     best_idx, best_score = idx, score
             large[best_idx] = large[best_idx] | tiny
@@ -227,6 +226,7 @@ def partition_components(
     # Step 2: SCC contraction
     # Build directed edges from SymbolEdge list
     from codewiki.src.be.clustering.graph_builder import _extract_file_from_symbol
+
     file_to_comps: dict[str, list[str]] = defaultdict(list)
     for cid in component_ids:
         fp = component_file_map.get(cid, "")

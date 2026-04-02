@@ -1,13 +1,23 @@
 # tests/test_index_models.py
 """Tests for index layer data models."""
+
 import pytest
 from codewiki.src.be.index.models import (
-    SourceRange, SymbolKind, Visibility, ExportStatus, EdgeType, Confidence,
-    Symbol, ImportStatement, SymbolEdge, ComponentCard,
+    SourceRange,
+    SymbolKind,
+    Visibility,
+    ExportStatus,
+    EdgeType,
+    Confidence,
+    Symbol,
+    ImportStatement,
+    SymbolEdge,
+    ComponentCard,
 )
 
 
 # ── SourceRange ──────────────────────────────────────────────────────────────
+
 
 def test_source_range_basic():
     r = SourceRange(file_path="src/main.py", start_line=10, start_col=0, end_line=20, end_col=1)
@@ -18,6 +28,7 @@ def test_source_range_basic():
 
 # ── SymbolKind enum ──────────────────────────────────────────────────────────
 
+
 def test_symbol_kind_values():
     assert SymbolKind.CLASS.value == "class"
     assert SymbolKind.METHOD.value == "method"
@@ -26,6 +37,7 @@ def test_symbol_kind_values():
 
 
 # ── Symbol ───────────────────────────────────────────────────────────────────
+
 
 def test_symbol_minimal():
     s = Symbol(
@@ -81,6 +93,7 @@ def test_symbol_file_path_is_relative():
 
 # ── ImportStatement ──────────────────────────────────────────────────────────
 
+
 def test_import_statement_basic():
     imp = ImportStatement(
         file_path="src/main.py",
@@ -119,6 +132,7 @@ def test_import_statement_relative():
 
 # ── SymbolEdge ───────────────────────────────────────────────────────────────
 
+
 def test_symbol_edge_resolved():
     e = SymbolEdge(
         edge_type=EdgeType.CALLS,
@@ -151,6 +165,7 @@ def test_symbol_edge_unresolved():
 
 # ── ComponentCard ────────────────────────────────────────────────────────────
 
+
 def test_component_card_basic():
     card = ComponentCard(
         symbol_id="py:src/a.py#Foo(class)",
@@ -166,9 +181,11 @@ def test_component_card_basic():
 
 # ── New edge-case tests ───────────────────────────────────────────────────────
 
+
 def test_symbol_model_dump_is_json_serializable():
     """Symbol.model_dump() should produce a JSON-serializable dict (no custom types)."""
     import json
+
     s = Symbol(
         symbol_id="py:src/a.py#Foo(class)",
         lang="python",

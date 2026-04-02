@@ -1,11 +1,14 @@
 """Task 5: Makefile analyzer enhancements — comprehensive tests"""
+
 import pytest
 
-pytest.importorskip("tree_sitter_make", reason="tree-sitter-make not installed; pip install 'codewiki[make]'")
+pytest.importorskip(
+    "tree_sitter_make", reason="tree-sitter-make not installed; pip install 'codewiki[make]'"
+)
 
 from codewiki.src.be.dependency_analyzer.analyzers.makefile import analyze_makefile_file
 
-SAMPLE_MAKE = '''
+SAMPLE_MAKE = """
 CC = gcc
 
 main.o: main.c utils.h config.h
@@ -16,9 +19,9 @@ utils.o: utils.c utils.h
 
 all: main.o utils.o
 \t$(CC) -o app main.o utils.o
-'''
+"""
 
-VPP_MAKE = '''
+VPP_MAKE = """
 PLATFORM = xilinx_u200_xdma_201830_2
 
 all: kernel.xo host.exe
@@ -31,10 +34,11 @@ host.exe: host.cpp
 
 main.o: main.c utils.h
 \tgcc -c main.c
-'''
+"""
 
 
 # ── target extraction ──────────────────────────────────────────────────────────
+
 
 def test_target_extraction():
     nodes, rels = analyze_makefile_file("/tmp/Makefile", SAMPLE_MAKE, "/tmp")
@@ -55,6 +59,7 @@ def test_target_has_file_path():
 
 
 # ── dependency classification ──────────────────────────────────────────────────
+
 
 def test_header_dep_classification():
     nodes, rels = analyze_makefile_file("/tmp/Makefile", SAMPLE_MAKE, "/tmp")
@@ -80,12 +85,11 @@ def test_relationship_type_always_set():
     nodes, rels = analyze_makefile_file("/tmp/Makefile", SAMPLE_MAKE, "/tmp")
     for r in rels:
         assert r.relationship_type is not None
-        assert r.relationship_type in (
-            "header_dep", "compile_dep", "target_dep", "hls_compile"
-        )
+        assert r.relationship_type in ("header_dep", "compile_dep", "target_dep", "hls_compile")
 
 
 # ── v++/HLS detection ─────────────────────────────────────────────────────────
+
 
 def test_vpp_hls_compile_detected():
     nodes, rels = analyze_makefile_file("/tmp/Makefile", VPP_MAKE, "/tmp")
@@ -114,6 +118,7 @@ def test_vpp_source_dep_for_kernel():
 
 
 # ── mixed targets ──────────────────────────────────────────────────────────────
+
 
 def test_mixed_vpp_gcc_targets():
     nodes, rels = analyze_makefile_file("/tmp/Makefile", VPP_MAKE, "/tmp")

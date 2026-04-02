@@ -1,4 +1,5 @@
 """LLM-constrained naming for clusters. v2: LLM naming with heuristic fallback."""
+
 import logging
 from collections import Counter
 from typing import Any
@@ -123,15 +124,11 @@ def _name_clusters_with_llm(
         return None
 
     if not isinstance(parsed, list):
-        logger.warning(
-            "LLM naming response is not a list (got %s)", type(parsed).__name__
-        )
+        logger.warning("LLM naming response is not a list (got %s)", type(parsed).__name__)
         return None
 
     if len(parsed) != len(clusters):
-        logger.warning(
-            "LLM naming returned %d items for %d clusters", len(parsed), len(clusters)
-        )
+        logger.warning("LLM naming returned %d items for %d clusters", len(parsed), len(clusters))
         return None
 
     # Validate each entry has required keys, correct cluster_idx,
@@ -153,16 +150,14 @@ def _name_clusters_with_llm(
         # Validate bilingual title: should contain "(" for "中文名 (English Name)" format
         # If LLM returns monolingual title, still accept but log warning
         if "(" not in title and not _is_cjk_only(title):
-            logger.info(
-                "LLM naming entry %d title lacks bilingual format: %r", i, title
-            )
+            logger.info("LLM naming entry %d title lacks bilingual format: %r", i, title)
 
     return parsed
 
 
 def _is_cjk_only(text: str) -> bool:
     """Check if text is predominantly CJK characters (no need for bilingual parens)."""
-    cjk_count = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or '\u3400' <= c <= '\u4dbf')
+    cjk_count = sum(1 for c in text if "\u4e00" <= c <= "\u9fff" or "\u3400" <= c <= "\u4dbf")
     return cjk_count > len(text) * 0.5
 
 
@@ -189,9 +184,7 @@ def name_clusters(
     # Try LLM naming when config and cluster_model are available
     if config is not None and getattr(config, "cluster_model", None):
         try:
-            result = _name_clusters_with_llm(
-                clusters, component_file_map, config, components
-            )
+            result = _name_clusters_with_llm(clusters, component_file_map, config, components)
             if result is not None and len(result) == len(clusters):
                 return result
         except Exception as e:
@@ -201,9 +194,11 @@ def name_clusters(
     results = []
     for idx, cluster in enumerate(clusters):
         title, description = heuristic_cluster_name(cluster, component_file_map)
-        results.append({
-            "cluster_idx": idx,
-            "title": title,
-            "description": description,
-        })
+        results.append(
+            {
+                "cluster_idx": idx,
+                "title": title,
+                "description": description,
+            }
+        )
     return results

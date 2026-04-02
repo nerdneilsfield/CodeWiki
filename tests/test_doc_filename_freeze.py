@@ -63,5 +63,7 @@ def test_freeze_doc_filenames_uses_parent_stem_for_empty_child_path(tmp_path):
 
     gen._freeze_doc_filenames(tree)
 
-    assert tree["CLI Transport"]["children"]["io_abstractions"]["_doc_filename"] == "cli-io_abstractions.md"
-
+    assert (
+        tree["CLI Transport"]["children"]["io_abstractions"]["_doc_filename"]
+        == "cli-io_abstractions.md"
+    )

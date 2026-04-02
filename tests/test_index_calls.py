@@ -3,6 +3,7 @@
 
 TDD cycle: write tests first (RED), implement to make them GREEN.
 """
+
 import textwrap
 
 import pytest
@@ -63,7 +64,9 @@ def test_py_calls_same_file_function(tmp_path):
     foo_sym = next(s for s in st.all_symbols() if s.name == "foo" and s.kind == SymbolKind.FUNCTION)
     bar_sym = next(s for s in st.all_symbols() if s.name == "bar" and s.kind == SymbolKind.FUNCTION)
 
-    matching = [e for e in calls if e.from_symbol == foo_sym.symbol_id and e.to_symbol == bar_sym.symbol_id]
+    matching = [
+        e for e in calls if e.from_symbol == foo_sym.symbol_id and e.to_symbol == bar_sym.symbol_id
+    ]
     assert len(matching) == 1, f"Expected foo->bar CALLS edge, got: {calls}"
     assert matching[0].confidence == Confidence.HIGH
 
@@ -96,7 +99,11 @@ def test_py_calls_imported_function(tmp_path):
     caller_sym = next(s for s in st.all_symbols() if s.name == "caller")
     helper_sym = next(s for s in st.all_symbols() if s.name == "helper")
 
-    matching = [e for e in calls if e.from_symbol == caller_sym.symbol_id and e.to_symbol == helper_sym.symbol_id]
+    matching = [
+        e
+        for e in calls
+        if e.from_symbol == caller_sym.symbol_id and e.to_symbol == helper_sym.symbol_id
+    ]
     assert len(matching) == 1, f"Expected caller->helper CALLS edge, got: {calls}"
     assert matching[0].confidence == Confidence.HIGH
 
@@ -122,9 +129,15 @@ def test_py_calls_self_method(tmp_path):
 
     calls = [e for e in edges if e.edge_type == EdgeType.CALLS]
     run_sym = next(s for s in st.all_symbols() if s.name == "run" and s.kind == SymbolKind.METHOD)
-    helper_sym = next(s for s in st.all_symbols() if s.name == "helper" and s.kind == SymbolKind.METHOD)
+    helper_sym = next(
+        s for s in st.all_symbols() if s.name == "helper" and s.kind == SymbolKind.METHOD
+    )
 
-    matching = [e for e in calls if e.from_symbol == run_sym.symbol_id and e.to_symbol == helper_sym.symbol_id]
+    matching = [
+        e
+        for e in calls
+        if e.from_symbol == run_sym.symbol_id and e.to_symbol == helper_sym.symbol_id
+    ]
     assert len(matching) == 1, f"Expected run->helper CALLS edge, got: {calls}"
     assert matching[0].confidence == Confidence.HIGH
 
@@ -149,7 +162,8 @@ def test_py_calls_unresolved_external(tmp_path):
     calls = [e for e in edges if e.edge_type == EdgeType.CALLS]
     # os.path.join is external — to_symbol must be None, to_unresolved is set
     unresolved = [
-        e for e in calls
+        e
+        for e in calls
         if e.to_symbol is None and e.to_unresolved is not None and "join" in e.to_unresolved
     ]
     assert len(unresolved) >= 1, f"Expected unresolved os.path.join edge, got: {calls}"
@@ -207,7 +221,9 @@ def test_py_calls_evidence_ref_correct(tmp_path):
     bar_sym = next(s for s in st.all_symbols() if s.name == "bar" and s.kind == SymbolKind.FUNCTION)
     foo_sym = next(s for s in st.all_symbols() if s.name == "foo" and s.kind == SymbolKind.FUNCTION)
 
-    matching = [e for e in edges if e.from_symbol == foo_sym.symbol_id and e.to_symbol == bar_sym.symbol_id]
+    matching = [
+        e for e in edges if e.from_symbol == foo_sym.symbol_id and e.to_symbol == bar_sym.symbol_id
+    ]
     assert len(matching) == 1
     edge = matching[0]
     assert len(edge.evidence_refs) >= 1
@@ -243,8 +259,16 @@ def test_py_calls_nested_calls(tmp_path):
     foo_sym = next(s for s in st.all_symbols() if s.name == "foo" and s.kind == SymbolKind.FUNCTION)
     bar_sym = next(s for s in st.all_symbols() if s.name == "bar" and s.kind == SymbolKind.FUNCTION)
 
-    outer_to_foo = [e for e in calls if e.from_symbol == outer_sym.symbol_id and e.to_symbol == foo_sym.symbol_id]
-    outer_to_bar = [e for e in calls if e.from_symbol == outer_sym.symbol_id and e.to_symbol == bar_sym.symbol_id]
+    outer_to_foo = [
+        e
+        for e in calls
+        if e.from_symbol == outer_sym.symbol_id and e.to_symbol == foo_sym.symbol_id
+    ]
+    outer_to_bar = [
+        e
+        for e in calls
+        if e.from_symbol == outer_sym.symbol_id and e.to_symbol == bar_sym.symbol_id
+    ]
 
     assert len(outer_to_foo) >= 1, f"Expected outer->foo edge, got: {calls}"
     assert len(outer_to_bar) >= 1, f"Expected outer->bar edge, got: {calls}"
@@ -271,10 +295,18 @@ def test_py_calls_class_instantiation(tmp_path):
     edges = adapter.extract_calls(st, ig)
 
     calls = [e for e in edges if e.edge_type == EdgeType.CALLS]
-    make_sym = next(s for s in st.all_symbols() if s.name == "make" and s.kind == SymbolKind.FUNCTION)
-    myclass_sym = next(s for s in st.all_symbols() if s.name == "MyClass" and s.kind == SymbolKind.CLASS)
+    make_sym = next(
+        s for s in st.all_symbols() if s.name == "make" and s.kind == SymbolKind.FUNCTION
+    )
+    myclass_sym = next(
+        s for s in st.all_symbols() if s.name == "MyClass" and s.kind == SymbolKind.CLASS
+    )
 
-    matching = [e for e in calls if e.from_symbol == make_sym.symbol_id and e.to_symbol == myclass_sym.symbol_id]
+    matching = [
+        e
+        for e in calls
+        if e.from_symbol == make_sym.symbol_id and e.to_symbol == myclass_sym.symbol_id
+    ]
     assert len(matching) >= 1, f"Expected make->MyClass CALLS edge, got: {calls}"
 
 
@@ -285,13 +317,15 @@ def test_index_builder_two_pass_produces_calls_edges(tmp_path):
     """IndexBuilder.build() with two-pass must include CALLS edges in products.edges."""
     from codewiki.src.be.index.index_builder import IndexBuilder
 
-    (tmp_path / "funcs.py").write_text(textwrap.dedent("""\
+    (tmp_path / "funcs.py").write_text(
+        textwrap.dedent("""\
         def bar():
             pass
 
         def foo():
             bar()
-    """))
+    """)
+    )
     builder = IndexBuilder(repo_path=str(tmp_path))
     products = builder.build()
 
@@ -430,8 +464,7 @@ def test_ts_calls_function_call(tmp_path):
     assert bar_sym is not None, "bar symbol not found"
 
     matching = [
-        e for e in calls
-        if e.from_symbol == foo_sym.symbol_id and e.to_symbol == bar_sym.symbol_id
+        e for e in calls if e.from_symbol == foo_sym.symbol_id and e.to_symbol == bar_sym.symbol_id
     ]
     assert len(matching) >= 1, (
         f"Expected foo->bar CALLS edge. from={foo_sym.symbol_id}, to={bar_sym.symbol_id}. Got: {calls}"
@@ -466,12 +499,11 @@ def test_ts_calls_this_method(tmp_path):
     assert helper_sym is not None, "helper symbol not found"
 
     matching = [
-        e for e in calls
+        e
+        for e in calls
         if e.from_symbol == run_sym.symbol_id and e.to_symbol == helper_sym.symbol_id
     ]
-    assert len(matching) >= 1, (
-        f"Expected run->helper CALLS edge. Got: {calls}"
-    )
+    assert len(matching) >= 1, f"Expected run->helper CALLS edge. Got: {calls}"
 
 
 # ── TS: calling an imported symbol ────────────────────────────────────────────
@@ -503,12 +535,11 @@ def test_ts_calls_imported_symbol(tmp_path):
     assert helper_sym is not None, "helper symbol not found"
 
     matching = [
-        e for e in calls
+        e
+        for e in calls
         if e.from_symbol == caller_sym.symbol_id and e.to_symbol == helper_sym.symbol_id
     ]
-    assert len(matching) >= 1, (
-        f"Expected caller->helper resolved CALLS edge. Got: {calls}"
-    )
+    assert len(matching) >= 1, f"Expected caller->helper resolved CALLS edge. Got: {calls}"
     assert matching[0].confidence == Confidence.HIGH
 
 
@@ -530,7 +561,8 @@ def test_ts_calls_unresolved(tmp_path):
     calls = [e for e in edges if e.edge_type == EdgeType.CALLS]
 
     unresolved = [
-        e for e in calls
+        e
+        for e in calls
         if e.to_symbol is None
         and e.to_unresolved is not None
         and "unknownGlobal" in e.to_unresolved
@@ -557,11 +589,18 @@ def test_ts_calls_builtins_filtered(tmp_path):
 
     calls = [e for e in edges if e.edge_type == EdgeType.CALLS]
     filtered_names = {
-        "console.log", "console.warn", "console.error",
-        "setTimeout", "setInterval",
-        "JSON.stringify", "JSON.parse",
-        "parseInt", "parseFloat",
-        "Array.isArray", "Object.keys", "Object.values",
+        "console.log",
+        "console.warn",
+        "console.error",
+        "setTimeout",
+        "setInterval",
+        "JSON.stringify",
+        "JSON.parse",
+        "parseInt",
+        "parseFloat",
+        "Array.isArray",
+        "Object.keys",
+        "Object.values",
         "Promise.resolve",
     }
     for edge in calls:
@@ -579,8 +618,12 @@ from codewiki.src.be.dependency_analyzer.models.core import CallRelationship
 from codewiki.src.be.index.models import Symbol, SymbolKind, Visibility, ExportStatus, SourceRange
 
 
-def _make_symbol(name: str, qualified_name: str, file_path: str = "mod.py",
-                 kind: SymbolKind = SymbolKind.FUNCTION) -> Symbol:
+def _make_symbol(
+    name: str,
+    qualified_name: str,
+    file_path: str = "mod.py",
+    kind: SymbolKind = SymbolKind.FUNCTION,
+) -> Symbol:
     return Symbol(
         symbol_id=f"py:{file_path}#{name}(function)",
         lang="python",
@@ -723,5 +766,7 @@ def test_generic_calls_unresolved_caller_still_has_evidence():
     assert len(edges) == 1
     edge = edges[0]
     assert edge.from_symbol.startswith("unresolved:")
-    assert len(edge.evidence_refs) >= 1, "Evidence refs must not be empty even for unresolved caller"
+    assert len(edge.evidence_refs) >= 1, (
+        "Evidence refs must not be empty even for unresolved caller"
+    )
     assert edge.evidence_refs[0].start_line == 99

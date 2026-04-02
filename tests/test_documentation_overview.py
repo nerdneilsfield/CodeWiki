@@ -126,7 +126,9 @@ async def test_generate_parent_module_docs_skips_when_input_hash_matches(tmp_pat
         module_tree=tree,
         working_dir=str(docs_dir),
         gen_state=state,
-        call_llm=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not call llm")),
+        call_llm=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("should not call llm")
+        ),
     )
 
     monkeypatch.setattr(

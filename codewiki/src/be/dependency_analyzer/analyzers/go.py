@@ -73,7 +73,7 @@ class TreeSitterGoAnalyzer:
                     component_type="function",
                     file_path=str(self.file_path),
                     relative_path=self._get_relative_path(),
-                    source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                    source_code="\n".join(lines[node.start_point[0] : node.end_point[0] + 1]),
                     start_line=node.start_point[0] + 1,
                     end_line=node.end_point[0] + 1,
                     has_docstring=False,
@@ -103,7 +103,7 @@ class TreeSitterGoAnalyzer:
                     component_type="method",
                     file_path=str(self.file_path),
                     relative_path=self._get_relative_path(),
-                    source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                    source_code="\n".join(lines[node.start_point[0] : node.end_point[0] + 1]),
                     start_line=node.start_point[0] + 1,
                     end_line=node.end_point[0] + 1,
                     has_docstring=False,
@@ -121,7 +121,9 @@ class TreeSitterGoAnalyzer:
         elif node.type == "type_declaration":
             for spec in node.children:
                 if spec.type == "type_spec":
-                    name_node = next((c for c in spec.children if c.type == "type_identifier"), None)
+                    name_node = next(
+                        (c for c in spec.children if c.type == "type_identifier"), None
+                    )
                     type_node = spec.children[-1] if spec.children else None
                     if name_node and type_node:
                         name = self._node_text(name_node)
@@ -138,7 +140,9 @@ class TreeSitterGoAnalyzer:
                             component_type=node_type,
                             file_path=str(self.file_path),
                             relative_path=self._get_relative_path(),
-                            source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                            source_code="\n".join(
+                                lines[node.start_point[0] : node.end_point[0] + 1]
+                            ),
                             start_line=node.start_point[0] + 1,
                             end_line=node.end_point[0] + 1,
                             has_docstring=False,
@@ -199,12 +203,14 @@ class TreeSitterGoAnalyzer:
                 caller_id = self._find_containing_fn(node, top_level_nodes)
                 callee_name = self._resolve_call_target(fn_node)
                 if caller_id and callee_name and not self._is_builtin(callee_name):
-                    self.call_relationships.append(CallRelationship(
-                        caller=caller_id,
-                        callee=callee_name,
-                        call_line=node.start_point[0] + 1,
-                        is_resolved=False,
-                    ))
+                    self.call_relationships.append(
+                        CallRelationship(
+                            caller=caller_id,
+                            callee=callee_name,
+                            call_line=node.start_point[0] + 1,
+                            is_resolved=False,
+                        )
+                    )
 
         for child in node.children:
             self._extract_relationships(child, top_level_nodes)
@@ -228,7 +234,9 @@ class TreeSitterGoAnalyzer:
                     return self._get_component_id(self._node_text(name_node))
             elif current.type == "method_declaration":
                 receiver_type = self._get_receiver_type(current)
-                name_node = next((c for c in current.children if c.type == "field_identifier"), None)
+                name_node = next(
+                    (c for c in current.children if c.type == "field_identifier"), None
+                )
                 if name_node:
                     return self._get_component_id(self._node_text(name_node), receiver_type)
             current = current.parent
@@ -236,9 +244,26 @@ class TreeSitterGoAnalyzer:
 
     def _is_builtin(self, name: str) -> bool:
         builtins = {
-            "make", "new", "len", "cap", "append", "copy", "delete", "close",
-            "panic", "recover", "print", "println", "error", "nil",
-            "fmt", "log", "os", "io", "strings", "strconv",
+            "make",
+            "new",
+            "len",
+            "cap",
+            "append",
+            "copy",
+            "delete",
+            "close",
+            "panic",
+            "recover",
+            "print",
+            "println",
+            "error",
+            "nil",
+            "fmt",
+            "log",
+            "os",
+            "io",
+            "strings",
+            "strconv",
         }
         return name in builtins
 

@@ -35,33 +35,32 @@ logger = logging.getLogger(__name__)
 # ── mdformat (optional dependency) ─────────────────────────────────────────────
 try:
     import mdformat
+
     _HAS_MDFORMAT = True
 except ImportError:
     _HAS_MDFORMAT = False
 
 
 # ── Math block extraction ───────────────────────────────────────────────────────
-_MATH_DISPLAY_RE = re.compile(r'(\$\$)([\s\S]+?)(\$\$)', re.DOTALL)
-_MATH_INLINE_RE  = re.compile(r'(?<!\$)(\$)(?!\s)([^$\n]+?)(\$)(?!\$)')
-_MATH_BK_DISP_RE = re.compile(r'(\\\[)([\s\S]+?)(\\\])', re.DOTALL)
-_MATH_BK_INLN_RE = re.compile(r'(\\\()(.+?)(\\\))')
+_MATH_DISPLAY_RE = re.compile(r"(\$\$)([\s\S]+?)(\$\$)", re.DOTALL)
+_MATH_INLINE_RE = re.compile(r"(?<!\$)(\$)(?!\s)([^$\n]+?)(\$)(?!\$)")
+_MATH_BK_DISP_RE = re.compile(r"(\\\[)([\s\S]+?)(\\\])", re.DOTALL)
+_MATH_BK_INLN_RE = re.compile(r"(\\\()(.+?)(\\\))")
 
 # ── Math validation helpers ────────────────────────────────────────────────────
 # Combined begin/end pattern for stack-based nesting validation
-_MATH_ENV_RE = re.compile(r'\\(begin|end)\{([^}]+)\}')
+_MATH_ENV_RE = re.compile(r"\\(begin|end)\{([^}]+)\}")
 
 # ── Code block masking (protect fenced/inline code from math regex) ───────────
 # Covers backtick fences (``` and ~~~) and inline code.
 # Indented code blocks (4-space) are not covered — too complex without full MD parsing.
-_CODE_FENCE_RE = re.compile(r'(~~~[\s\S]*?~~~|```[\s\S]*?```|`[^`\n]+`)', re.DOTALL)
+_CODE_FENCE_RE = re.compile(r"(~~~[\s\S]*?~~~|```[\s\S]*?```|`[^`\n]+`)", re.DOTALL)
 
 # ── Mermaid block extraction ───────────────────────────────────────────────────
 _MERMAID_BLOCK_RE = re.compile(r"(```\s*mermaid\s*\n)([\s\S]*?)(```)", re.IGNORECASE)
 
 # Unicode math operators that break the Mermaid lexer
-_MERMAID_BAD_UNICODE_RE = re.compile(
-    r"[∃∀∈∉⊂⊆⊇⊃⊄∧∨∩∪≡≈≠→⇒⇔←⇐≤≥∞∂∇√∫∑∏±×÷]"
-)
+_MERMAID_BAD_UNICODE_RE = re.compile(r"[∃∀∈∉⊂⊆⊇⊃⊄∧∨∩∪≡≈≠→⇒⇔←⇐≤≥∞∂∇√∫∑∏±×÷]")
 
 # Single quote inside a node label bracket  e.g.  A["it's"]  or  B['text']
 _MERMAID_SINGLE_QUOTE_RE = re.compile(r'\[["\'](?:[^"\']*\'[^"\']*)+["\'][^]]*]')
@@ -118,6 +117,7 @@ def _save_hash_cache(docs_path: Path, cache: dict[str, str]) -> None:
 
 # ── Phase 1: Markdown formatting ────────────────────────────────────────────────
 
+
 def _format_markdown(text: str, stats: FixStats) -> str:
     if not _HAS_MDFORMAT:
         return text
@@ -133,6 +133,7 @@ def _format_markdown(text: str, stats: FixStats) -> str:
 
 # ── Phase 2: Math repair ────────────────────────────────────────────────────────
 
+
 def _validate_math(content: str) -> list[str]:
     """Check a LaTeX formula for structural errors. Returns list of issue strings."""
     issues: list[str] = []
@@ -142,12 +143,12 @@ def _validate_math(content: str) -> list[str]:
     depth = 0
     backslash_run = 0
     for ch in content:
-        if ch == '\\':
+        if ch == "\\":
             backslash_run += 1
             continue
-        if ch == '{' and backslash_run % 2 == 0:
+        if ch == "{" and backslash_run % 2 == 0:
             depth += 1
-        elif ch == '}' and backslash_run % 2 == 0:
+        elif ch == "}" and backslash_run % 2 == 0:
             depth -= 1
         backslash_run = 0
         if depth < 0:
@@ -165,9 +166,7 @@ def _validate_math(content: str) -> list[str]:
             if not env_stack:
                 issues.append(f"Unmatched \\end{{{env}}}")
             elif env_stack[-1] != env:
-                issues.append(
-                    f"Mismatched \\end{{{env}}} (expected \\end{{{env_stack[-1]}}})"
-                )
+                issues.append(f"Mismatched \\end{{{env}}} (expected \\end{{{env_stack[-1]}}})")
                 env_stack.pop()
             else:
                 env_stack.pop()
@@ -228,7 +227,7 @@ def _fix_math_in_text(
     # delimiters.  We use str.split instead of a regex because Python's re
     # module treats \$ as a literal-dollar pattern (not backslash+dollar),
     # making regex-based matching of the 2-char sequence unreliable.
-    _ESC_DOLLAR = '\\$'  # the 2-char sequence: backslash then dollar
+    _ESC_DOLLAR = "\\$"  # the 2-char sequence: backslash then dollar
     esc_dollar_parts = masked.split(_ESC_DOLLAR)
     esc_dollars_count = len(esc_dollar_parts) - 1
     if esc_dollars_count:
@@ -236,14 +235,14 @@ def _fix_math_in_text(
         for i in range(esc_dollars_count):
             new_parts.append(f"\x00ESCD{i}\x00")
             new_parts.append(esc_dollar_parts[i + 1])
-        masked = ''.join(new_parts)
+        masked = "".join(new_parts)
 
     # Display-math patterns use group(1) as open delimiter ($$, \[)
     _DISPLAY_PATTERNS = {id(_MATH_DISPLAY_RE), id(_MATH_BK_DISP_RE)}
 
     def _try_fix(m: re.Match, pattern: re.Pattern) -> str:
-        open_delim  = m.group(1)
-        content     = m.group(2)
+        open_delim = m.group(1)
+        content = m.group(2)
         close_delim = m.group(3)
         stats.math_total += 1
         issues = _validate_math(content)
@@ -255,18 +254,17 @@ def _fix_math_in_text(
             stats.math_failed += 1
             error_msg = "; ".join(issues)
             if report is not None:
-                report.math_failures.append({
-                    "file": filename,
-                    "expression": content.strip()[:120],
-                    "error": error_msg,
-                    "degraded": True,
-                })
+                report.math_failures.append(
+                    {
+                        "file": filename,
+                        "expression": content.strip()[:120],
+                        "error": error_msg,
+                        "degraded": True,
+                    }
+                )
             is_display = id(pattern) in _DISPLAY_PATTERNS
             if is_display:
-                return (
-                    f"```latex\n{content.strip()}\n```\n"
-                    f"<!-- math-error: {error_msg} -->"
-                )
+                return f"```latex\n{content.strip()}\n```\n<!-- math-error: {error_msg} -->"
             return f"`{content.strip()}` <!-- math-error: {error_msg} -->"
         recheck = _validate_math(fixed)
         if recheck:
@@ -274,18 +272,17 @@ def _fix_math_in_text(
             stats.math_failed += 1
             error_msg = "; ".join(recheck)
             if report is not None:
-                report.math_failures.append({
-                    "file": filename,
-                    "expression": content.strip()[:120],
-                    "error": error_msg,
-                    "degraded": True,
-                })
+                report.math_failures.append(
+                    {
+                        "file": filename,
+                        "expression": content.strip()[:120],
+                        "error": error_msg,
+                        "degraded": True,
+                    }
+                )
             is_display = id(pattern) in _DISPLAY_PATTERNS
             if is_display:
-                return (
-                    f"```latex\n{content.strip()}\n```\n"
-                    f"<!-- math-error: {error_msg} -->"
-                )
+                return f"```latex\n{content.strip()}\n```\n<!-- math-error: {error_msg} -->"
             return f"`{content.strip()}` <!-- math-error: {error_msg} -->"
         stats.math_repaired += 1
         return f"{open_delim}{fixed}{close_delim}"
@@ -297,7 +294,7 @@ def _fix_math_in_text(
     if esc_dollars_count:
         for i in range(esc_dollars_count):
             masked = masked.replace(f"\x00ESCD{i}\x00", _ESC_DOLLAR)
-    return re.sub(r'\x00CODE(\d+)\x00', lambda m: code_blocks[int(m.group(1))], masked)
+    return re.sub(r"\x00CODE(\d+)\x00", lambda m: code_blocks[int(m.group(1))], masked)
 
 
 # ── Phase 3: Mermaid repair ─────────────────────────────────────────────────────
@@ -350,7 +347,7 @@ def _has_unquoted_nonascii(content: str) -> bool:
     # Temporarily strip all double/single-quoted strings, then look for non-ASCII
     cleaned = re.sub(r'"[^"]*"', '""', content)
     cleaned = re.sub(r"'[^']*'", "''", cleaned)
-    return bool(re.search(r'[^\x00-\x7F]', cleaned))
+    return bool(re.search(r"[^\x00-\x7F]", cleaned))
 
 
 def _validate_with_regex(content: str) -> list[str]:
@@ -369,7 +366,7 @@ def _validate_with_regex(content: str) -> list[str]:
     if _has_unquoted_nonascii(content):
         issues.append(
             "Non-ASCII characters (e.g. Chinese/CJK) outside quoted strings — "
-            "wrap node labels in double quotes, e.g. A[\"中文\"]"
+            'wrap node labels in double quotes, e.g. A["中文"]'
         )
     return issues
 
@@ -446,9 +443,7 @@ def _fix_mermaid_in_text(
         stats.diagrams_invalid += 1
         file_has_issues = True
         approx_line = text[:start].count("\n") + 1
-        logger.info(
-            f"    \U0001f527 Mermaid line ~{approx_line} \u2014 {'; '.join(issues)}"
-        )
+        logger.info(f"    \U0001f527 Mermaid line ~{approx_line} \u2014 {'; '.join(issues)}")
 
         fixed = _llm_repair(content, issues, config)
 
@@ -476,18 +471,22 @@ def _fix_mermaid_in_text(
                 repair_failed = True
 
         if not repair_failed and fixed == content.strip():
-            logger.debug(f"    \u2298 Mermaid line ~{approx_line} \u2014 LLM returned unchanged content")
+            logger.debug(
+                f"    \u2298 Mermaid line ~{approx_line} \u2014 LLM returned unchanged content"
+            )
             stats.diagrams_failed += 1
             repair_failed = True
 
         if repair_failed:
             if report is not None:
-                report.mermaid_failures.append({
-                    "file": filename,
-                    "block_index": block_index,
-                    "error": error_msg,
-                    "degraded": True,
-                })
+                report.mermaid_failures.append(
+                    {
+                        "file": filename,
+                        "block_index": block_index,
+                        "error": error_msg,
+                        "degraded": True,
+                    }
+                )
             degraded_block = (
                 f"```text\n"
                 f"[MERMAID DIAGRAM - RENDER FAILED]\n"
@@ -518,6 +517,7 @@ def _fix_mermaid_in_text(
 
 # ── Backward-compat wrapper ─────────────────────────────────────────────────────
 
+
 def fix_mermaid_in_file(path: Path, config: Config, stats: FixStats) -> bool:
     """Scan one markdown file and repair broken Mermaid diagrams in-place.
 
@@ -532,6 +532,7 @@ def fix_mermaid_in_file(path: Path, config: Config, stats: FixStats) -> bool:
 
 
 # ── Directory-level entry point ─────────────────────────────────────────────────
+
 
 def fix_docs(working_dir: str, config: Config) -> FixStats:
     """Apply all post-processing fix phases to every .md file in *working_dir*.
@@ -613,14 +614,10 @@ def fix_docs(working_dir: str, config: Config) -> FixStats:
                 continue  # skip Phases 2+3
 
             # Phase 2 — Math repair
-            text = _fix_math_in_text(
-                text, config, stats, report=report, filename=md_file.name
-            )
+            text = _fix_math_in_text(text, config, stats, report=report, filename=md_file.name)
 
             # Phase 3 — Mermaid repair
-            text = _fix_mermaid_in_text(
-                text, config, stats, report=report, filename=md_file.name
-            )
+            text = _fix_mermaid_in_text(text, config, stats, report=report, filename=md_file.name)
 
             if text != original_raw:
                 md_file.write_text(text, encoding="utf-8")
@@ -650,14 +647,17 @@ def fix_docs(working_dir: str, config: Config) -> FixStats:
     # ── Phase 4b: Link validation ──────────────────────────────────────────────
     try:
         from codewiki.src.be.postprocess.link_validator import validate_links
+
         link_issues = validate_links(working_dir)
         for issue in link_issues:
-            report.link_issues.append({
-                "file": issue.source_file,
-                "line": issue.line_number,
-                "target": issue.target,
-                "issue_type": issue.issue_type,
-            })
+            report.link_issues.append(
+                {
+                    "file": issue.source_file,
+                    "line": issue.line_number,
+                    "target": issue.target,
+                    "issue_type": issue.issue_type,
+                }
+            )
     except Exception as exc:
         logger.warning(f"Link validation failed: {exc}")
 
@@ -670,9 +670,13 @@ def fix_docs(working_dir: str, config: Config) -> FixStats:
     if stats.md_files_formatted:
         logger.info(f"  \U0001f4dd Formatted {stats.md_files_formatted} file(s) with mdformat")
     if stats.math_repaired:
-        logger.info(f"  \u2713 Math: repaired {stats.math_repaired}/{stats.math_invalid} formula(s)")
+        logger.info(
+            f"  \u2713 Math: repaired {stats.math_repaired}/{stats.math_invalid} formula(s)"
+        )
     if stats.diagrams_repaired:
-        logger.info(f"  \u2713 Mermaid: repaired {stats.diagrams_repaired}/{stats.diagrams_invalid} diagram(s)")
+        logger.info(
+            f"  \u2713 Mermaid: repaired {stats.diagrams_repaired}/{stats.diagrams_invalid} diagram(s)"
+        )
 
     # ── Strict gate ───────────────────────────────────────────────────────────
     if getattr(config, "postprocess_strict", False) and report.has_failures:

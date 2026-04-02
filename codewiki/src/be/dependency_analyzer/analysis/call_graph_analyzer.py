@@ -31,10 +31,10 @@ class CallGraphAnalyzer:
         Complete analysis: Analyze all files to build complete call graph with all nodes.
 
         This approach:
-        1. Analyzes all code files 
+        1. Analyzes all code files
         2. Extracts all functions and relationships
         3. Builds complete call graph
-        4. Returns all nodes and relationships 
+        4. Returns all nodes and relationships
         """
         logger.debug(f"Starting analysis of {len(code_files)} files")
 
@@ -57,7 +57,9 @@ class CallGraphAnalyzer:
                     self.call_relationships.extend(file_rels)
                     files_analyzed += 1
                 except Exception as e:
-                    logger.error(f"Unexpected error for {file_info.get('path')}: {e}", exc_info=True)
+                    logger.error(
+                        f"Unexpected error for {file_info.get('path')}: {e}", exc_info=True
+                    )
 
         logger.debug(
             f"Analysis complete: {files_analyzed} files analyzed, "
@@ -106,7 +108,11 @@ class CallGraphAnalyzer:
                 # Detect by extension, with special-case for CMakeLists.txt and Makefile
                 if file_name == "CMakeLists.txt":
                     language = "cmake"
-                elif file_name in ("Makefile", "GNUmakefile") or file_name.endswith(".mk") or file_name.endswith(".mak"):
+                elif (
+                    file_name in ("Makefile", "GNUmakefile")
+                    or file_name.endswith(".mk")
+                    or file_name.endswith(".mak")
+                ):
                     language = "makefile"
                 elif ext == ".cfg":
                     # .cfg is a common extension — only route as vitis_cfg if content
@@ -199,27 +205,40 @@ class CallGraphAnalyzer:
 
     # ── Scripting / dynamic languages ─────────────────────────────────────
 
-    def _analyze_python_file(self, file_path: str, content: str, base_dir: str) -> tuple[list, list]:
+    def _analyze_python_file(
+        self, file_path: str, content: str, base_dir: str
+    ) -> tuple[list, list]:
         """Analyze Python file using the native AST analyzer."""
         from codewiki.src.be.dependency_analyzer.analyzers.python import analyze_python_file
+
         try:
             return analyze_python_file(file_path, content, repo_path=base_dir)
         except Exception as e:
             logger.error(f"Failed to analyze Python file {file_path}: {e}", exc_info=True)
             return [], []
 
-    def _analyze_javascript_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
+    def _analyze_javascript_file(
+        self, file_path: str, content: str, repo_dir: str
+    ) -> tuple[list, list]:
         """Analyze JavaScript file using tree-sitter."""
-        from codewiki.src.be.dependency_analyzer.analyzers.javascript import analyze_javascript_file_treesitter
+        from codewiki.src.be.dependency_analyzer.analyzers.javascript import (
+            analyze_javascript_file_treesitter,
+        )
+
         try:
             return analyze_javascript_file_treesitter(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze JavaScript file {file_path}: {e}", exc_info=True)
             return [], []
 
-    def _analyze_typescript_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
+    def _analyze_typescript_file(
+        self, file_path: str, content: str, repo_dir: str
+    ) -> tuple[list, list]:
         """Analyze TypeScript file using tree-sitter."""
-        from codewiki.src.be.dependency_analyzer.analyzers.typescript import analyze_typescript_file_treesitter
+        from codewiki.src.be.dependency_analyzer.analyzers.typescript import (
+            analyze_typescript_file_treesitter,
+        )
+
         try:
             return analyze_typescript_file_treesitter(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -229,6 +248,7 @@ class CallGraphAnalyzer:
     def _analyze_php_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze PHP file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.php import analyze_php_file
+
         try:
             return analyze_php_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -240,15 +260,19 @@ class CallGraphAnalyzer:
     def _analyze_java_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Java file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.java import analyze_java_file
+
         try:
             return analyze_java_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze Java file {file_path}: {e}", exc_info=True)
             return [], []
 
-    def _analyze_csharp_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
+    def _analyze_csharp_file(
+        self, file_path: str, content: str, repo_dir: str
+    ) -> tuple[list, list]:
         """Analyze C# file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.csharp import analyze_csharp_file
+
         try:
             return analyze_csharp_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -260,6 +284,7 @@ class CallGraphAnalyzer:
     def _analyze_c_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze C file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.c import analyze_c_file
+
         try:
             return analyze_c_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -269,6 +294,7 @@ class CallGraphAnalyzer:
     def _analyze_cpp_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze C++ file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.cpp import analyze_cpp_file
+
         try:
             return analyze_cpp_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -278,6 +304,7 @@ class CallGraphAnalyzer:
     def _analyze_go_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Go file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.go import analyze_go_file
+
         try:
             return analyze_go_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -287,6 +314,7 @@ class CallGraphAnalyzer:
     def _analyze_rust_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Rust file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.rust import analyze_rust_file
+
         try:
             return analyze_rust_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -298,6 +326,7 @@ class CallGraphAnalyzer:
     def _analyze_bash_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Bash/Shell file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.bash import analyze_bash_file
+
         try:
             return analyze_bash_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -307,6 +336,7 @@ class CallGraphAnalyzer:
     def _analyze_cmake_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze CMake file using tree-sitter."""
         from codewiki.src.be.dependency_analyzer.analyzers.cmake import analyze_cmake_file
+
         try:
             return analyze_cmake_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -316,6 +346,7 @@ class CallGraphAnalyzer:
     def _analyze_toml_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze TOML file using tree-sitter (extracts top-level tables as structural nodes)."""
         from codewiki.src.be.dependency_analyzer.analyzers.toml import analyze_toml_file
+
         try:
             return analyze_toml_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -325,15 +356,19 @@ class CallGraphAnalyzer:
     def _analyze_tcl_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
         """Analyze Vitis HLS TCL script."""
         from codewiki.src.be.dependency_analyzer.analyzers.tcl import analyze_tcl_file
+
         try:
             return analyze_tcl_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
             logger.error(f"Failed to analyze TCL file {file_path}: {e}", exc_info=True)
             return [], []
 
-    def _analyze_makefile_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
+    def _analyze_makefile_file(
+        self, file_path: str, content: str, repo_dir: str
+    ) -> tuple[list, list]:
         """Analyze Makefile using tree-sitter-make."""
         from codewiki.src.be.dependency_analyzer.analyzers.makefile import analyze_makefile_file
+
         try:
             return analyze_makefile_file(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -342,8 +377,12 @@ class CallGraphAnalyzer:
 
     # Vitis .cfg markers — must be present in file content for it to be treated as Vitis config.
     # These are unique to Xilinx/AMD Vitis and would not appear in generic .cfg files.
-    _VITIS_CFG_SECTION_MARKERS = frozenset({"[hls]", "[connectivity]", "[clock]", "[profile]", "[advanced]"})
-    _VITIS_CFG_KEY_MARKERS = frozenset({"syn.top=", "syn.file=", "stream_connect=", "nk=", "flow_target=vitis"})
+    _VITIS_CFG_SECTION_MARKERS = frozenset(
+        {"[hls]", "[connectivity]", "[clock]", "[profile]", "[advanced]"}
+    )
+    _VITIS_CFG_KEY_MARKERS = frozenset(
+        {"syn.top=", "syn.file=", "stream_connect=", "nk=", "flow_target=vitis"}
+    )
 
     def _is_vitis_cfg(self, content: str) -> bool:
         """Return True only if the file content looks like a Vitis/HLS .cfg file."""
@@ -355,12 +394,15 @@ class CallGraphAnalyzer:
                 return True
         return False
 
-    def _analyze_vitis_cfg_file(self, file_path: str, content: str, repo_dir: str) -> tuple[list, list]:
+    def _analyze_vitis_cfg_file(
+        self, file_path: str, content: str, repo_dir: str
+    ) -> tuple[list, list]:
         """Analyze Vitis .cfg file for HLS top functions, stream connections, memory maps."""
         if not self._is_vitis_cfg(content):
             logger.debug(f"Skipping {file_path}: does not look like a Vitis .cfg file")
             return [], []
         from codewiki.src.be.dependency_analyzer.analyzers.vitis_cfg import analyze_vitis_cfg
+
         try:
             return analyze_vitis_cfg(file_path, content, repo_path=repo_dir)
         except Exception as e:
@@ -370,12 +412,14 @@ class CallGraphAnalyzer:
     def _analyze_data_flow(self) -> dict:
         """Run cross-file data flow analysis."""
         from codewiki.src.be.dependency_analyzer.analysis.data_flow_analyzer import DataFlowAnalyzer
+
         analyzer = DataFlowAnalyzer(self.functions, self.call_relationships)
         return analyzer.analyze()
 
     def _pair_header_source_files(self):
         """Pair header files (.h/.hpp) with implementation files (.cpp/.cc/.c) by basename."""
         from collections import defaultdict
+
         header_exts = {".h", ".hpp", ".hxx"}
         source_exts = {".c", ".cpp", ".cc", ".cxx", ".c++"}
 
@@ -394,13 +438,15 @@ class CallGraphAnalyzer:
             if files["headers"] and files["sources"]:
                 header_rep = files["headers"][0]
                 source_rep = files["sources"][0]
-                self.call_relationships.append(CallRelationship(
-                    caller=source_rep.id,
-                    callee=header_rep.id,
-                    call_line=0,
-                    is_resolved=True,
-                    relationship_type="header_impl",
-                ))
+                self.call_relationships.append(
+                    CallRelationship(
+                        caller=source_rep.id,
+                        callee=header_rep.id,
+                        call_line=0,
+                        is_resolved=True,
+                        relationship_type="header_impl",
+                    )
+                )
 
     def _resolve_call_relationships(self):
         """
@@ -464,10 +510,7 @@ class CallGraphAnalyzer:
                 if callee_info is None:
                     continue
                 match_file = callee_info.file_path == caller_file
-                match_class = (
-                    caller_class is not None
-                    and callee_info.class_name == caller_class
-                )
+                match_class = caller_class is not None and callee_info.class_name == caller_class
                 if match_file and match_class:
                     same_file_same_class.append(cid)
                 elif match_file:
@@ -493,9 +536,7 @@ class CallGraphAnalyzer:
 
             # 2. Bare-name lookup with scope-aware tie-breaking.
             elif callee_name in name_candidates:
-                relationship.callee = _pick_candidate(
-                    name_candidates[callee_name], caller_info
-                )
+                relationship.callee = _pick_candidate(name_candidates[callee_name], caller_info)
                 relationship.is_resolved = True
                 resolved_count += 1
 
@@ -685,4 +726,3 @@ class CallGraphAnalyzer:
             for rel in self.call_relationships
             if rel.caller in selected_func_ids and rel.callee in selected_func_ids
         ]
-

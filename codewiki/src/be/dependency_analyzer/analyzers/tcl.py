@@ -65,9 +65,7 @@ class VitisHLSTclAnalyzer:
                 continue
 
             # First child is the command name (simple_word)
-            name_node = next(
-                (c for c in cmd_node.children if c.type == "simple_word"), None
-            )
+            name_node = next((c for c in cmd_node.children if c.type == "simple_word"), None)
             if not name_node:
                 continue
             cmd_name = self._node_text(name_node)
@@ -83,37 +81,45 @@ class VitisHLSTclAnalyzer:
             if cmd_name == "open_project" and args:
                 project_name = args[-1]  # skip flags like -reset
                 comp_id = self._get_component_id(project_name)
-                self.nodes.append(Node(
-                    id=comp_id,
-                    name=project_name,
-                    component_type="hls_project",
-                    file_path=self.file_path,
-                    relative_path=self._get_relative_path(),
-                    source_code="\n".join(lines[cmd_node.start_point[0]:cmd_node.end_point[0] + 1]),
-                    start_line=start_line,
-                    end_line=cmd_node.end_point[0] + 1,
-                    node_type="hls_project",
-                    display_name=f"HLS project: {project_name}",
-                    component_id=comp_id,
-                ))
+                self.nodes.append(
+                    Node(
+                        id=comp_id,
+                        name=project_name,
+                        component_type="hls_project",
+                        file_path=self.file_path,
+                        relative_path=self._get_relative_path(),
+                        source_code="\n".join(
+                            lines[cmd_node.start_point[0] : cmd_node.end_point[0] + 1]
+                        ),
+                        start_line=start_line,
+                        end_line=cmd_node.end_point[0] + 1,
+                        node_type="hls_project",
+                        display_name=f"HLS project: {project_name}",
+                        component_id=comp_id,
+                    )
+                )
 
             elif cmd_name == "set_top" and args:
                 func_name = args[0]
                 comp_id = self._get_component_id(func_name)
-                self.nodes.append(Node(
-                    id=comp_id,
-                    name=func_name,
-                    component_type="hls_top",
-                    file_path=self.file_path,
-                    relative_path=self._get_relative_path(),
-                    source_code="\n".join(lines[cmd_node.start_point[0]:cmd_node.end_point[0] + 1]),
-                    start_line=start_line,
-                    end_line=cmd_node.end_point[0] + 1,
-                    node_type="hls_top",
-                    display_name=f"HLS top: {func_name}",
-                    component_id=comp_id,
-                    is_hls_kernel=True,
-                ))
+                self.nodes.append(
+                    Node(
+                        id=comp_id,
+                        name=func_name,
+                        component_type="hls_top",
+                        file_path=self.file_path,
+                        relative_path=self._get_relative_path(),
+                        source_code="\n".join(
+                            lines[cmd_node.start_point[0] : cmd_node.end_point[0] + 1]
+                        ),
+                        start_line=start_line,
+                        end_line=cmd_node.end_point[0] + 1,
+                        node_type="hls_top",
+                        display_name=f"HLS top: {func_name}",
+                        component_id=comp_id,
+                        is_hls_kernel=True,
+                    )
+                )
                 top_func_id = comp_id
 
             elif cmd_name == "add_files" and args:
@@ -136,23 +142,27 @@ class VitisHLSTclAnalyzer:
                         cleaned.append(a)
                 for src_file in cleaned:
                     caller = top_func_id or self._get_component_id("__top__")
-                    self.call_relationships.append(CallRelationship(
-                        caller=caller,
-                        callee=src_file.lstrip("./"),
-                        call_line=start_line,
-                        is_resolved=False,
-                        relationship_type="hls_source",
-                    ))
+                    self.call_relationships.append(
+                        CallRelationship(
+                            caller=caller,
+                            callee=src_file.lstrip("./"),
+                            call_line=start_line,
+                            is_resolved=False,
+                            relationship_type="hls_source",
+                        )
+                    )
 
             elif cmd_name == "csynth_design":
                 caller = top_func_id or self._get_component_id("__top__")
-                self.call_relationships.append(CallRelationship(
-                    caller=caller,
-                    callee="csynth_design",
-                    call_line=start_line,
-                    is_resolved=False,
-                    relationship_type="hls_synth",
-                ))
+                self.call_relationships.append(
+                    CallRelationship(
+                        caller=caller,
+                        callee="csynth_design",
+                        call_line=start_line,
+                        is_resolved=False,
+                        relationship_type="hls_synth",
+                    )
+                )
 
             elif cmd_name == "export_design":
                 # extract -format value and -output value
@@ -164,13 +174,15 @@ class VitisHLSTclAnalyzer:
                     elif a == "-output" and i + 1 < len(args):
                         out = args[i + 1]
                 caller = top_func_id or self._get_component_id("__top__")
-                self.call_relationships.append(CallRelationship(
-                    caller=caller,
-                    callee=out or f"export.{fmt or 'unknown'}",
-                    call_line=start_line,
-                    is_resolved=False,
-                    relationship_type="hls_export",
-                ))
+                self.call_relationships.append(
+                    CallRelationship(
+                        caller=caller,
+                        callee=out or f"export.{fmt or 'unknown'}",
+                        call_line=start_line,
+                        is_resolved=False,
+                        relationship_type="hls_export",
+                    )
+                )
 
 
 def analyze_tcl_file(

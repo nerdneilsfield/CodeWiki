@@ -34,7 +34,9 @@ _PROMPT_VERSIONS = {
 }
 _GUIDE_PREFIXES = (
     "guide-",
-    "_guide_cache", "_parent_doc_hashes", "_tree_cache_meta",
+    "_guide_cache",
+    "_parent_doc_hashes",
+    "_tree_cache_meta",
 )
 
 # ── Language-specific build guide snippets ────────────────────────────────
@@ -46,45 +48,38 @@ _LANG_BUILD_GUIDES = {
 - Virtual environment management strategy
 - Common commands: pip install, pytest, python -m
 </PYTHON_BUILD_GUIDE>""",
-
     "javascript": """<JS_BUILD_GUIDE>
 - Analyze package.json: scripts, dependencies vs devDependencies
 - Bundler configuration (webpack / vite / esbuild) if present
 - Monorepo structure (workspaces) if applicable
 - Common commands: npm install, npm run build, npm test
 </JS_BUILD_GUIDE>""",
-
     "typescript": """<TS_BUILD_GUIDE>
 - Analyze tsconfig.json: target, module resolution, strict flags
 - Build pipeline: tsc → bundler → output
 - Type declaration strategy (.d.ts files)
 </TS_BUILD_GUIDE>""",
-
     "java": """<JAVA_BUILD_GUIDE>
 - Analyze pom.xml / build.gradle: dependency management, build lifecycle
 - Module structure (multi-module projects)
 - Common commands: mvn package, gradle build
 </JAVA_BUILD_GUIDE>""",
-
     "go": """<GO_BUILD_GUIDE>
 - Analyze go.mod: module path, dependency versions
 - Package conventions and directory layout
 - Build tags and cross-compilation
 - Common commands: go build, go test, go mod tidy
 </GO_BUILD_GUIDE>""",
-
     "rust": """<RUST_BUILD_GUIDE>
 - Analyze Cargo.toml: workspace structure, feature flags, dependency features
 - Build profiles (dev vs release)
 - Common commands: cargo build, cargo test, cargo clippy
 </RUST_BUILD_GUIDE>""",
-
     "c": """<C_BUILD_GUIDE>
 - Analyze Makefile / CMakeLists.txt: targets, compilation flags, link dependencies
 - Header / source file organization
 - Cross-platform considerations
 </C_BUILD_GUIDE>""",
-
     "cpp": """<CPP_BUILD_GUIDE>
 - Analyze CMakeLists.txt: targets, C++ standard, link dependencies
 - Header / source file organization and include paths
@@ -132,7 +127,7 @@ class GuideGenerator:
             h.update(extra.encode())
         for fp in sorted(file_paths):
             try:
-                with open(fp, 'rb') as f:
+                with open(fp, "rb") as f:
                     while chunk := f.read(8192):
                         h.update(chunk)
             except OSError:
@@ -146,8 +141,8 @@ class GuideGenerator:
         Falls back to "part-{index}" when the slug becomes empty after
         sanitization (e.g. pure Chinese titles), preventing filename collisions.
         """
-        slug = re.sub(r'[^a-z0-9-]', '', raw.lower().strip())
-        slug = re.sub(r'-+', '-', slug).strip('-')
+        slug = re.sub(r"[^a-z0-9-]", "", raw.lower().strip())
+        slug = re.sub(r"-+", "-", slug).strip("-")
         return slug or f"part-{index}"
 
     def _unique_slug(self, raw: str, index: int = 0, used: Optional[set] = None) -> str:
@@ -160,7 +155,7 @@ class GuideGenerator:
         base = self._sanitize_slug(raw, index)
         if used is None:
             # Fallback: use instance-level set (kept for backward compat only)
-            if not hasattr(self, '_used_slugs'):
+            if not hasattr(self, "_used_slugs"):
                 self._used_slugs: set = set()
             used = self._used_slugs
         slug = base
@@ -195,7 +190,10 @@ class GuideGenerator:
         return True
 
     def _update_cache(
-        self, guide_type: str, input_files: List[str], output_files: List[str],
+        self,
+        guide_type: str,
+        input_files: List[str],
+        output_files: List[str],
         extra_salt: str = "",
     ):
         version = _PROMPT_VERSIONS.get(guide_type, "v1")
@@ -222,10 +220,7 @@ class GuideGenerator:
         prompt_tokens = count_tokens(prompt)
 
         # Pre-select: skip straight to long-context model for oversized prompts
-        if (
-            self.config.long_context_model
-            and prompt_tokens > self.config.long_context_threshold
-        ):
+        if self.config.long_context_model and prompt_tokens > self.config.long_context_threshold:
             logger.info(
                 f"Pre-selecting long-context model {self.config.long_context_model} "
                 f"(prompt {prompt_tokens} tokens > threshold {self.config.long_context_threshold})"
@@ -238,9 +233,7 @@ class GuideGenerator:
         # Build fallback chain: main → fallback(s) → long_context (last resort)
         models = [self.config.main_model]
         if self.config.fallback_model:
-            models.extend(
-                n.strip() for n in self.config.fallback_model.split(",") if n.strip()
-            )
+            models.extend(n.strip() for n in self.config.fallback_model.split(",") if n.strip())
         if self.config.long_context_model and self.config.long_context_model not in models:
             models.append(self.config.long_context_model)
 
@@ -248,9 +241,7 @@ class GuideGenerator:
         for model_name in models:
             try:
                 async with self._semaphore:
-                    return await asyncio.to_thread(
-                        call_llm, prompt, self.config, model=model_name
-                    )
+                    return await asyncio.to_thread(call_llm, prompt, self.config, model=model_name)
             except Exception as e:
                 logger.warning(f"Guide LLM call failed with model {model_name}: {e}")
                 last_exc = e
@@ -300,9 +291,18 @@ class GuideGenerator:
     def _find_setup_files(self) -> str:
         """Collect content of package/build setup files."""
         candidates = [
-            "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg",
-            "package.json", "Cargo.toml", "go.mod", "pom.xml", "build.gradle",
-            "Makefile", "CMakeLists.txt", "Dockerfile",
+            "requirements.txt",
+            "pyproject.toml",
+            "setup.py",
+            "setup.cfg",
+            "package.json",
+            "Cargo.toml",
+            "go.mod",
+            "pom.xml",
+            "build.gradle",
+            "Makefile",
+            "CMakeLists.txt",
+            "Dockerfile",
         ]
         parts = []
         for name in candidates:
@@ -316,11 +316,19 @@ class GuideGenerator:
     def _find_cli_entry(self) -> str:
         """Find main entry point file content."""
         candidates = [
-            "codewiki/src/be/main.py", "src/main.py", "main.py",
-            "cli/main.py", "app.py", "manage.py",
-            "__main__.py", "src/__main__.py",
-            "src/index.ts", "src/index.js", "index.js",
-            "cmd/main.go", "main.go",
+            "codewiki/src/be/main.py",
+            "src/main.py",
+            "main.py",
+            "cli/main.py",
+            "app.py",
+            "manage.py",
+            "__main__.py",
+            "src/__main__.py",
+            "src/index.ts",
+            "src/index.js",
+            "index.js",
+            "cmd/main.go",
+            "main.go",
         ]
         for name in candidates:
             p = os.path.join(self.config.repo_path, name)
@@ -331,8 +339,11 @@ class GuideGenerator:
     def _find_config_source(self) -> str:
         """Find configuration file/class source."""
         candidates = [
-            "codewiki/src/config.py", "src/config.py", "config.py",
-            "src/config.ts", "config/settings.py",
+            "codewiki/src/config.py",
+            "src/config.py",
+            "config.py",
+            "src/config.ts",
+            "config/settings.py",
         ]
         for name in candidates:
             p = os.path.join(self.config.repo_path, name)
@@ -378,6 +389,7 @@ class GuideGenerator:
     def _read_module_doc(self, module_name: str) -> str:
         """Read the full generated doc for a module by name."""
         from codewiki.src.utils import find_module_doc
+
         path = find_module_doc(self.working_dir, [module_name])
         if path:
             return self._read_file_safe(path)
@@ -409,11 +421,10 @@ class GuideGenerator:
                 lines.append(f"  {comp_id} → {', '.join(sorted(deps))}")
         return "\n".join(lines) if lines else "(no dependencies found)"
 
-    def _read_component_source(
-        self, comp_ids: List[str], max_tokens: int = 30000
-    ) -> str:
+    def _read_component_source(self, comp_ids: List[str], max_tokens: int = 30000) -> str:
         """Read source code for given component IDs, truncated to max_tokens."""
         from codewiki.src.be.utils import count_tokens
+
         parts = []
         total = 0
         seen_files = set()
@@ -431,7 +442,7 @@ class GuideGenerator:
                     if total + chunk_tokens > max_tokens:
                         remaining = max_tokens - total
                         if remaining > 500:
-                            content = content[:remaining * 4] + "\n... (truncated)"
+                            content = content[: remaining * 4] + "\n... (truncated)"
                         else:
                             logger.debug(
                                 f"Skipping {fp}: would exceed max_tokens ({total}/{max_tokens})"
@@ -464,11 +475,10 @@ class GuideGenerator:
                     paths.append(os.path.join(test_dir, fname))
         return paths
 
-    def _find_test_files(
-        self, comp_ids: List[str], max_tokens: int = 15000
-    ) -> str:
+    def _find_test_files(self, comp_ids: List[str], max_tokens: int = 15000) -> str:
         """Find and read test files, truncated to max_tokens."""
         from codewiki.src.be.utils import count_tokens
+
         paths = self._find_test_file_paths(comp_ids)
         parts = []
         total = 0
@@ -515,8 +525,16 @@ class GuideGenerator:
         lines = []
         root_p = Path(root)
         excluded = {
-            "node_modules", ".git", "__pycache__", ".venv", "venv",
-            ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
+            "node_modules",
+            ".git",
+            "__pycache__",
+            ".venv",
+            "venv",
+            ".tox",
+            ".mypy_cache",
+            ".pytest_cache",
+            "dist",
+            "build",
             ".eggs",
         }
 
@@ -566,7 +584,8 @@ class GuideGenerator:
 
         # Layer 3 quality gate: warn if no MODULE docs were generated
         gen_docs = [
-            f for f in os.listdir(self.working_dir)
+            f
+            for f in os.listdir(self.working_dir)
             if f.endswith(".md") and not f.startswith(_GUIDE_PREFIXES)
         ]
         if not gen_docs:
@@ -623,8 +642,10 @@ class GuideGenerator:
     async def _regenerate_overview(self):
         """Augment overview.md with guide navigation section."""
         from codewiki.src.be.prompt_template import (
-            OVERVIEW_AUGMENT_PROMPT, format_language_instruction,
+            OVERVIEW_AUGMENT_PROMPT,
+            format_language_instruction,
         )
+
         overview_path = os.path.join(self.working_dir, "overview.md")
         existing = self._read_file_safe(overview_path)
         if not existing:
@@ -634,9 +655,21 @@ class GuideGenerator:
         # Build list of successfully generated guides
         guides_list = []
         guide_files = [
-            ("guide-getting-started.md", "Get Started", "Quick installation and first-run tutorial"),
-            ("guide-beginners-guide.md", "Beginner's Guide", "Accessible multi-chapter walkthrough"),
-            ("guide-build-and-organization.md", "Build & Code Organization", "Build pipeline and project structure"),
+            (
+                "guide-getting-started.md",
+                "Get Started",
+                "Quick installation and first-run tutorial",
+            ),
+            (
+                "guide-beginners-guide.md",
+                "Beginner's Guide",
+                "Accessible multi-chapter walkthrough",
+            ),
+            (
+                "guide-build-and-organization.md",
+                "Build & Code Organization",
+                "Build pipeline and project structure",
+            ),
             ("guide-core-algorithms.md", "Core Algorithms", "Formal algorithm deep-dives"),
         ]
         for fname, title, summary in guide_files:
@@ -666,7 +699,8 @@ class GuideGenerator:
     async def generate_getting_started(self):
         """Generate getting-started.md."""
         from codewiki.src.be.prompt_template import (
-            GETTING_STARTED_PROMPT, format_language_instruction,
+            GETTING_STARTED_PROMPT,
+            format_language_instruction,
         )
 
         output_path = self._safe_output_path("guide-getting-started.md")
@@ -680,9 +714,18 @@ class GuideGenerator:
                 readme_path = p
                 break
         setup_file_names = [
-            "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg",
-            "package.json", "Cargo.toml", "go.mod", "pom.xml", "build.gradle",
-            "Makefile", "CMakeLists.txt", "Dockerfile",
+            "requirements.txt",
+            "pyproject.toml",
+            "setup.py",
+            "setup.cfg",
+            "package.json",
+            "Cargo.toml",
+            "go.mod",
+            "pom.xml",
+            "build.gradle",
+            "Makefile",
+            "CMakeLists.txt",
+            "Dockerfile",
         ]
         overview_path = os.path.join(self.working_dir, "overview.md")
         input_files = [p for p in [readme_path] if p]
@@ -724,8 +767,10 @@ class GuideGenerator:
         """Generate beginner's guide: outline → serial sections → parent page."""
         from pydantic import BaseModel, Field, ValidationError
         from codewiki.src.be.prompt_template import (
-            BEGINNER_OUTLINE_PROMPT, BEGINNER_SECTION_PROMPT,
-            BEGINNER_PARENT_PROMPT, format_language_instruction,
+            BEGINNER_OUTLINE_PROMPT,
+            BEGINNER_SECTION_PROMPT,
+            BEGINNER_PARENT_PROMPT,
+            format_language_instruction,
         )
 
         class OutlineSection(BaseModel):
@@ -739,9 +784,7 @@ class GuideGenerator:
             sections: list[OutlineSection] = Field(default_factory=list)
 
         repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
-        module_tree_str = json.dumps(
-            self._strip_tree_for_display(self.module_tree), indent=2
-        )
+        module_tree_str = json.dumps(self._strip_tree_for_display(self.module_tree), indent=2)
 
         # Hash check: generated module docs + module_tree structure.
         # overview.md is excluded: it is rewritten by _regenerate_overview()
@@ -750,8 +793,7 @@ class GuideGenerator:
         gen_doc_files = [
             os.path.join(self.working_dir, f)
             for f in sorted(os.listdir(self.working_dir))
-            if f.endswith(".md") and not f.startswith(_GUIDE_PREFIXES)
-            and f != "overview.md"
+            if f.endswith(".md") and not f.startswith(_GUIDE_PREFIXES) and f != "overview.md"
         ]
         module_tree_hash = hashlib.sha256(
             json.dumps(self.module_tree, sort_keys=True).encode()
@@ -786,8 +828,7 @@ class GuideGenerator:
         # Pre-build slug map with a fresh local set so Phase C links are consistent
         _used: set = set()
         section_slugs = [
-            self._unique_slug(s.id, index=i, used=_used)
-            for i, s in enumerate(sections)
+            self._unique_slug(s.id, index=i, used=_used) for i, s in enumerate(sections)
         ]
 
         output_files = []
@@ -796,14 +837,13 @@ class GuideGenerator:
 
         for i, section in enumerate(sections):
             section_id = section_slugs[i]
-            section_title = section.title or f"Part {i+1}"
+            section_title = section.title or f"Part {i + 1}"
             section_summary = section.summary
             focus_modules = section.focus_modules
 
             # Gather focus module docs
             focus_docs = "\n\n".join(
-                self._read_module_doc(m) for m in focus_modules
-                if self._read_module_doc(m)
+                self._read_module_doc(m) for m in focus_modules if self._read_module_doc(m)
             )
 
             section_prompt = BEGINNER_SECTION_PROMPT.format(
@@ -820,11 +860,11 @@ class GuideGenerator:
                 language_instruction=lang_inst,
             )
 
-            logger.info(f"  ⌛ Section {i+1}/{len(sections)}: {section_title}")
+            logger.info(f"  ⌛ Section {i + 1}/{len(sections)}: {section_title}")
             response = await self._call_llm_with_fallback(section_prompt)
             content = self._parse_guide_response(response)
 
-            out_path = self._safe_output_path(f"guide-beginners-guide-{i+1:02d}-{section_id}.md")
+            out_path = self._safe_output_path(f"guide-beginners-guide-{i + 1:02d}-{section_id}.md")
             file_manager.save_text(content, out_path)
             output_files.append(out_path)
 
@@ -835,15 +875,15 @@ class GuideGenerator:
                 summary_line = summary_line[:400].rsplit(" ", 1)[0] + "..."
             elif len(paras) > 1:
                 summary_line += "..."
-            carry_forward += f"\n\n### Chapter {i+1}: {section_title}\n{summary_line}"
+            carry_forward += f"\n\n### Chapter {i + 1}: {section_title}\n{summary_line}"
 
-            logger.info(f"  ✓ Section {i+1}/{len(sections)}: {section_title}")
+            logger.info(f"  ✓ Section {i + 1}/{len(sections)}: {section_title}")
 
         # ── Phase C: parent page ──────────────────────────────────────
         logger.info("📝 Beginner's Guide — Phase C: parent page")
         # Reuse pre-built section_slugs — no second _unique_slug call here
         chapters_list = "\n".join(
-            f"- [{s.title}](guide-beginners-guide-{i+1:02d}-{section_slugs[i]}.md): {s.summary}"
+            f"- [{s.title}](guide-beginners-guide-{i + 1:02d}-{section_slugs[i]}.md): {s.summary}"
             for i, s in enumerate(sections)
         )
         parent_prompt = BEGINNER_PARENT_PROMPT.format(
@@ -859,7 +899,9 @@ class GuideGenerator:
         output_files.insert(0, parent_path)
 
         self._update_cache(
-            "beginner_guide", gen_doc_files, output_files,
+            "beginner_guide",
+            gen_doc_files,
+            output_files,
             extra_salt=module_tree_hash,
         )
         logger.info(f"✓ Beginner's Guide complete: {len(sections)} sections")
@@ -867,7 +909,8 @@ class GuideGenerator:
     async def generate_build_analysis(self):
         """Generate build-and-organization.md (multi-language adaptive)."""
         from codewiki.src.be.prompt_template import (
-            BUILD_ANALYSIS_PROMPT, format_language_instruction,
+            BUILD_ANALYSIS_PROMPT,
+            format_language_instruction,
         )
 
         output_path = self._safe_output_path("guide-build-and-organization.md")
@@ -875,17 +918,39 @@ class GuideGenerator:
 
         # Collect build files
         build_file_names = [
-            "Makefile", "GNUmakefile", "makefile", "CMakeLists.txt",
-            "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt",
-            "package.json", "tsconfig.json", "webpack.config.js", "vite.config.ts",
-            "Cargo.toml", "go.mod",
-            "pom.xml", "build.gradle", "build.gradle.kts",
-            "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
-            ".github/workflows/ci.yml", ".github/workflows/ci.yaml",
+            "Makefile",
+            "GNUmakefile",
+            "makefile",
+            "CMakeLists.txt",
+            "pyproject.toml",
+            "setup.py",
+            "setup.cfg",
+            "requirements.txt",
+            "package.json",
+            "tsconfig.json",
+            "webpack.config.js",
+            "vite.config.ts",
+            "Cargo.toml",
+            "go.mod",
+            "pom.xml",
+            "build.gradle",
+            "build.gradle.kts",
+            "Dockerfile",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+            ".github/workflows/ci.yml",
+            ".github/workflows/ci.yaml",
         ]
         # Lock files are auto-generated and bloat the prompt — exclude them
-        _LOCK_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-                       "Cargo.lock", "poetry.lock", "Pipfile.lock", "go.sum"}
+        _LOCK_FILES = {
+            "package-lock.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+            "Cargo.lock",
+            "poetry.lock",
+            "Pipfile.lock",
+            "go.sum",
+        }
         MAX_BUILD_FILE_CHARS = 20000  # per file
 
         build_files_content = []
@@ -903,11 +968,13 @@ class GuideGenerator:
                     input_files.append(p)
 
         # Also hash component source files (design §4.2 requirement)
-        component_source_files = sorted({
-            getattr(n, "file_path", "")
-            for n in self.components.values()
-            if getattr(n, "file_path", "")
-        })
+        component_source_files = sorted(
+            {
+                getattr(n, "file_path", "")
+                for n in self.components.values()
+                if getattr(n, "file_path", "")
+            }
+        )
         input_files.extend(f for f in component_source_files if f not in input_files)
 
         if not self._should_regenerate("build_analysis", input_files):
@@ -922,27 +989,33 @@ class GuideGenerator:
             rel = getattr(comp, "relative_path", "") or ""
             ext = os.path.splitext(rel)[1].lower()
             lang = {
-                ".py": "python", ".js": "javascript", ".mjs": "javascript",
-                ".ts": "typescript", ".tsx": "typescript",
-                ".java": "java", ".go": "go", ".rs": "rust",
-                ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp",
-                ".hpp": "cpp", ".cs": "csharp", ".php": "php",
+                ".py": "python",
+                ".js": "javascript",
+                ".mjs": "javascript",
+                ".ts": "typescript",
+                ".tsx": "typescript",
+                ".java": "java",
+                ".go": "go",
+                ".rs": "rust",
+                ".c": "c",
+                ".h": "c",
+                ".cpp": "cpp",
+                ".cc": "cpp",
+                ".hpp": "cpp",
+                ".cs": "csharp",
+                ".php": "php",
             }.get(ext)
             if lang:
                 detected.add(lang)
 
         lang_guides = "\n\n".join(
-            _LANG_BUILD_GUIDES[lang]
-            for lang in sorted(detected)
-            if lang in _LANG_BUILD_GUIDES
+            _LANG_BUILD_GUIDES[lang] for lang in sorted(detected) if lang in _LANG_BUILD_GUIDES
         )
 
         # Directory tree (2-level)
         dir_tree = self._build_directory_tree(self.config.repo_path, max_depth=2)
 
-        module_tree_str = json.dumps(
-            self._strip_tree_for_display(self.module_tree), indent=2
-        )
+        module_tree_str = json.dumps(self._strip_tree_for_display(self.module_tree), indent=2)
 
         prompt = BUILD_ANALYSIS_PROMPT.format(
             repo_name=repo_name,
@@ -967,8 +1040,10 @@ class GuideGenerator:
         """Generate core algorithm pages: identify → per-algorithm → parent."""
         from pydantic import BaseModel, Field, ValidationError
         from codewiki.src.be.prompt_template import (
-            ALGORITHM_IDENTIFY_PROMPT, ALGORITHM_DEEPDIVE_PROMPT,
-            ALGORITHM_PARENT_PROMPT, format_language_instruction,
+            ALGORITHM_IDENTIFY_PROMPT,
+            ALGORITHM_DEEPDIVE_PROMPT,
+            ALGORITHM_PARENT_PROMPT,
+            format_language_instruction,
         )
 
         class AlgorithmEntry(BaseModel):
@@ -983,15 +1058,16 @@ class GuideGenerator:
         repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
 
         # Hash check: component source files + test files (design §4.2)
-        source_files = sorted({
-            getattr(n, "file_path", "")
-            for n in self.components.values()
-            if getattr(n, "file_path", "")
-        })
-        test_files = sorted({
-            t for comp_id in self.components
-            for t in self._find_test_file_paths(comp_id)
-        })
+        source_files = sorted(
+            {
+                getattr(n, "file_path", "")
+                for n in self.components.values()
+                if getattr(n, "file_path", "")
+            }
+        )
+        test_files = sorted(
+            {t for comp_id in self.components for t in self._find_test_file_paths(comp_id)}
+        )
         if not self._should_regenerate("algorithm_deepdive", source_files + test_files):
             logger.info("✓ Core Algorithms pages are up to date (cache hit)")
             return
@@ -1015,16 +1091,13 @@ class GuideGenerator:
         if not algorithms:
             raise ValueError("No core algorithms identified by LLM")
 
-        logger.info(
-            f"📝 Core Algorithms — Phase B: generating {len(algorithms)} deep-dives"
-        )
+        logger.info(f"📝 Core Algorithms — Phase B: generating {len(algorithms)} deep-dives")
 
         # ── Phase B: per-algorithm deep-dives (parallel, Semaphore) ───
         # Pre-build slug map with a fresh local set so Phase C links are consistent
         _used: set = set()
         algo_slugs = [
-            self._unique_slug(a.id, index=i, used=_used)
-            for i, a in enumerate(algorithms)
+            self._unique_slug(a.id, index=i, used=_used) for i, a in enumerate(algorithms)
         ]
 
         lang_inst = format_language_instruction(self.config.output_language)
@@ -1032,7 +1105,7 @@ class GuideGenerator:
 
         async def _generate_one_algo(idx: int, algo: AlgorithmEntry):
             algo_id = algo_slugs[idx]
-            algo_title = algo.title or f"Algorithm {idx+1}"
+            algo_title = algo.title or f"Algorithm {idx + 1}"
             related = algo.related_components
 
             dd_prompt = ALGORITHM_DEEPDIVE_PROMPT.format(
@@ -1045,24 +1118,22 @@ class GuideGenerator:
                 language_instruction=lang_inst,
             )
 
-            logger.info(f"  ⌛ Algorithm {idx+1}/{len(algorithms)}: {algo_title}")
+            logger.info(f"  ⌛ Algorithm {idx + 1}/{len(algorithms)}: {algo_title}")
             response = await self._call_llm_with_fallback(dd_prompt)
             content = self._parse_guide_response(response)
-            out_path = self._safe_output_path(f"guide-core-algorithms-{idx+1:02d}-{algo_id}.md")
+            out_path = self._safe_output_path(f"guide-core-algorithms-{idx + 1:02d}-{algo_id}.md")
             file_manager.save_text(content, out_path)
             output_files[idx] = out_path
-            logger.info(f"  ✓ Algorithm {idx+1}/{len(algorithms)}: {algo_title}")
+            logger.info(f"  ✓ Algorithm {idx + 1}/{len(algorithms)}: {algo_title}")
 
-        await asyncio.gather(
-            *[_generate_one_algo(i, algo) for i, algo in enumerate(algorithms)]
-        )
+        await asyncio.gather(*[_generate_one_algo(i, algo) for i, algo in enumerate(algorithms)])
         output_files_filtered = [p for p in output_files if p]
 
         # ── Phase C: parent page ──────────────────────────────────────
         logger.info("📝 Core Algorithms — Phase C: parent page")
         # Reuse pre-built algo_slugs — no second _unique_slug call here
         algos_list = "\n".join(
-            f"- [{a.title}](guide-core-algorithms-{i+1:02d}-{algo_slugs[i]}.md): {a.summary}"
+            f"- [{a.title}](guide-core-algorithms-{i + 1:02d}-{algo_slugs[i]}.md): {a.summary}"
             for i, a in enumerate(algorithms)
         )
         parent_prompt = ALGORITHM_PARENT_PROMPT.format(

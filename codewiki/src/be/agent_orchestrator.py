@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 #     logfire_token = os.getenv('LOGFIRE_TOKEN')
 #     logfire_project = os.getenv('LOGFIRE_PROJECT_NAME', 'default')
 #     logfire_service = os.getenv('LOGFIRE_SERVICE_NAME', 'default')
-    
+
 #     if logfire_token:
 #         # Configure with explicit token (for Docker)
 #         logfire.configure(
@@ -56,10 +56,10 @@ logger = logging.getLogger(__name__)
 #             project_name=logfire_project,
 #             service_name=logfire_service,
 #         )
-    
+
 #     logfire.instrument_pydantic_ai()
 #     logger.debug(f"Logfire configured successfully for project: {logfire_project}")
-    
+
 # except Exception as e:
 #     logger.warning(f"Failed to configure logfire: {e}")
 
@@ -67,7 +67,9 @@ logger = logging.getLogger(__name__)
 from codewiki.src.be.agent_tools.deps import CodeWikiDeps
 from codewiki.src.be.agent_tools.read_code_components import read_code_components_tool
 from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_tool
-from codewiki.src.be.agent_tools.generate_sub_module_documentations import generate_sub_module_documentation_tool
+from codewiki.src.be.agent_tools.generate_sub_module_documentations import (
+    generate_sub_module_documentation_tool,
+)
 from codewiki.src.be.llm_services import create_fallback_models, create_long_context_model
 from codewiki.src.be.prompt_template import (
     format_user_prompt,
@@ -93,7 +95,7 @@ from codewiki.src.be.dependency_analyzer.models.core import Node
 
 class AgentOrchestrator:
     """Orchestrates the AI agents for documentation generation."""
-    
+
     def __init__(self, config: Config):
         self.config = config
         self.fallback_models = create_fallback_models(config)
@@ -130,14 +132,15 @@ class AgentOrchestrator:
         except (KeyError, TypeError):
             return module_doc_filename(module_path)
 
-    def create_agent(self, module_name: str, components: Dict[str, Any],
-                    core_component_ids: List[str],
-                    estimated_tokens: int = 0) -> Agent:
+    def create_agent(
+        self,
+        module_name: str,
+        components: Dict[str, Any],
+        core_component_ids: List[str],
+        estimated_tokens: int = 0,
+    ) -> Agent:
         """Create an appropriate agent based on module complexity."""
-        if (
-            self.long_context_model
-            and estimated_tokens > self.config.long_context_threshold
-        ):
+        if self.long_context_model and estimated_tokens > self.config.long_context_threshold:
             model = self.long_context_model
         else:
             model = self.fallback_models
@@ -150,9 +153,11 @@ class AgentOrchestrator:
                 tools=[
                     read_code_components_tool,
                     str_replace_editor_tool,
-                    generate_sub_module_documentation_tool
+                    generate_sub_module_documentation_tool,
                 ],
-                system_prompt=format_system_prompt(module_name, self.custom_instructions, self.output_language),
+                system_prompt=format_system_prompt(
+                    module_name, self.custom_instructions, self.output_language
+                ),
             )
         else:
             return Agent(
@@ -160,13 +165,22 @@ class AgentOrchestrator:
                 name=module_name,
                 deps_type=CodeWikiDeps,
                 tools=[read_code_components_tool, str_replace_editor_tool],
-                system_prompt=format_leaf_system_prompt(module_name, self.custom_instructions, self.output_language),
+                system_prompt=format_leaf_system_prompt(
+                    module_name, self.custom_instructions, self.output_language
+                ),
             )
-    
-    async def process_module(self, module_name: str, components: Dict[str, Node],
-                           core_component_ids: List[str], module_path: List[str],
-                           working_dir: str, tree_manager=None,
-                           gen_state=None, state_mgr=None) -> tuple[Dict[str, Any], str]:
+
+    async def process_module(
+        self,
+        module_name: str,
+        components: Dict[str, Node],
+        core_component_ids: List[str],
+        module_path: List[str],
+        working_dir: str,
+        tree_manager=None,
+        gen_state=None,
+        state_mgr=None,
+    ) -> tuple[Dict[str, Any], str]:
         """Process a single module and generate its documentation.
 
         Args:
@@ -183,7 +197,9 @@ class AgentOrchestrator:
         doc_path_parts = module_path if module_path else [module_name]
         docs_path = None if gen_state else find_module_doc(working_dir, doc_path_parts)
         task = None
-        if gen_state and (module_tree := (await tree_manager.get_snapshot() if tree_manager else None)):
+        if gen_state and (
+            module_tree := (await tree_manager.get_snapshot() if tree_manager else None)
+        ):
             doc_id = doc_id_for_path(module_tree, doc_path_parts)
             task = gen_state.get_task(doc_id)
             if task and task.status == "completed":
@@ -222,7 +238,11 @@ class AgentOrchestrator:
                 child_done = False
                 if gen_state and module_tree:
                     child_done = all(
-                        (child_task := gen_state.get_task(doc_id_for_path(module_tree, module_path + [cn])))
+                        (
+                            child_task := gen_state.get_task(
+                                doc_id_for_path(module_tree, module_path + [cn])
+                            )
+                        )
                         and child_task.status == "completed"
                         for cn in children
                     )

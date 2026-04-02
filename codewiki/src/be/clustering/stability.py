@@ -2,6 +2,7 @@
 
 Aligned with v3.md section 5.3 L536-539.
 """
+
 import hashlib
 from dataclasses import dataclass
 
@@ -11,9 +12,11 @@ class StabilityReport:
     """Comparison metrics between two module trees."""
 
     common_module_jaccard: float  # Average Jaccard similarity of common modules' members (0.0-1.0)
-    module_coverage: float        # Fraction of total modules that are matched: len(common) / len(all) (0.0-1.0)
-    path_stability: float         # Fraction of modules with identical paths (0.0-1.0)
-    module_id_consistency: float   # Fraction of module_ids present in both trees (0.0-1.0)
+    module_coverage: (
+        float  # Fraction of total modules that are matched: len(common) / len(all) (0.0-1.0)
+    )
+    path_stability: float  # Fraction of modules with identical paths (0.0-1.0)
+    module_id_consistency: float  # Fraction of module_ids present in both trees (0.0-1.0)
     total_modules_a: int
     total_modules_b: int
 
@@ -59,10 +62,7 @@ def measure_tree_stability(tree_a: dict, tree_b: dict) -> StabilityReport:
     id_consistency = len(common_ids) / len(all_ids) if all_ids else 1.0
 
     # 2. Path stability: among common modules, how many kept the same path?
-    path_matches = sum(
-        1 for mid in common_ids
-        if modules_a[mid]["path"] == modules_b[mid]["path"]
-    )
+    path_matches = sum(1 for mid in common_ids if modules_a[mid]["path"] == modules_b[mid]["path"])
     path_stability = path_matches / len(common_ids) if common_ids else 1.0
 
     # 3. Member Jaccard: average Jaccard similarity of component sets.

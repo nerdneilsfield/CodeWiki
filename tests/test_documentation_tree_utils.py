@@ -48,7 +48,10 @@ def test_freeze_doc_filenames_disambiguates_colliding_top_level_paths():
 
 
 def test_build_generation_tasks_includes_child_dependencies(tmp_path):
-    from codewiki.src.be.documentation_tree_utils import build_generation_tasks, freeze_doc_filenames
+    from codewiki.src.be.documentation_tree_utils import (
+        build_generation_tasks,
+        freeze_doc_filenames,
+    )
 
     tree = {
         "CLI Transport": {

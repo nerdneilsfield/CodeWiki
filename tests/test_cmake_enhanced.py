@@ -1,20 +1,23 @@
 """Task 4: CMake analyzer enhancements — comprehensive tests"""
+
 import pytest
 
-pytest.importorskip("tree_sitter_cmake", reason="tree-sitter-cmake not installed; pip install 'codewiki[cmake]'")
+pytest.importorskip(
+    "tree_sitter_cmake", reason="tree-sitter-cmake not installed; pip install 'codewiki[cmake]'"
+)
 
 from codewiki.src.be.dependency_analyzer.analyzers.cmake import analyze_cmake_file
 
-SAMPLE_CMAKE = '''
+SAMPLE_CMAKE = """
 cmake_minimum_required(VERSION 3.10)
 project(MyApp)
 
 add_executable(myapp src/main.cpp src/utils.cpp src/parser.cpp)
 add_library(mylib STATIC src/lib.cpp src/helper.cpp)
 target_link_libraries(myapp mylib pthread)
-'''
+"""
 
-MULTI_TARGET_CMAKE = '''
+MULTI_TARGET_CMAKE = """
 cmake_minimum_required(VERSION 3.14)
 project(MultiLib)
 
@@ -23,10 +26,11 @@ add_executable(client src/client.cpp)
 add_library(core SHARED src/core.cpp src/io.cpp)
 target_link_libraries(server core)
 target_link_libraries(client core)
-'''
+"""
 
 
 # ── add_executable source extraction ──────────────────────────────────────────
+
 
 def test_add_executable_source_count():
     nodes, rels = analyze_cmake_file("/tmp/CMakeLists.txt", SAMPLE_CMAKE, "/tmp")
@@ -54,6 +58,7 @@ def test_add_executable_caller_contains_target():
 
 # ── add_library source extraction ─────────────────────────────────────────────
 
+
 def test_add_library_source_count():
     nodes, rels = analyze_cmake_file("/tmp/CMakeLists.txt", SAMPLE_CMAKE, "/tmp")
     compile_rels = [r for r in rels if r.relationship_type == "compile_target"]
@@ -70,6 +75,7 @@ def test_add_library_source_paths():
 
 
 # ── target_link_libraries ──────────────────────────────────────────────────────
+
 
 def test_target_link_libraries_extracted():
     nodes, rels = analyze_cmake_file("/tmp/CMakeLists.txt", SAMPLE_CMAKE, "/tmp")
@@ -93,6 +99,7 @@ def test_system_lib_also_extracted():
 
 # ── multi-target ───────────────────────────────────────────────────────────────
 
+
 def test_multiple_executables():
     nodes, rels = analyze_cmake_file("/tmp/CMakeLists.txt", MULTI_TARGET_CMAKE, "/tmp")
     compile_rels = [r for r in rels if r.relationship_type == "compile_target"]
@@ -112,6 +119,7 @@ def test_multiple_link_targets():
 
 
 # ── relationship types are always set ─────────────────────────────────────────
+
 
 def test_all_rels_have_relationship_type():
     nodes, rels = analyze_cmake_file("/tmp/CMakeLists.txt", SAMPLE_CMAKE, "/tmp")

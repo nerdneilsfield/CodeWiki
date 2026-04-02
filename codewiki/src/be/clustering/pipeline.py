@@ -1,4 +1,5 @@
 """Clustering v2 pipeline orchestrator."""
+
 import logging
 import os
 import subprocess
@@ -100,7 +101,7 @@ def cluster_modules_v2(
 
         # Populate members.symbols from IndexProducts symbol table
         member_symbols: list[str] = []
-        if index_products and hasattr(index_products, 'symbol_table'):
+        if index_products and hasattr(index_products, "symbol_table"):
             for cid in cluster:
                 file_path = component_file_map.get(cid, "")
                 comp_name = extract_component_name(cid)
@@ -111,22 +112,24 @@ def cluster_modules_v2(
         # Populate constraints from EdgeIndex
         public_api: list[str] = []
         boundary_edges_list: list[dict] = []
-        if index_products and hasattr(index_products, 'symbol_table'):
+        if index_products and hasattr(index_products, "symbol_table"):
             for sid in member_symbols:
                 sym = index_products.symbol_table.get(sid)
                 if sym and sym.export_status.value == "exported":
                     public_api.append(sid)
 
-        if index_products and hasattr(index_products, 'edge_index'):
+        if index_products and hasattr(index_products, "edge_index"):
             cluster_syms = set(member_symbols)
             for sid in member_symbols:
                 for edge in index_products.edge_index.callees_of(sid):
                     if edge.to_symbol and edge.to_symbol not in cluster_syms:
-                        boundary_edges_list.append({
-                            "from": edge.from_symbol,
-                            "to": edge.to_symbol or edge.to_unresolved or "",
-                            "type": edge.edge_type.value,
-                        })
+                        boundary_edges_list.append(
+                            {
+                                "from": edge.from_symbol,
+                                "to": edge.to_symbol or edge.to_unresolved or "",
+                                "type": edge.edge_type.value,
+                            }
+                        )
                         if len(boundary_edges_list) >= 10:
                             break
                 if len(boundary_edges_list) >= 10:
@@ -140,9 +143,7 @@ def cluster_modules_v2(
             members=ModuleMembers(
                 components=sorted(cluster),
                 symbols=sorted(set(member_symbols)),
-                files=sorted(
-                    {component_file_map.get(c, "") for c in cluster} - {""}
-                ),
+                files=sorted({component_file_map.get(c, "") for c in cluster} - {""}),
             ),
             constraints=ModuleConstraints(
                 public_api_symbols=sorted(public_api),
@@ -189,6 +190,7 @@ def cluster_modules_v2(
     if current_module_tree:
         try:
             from codewiki.src.be.clustering.stability import measure_tree_stability
+
             report = measure_tree_stability(current_module_tree, result)
             logger.info(f"Clustering stability: {report.summary()}")
         except Exception:
@@ -229,18 +231,22 @@ def _apply_naming_freeze(
         mid = module_id_from_members(cluster)
         if mid in prev_by_id:
             prev = prev_by_id[mid]
-            result.append({
-                "cluster_idx": naming.get("cluster_idx", 0),
-                "title": prev["title"],
-                "description": prev.get("description", naming.get("description", "")),
-                "frozen_path": prev.get("path", ""),
-            })
+            result.append(
+                {
+                    "cluster_idx": naming.get("cluster_idx", 0),
+                    "title": prev["title"],
+                    "description": prev.get("description", naming.get("description", "")),
+                    "frozen_path": prev.get("path", ""),
+                }
+            )
             frozen_count += 1
         else:
             result.append(naming)
 
     if frozen_count:
-        logger.info(f"Naming freeze: reused {frozen_count}/{len(clusters)} module names from previous tree")
+        logger.info(
+            f"Naming freeze: reused {frozen_count}/{len(clusters)} module names from previous tree"
+        )
 
     return result
 
@@ -289,7 +295,9 @@ def _get_commit_hash(index_products: Any) -> str | None:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             return result.stdout.strip()

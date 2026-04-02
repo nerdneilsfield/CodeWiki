@@ -2,10 +2,15 @@
 
 Written BEFORE implementation (TDD RED phase).
 """
+
 import os
 import pytest
 
-from codewiki.src.be.postprocess.link_validator import build_anchor_registry, validate_links, LinkIssue
+from codewiki.src.be.postprocess.link_validator import (
+    build_anchor_registry,
+    validate_links,
+    LinkIssue,
+)
 
 
 class TestBuildAnchorRegistry:
@@ -141,9 +146,7 @@ class TestValidateLinks:
         assert issues[0].issue_type == "empty_link"
 
     def test_validate_links_multiple_issues(self, tmp_path):
-        (tmp_path / "doc.md").write_text(
-            "[missing](gone.md)\n[bad anchor](other.md#nope)\n"
-        )
+        (tmp_path / "doc.md").write_text("[missing](gone.md)\n[bad anchor](other.md#nope)\n")
         (tmp_path / "other.md").write_text("# Real\n")
         issues = validate_links(str(tmp_path))
         assert len(issues) == 2

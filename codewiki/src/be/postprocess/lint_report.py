@@ -1,4 +1,5 @@
 """Lint report: structured output of all post-processing issues."""
+
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -26,9 +27,7 @@ class LintReport:
     # Each: {"file": str, "line": int, "target": str, "issue_type": str}
 
     total_files: int = 0
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @property
     def has_failures(self) -> bool:

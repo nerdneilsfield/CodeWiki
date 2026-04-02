@@ -1,29 +1,98 @@
 """Enhanced Python adapter: extracts methods, imports, visibility, and signatures."""
+
 import ast
 import hashlib
 import os
 import warnings
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from codewiki.src.be.index.models import (
-    Symbol, ImportStatement, SymbolKind, Visibility, ExportStatus, SourceRange,
-    SymbolEdge, EdgeType, Confidence,
+    Symbol,
+    ImportStatement,
+    SymbolKind,
+    Visibility,
+    ExportStatus,
+    SourceRange,
+    SymbolEdge,
+    EdgeType,
+    Confidence,
 )
 
+if TYPE_CHECKING:
+    from codewiki.src.be.index.import_graph import ImportGraph
+    from codewiki.src.be.index.symbol_table import SymbolTable
+
 # Builtins that should never appear as CALLS edges.
-_PYTHON_BUILTINS: frozenset[str] = frozenset({
-    "print", "len", "range", "type", "isinstance", "issubclass",
-    "int", "str", "float", "bool", "list", "dict", "set", "tuple",
-    "bytes", "bytearray", "memoryview", "object", "super",
-    "getattr", "setattr", "hasattr", "delattr", "property",
-    "staticmethod", "classmethod", "abs", "max", "min", "sum",
-    "sorted", "reversed", "enumerate", "zip", "map", "filter",
-    "any", "all", "id", "hash", "repr", "format", "open",
-    "input", "round", "pow", "divmod", "chr", "ord", "hex", "oct", "bin",
-    "iter", "next", "callable", "vars", "dir",
-    "ValueError", "TypeError", "KeyError", "IndexError", "AttributeError",
-    "RuntimeError", "StopIteration", "Exception", "NotImplementedError",
-})
+_PYTHON_BUILTINS: frozenset[str] = frozenset(
+    {
+        "print",
+        "len",
+        "range",
+        "type",
+        "isinstance",
+        "issubclass",
+        "int",
+        "str",
+        "float",
+        "bool",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "bytes",
+        "bytearray",
+        "memoryview",
+        "object",
+        "super",
+        "getattr",
+        "setattr",
+        "hasattr",
+        "delattr",
+        "property",
+        "staticmethod",
+        "classmethod",
+        "abs",
+        "max",
+        "min",
+        "sum",
+        "sorted",
+        "reversed",
+        "enumerate",
+        "zip",
+        "map",
+        "filter",
+        "any",
+        "all",
+        "id",
+        "hash",
+        "repr",
+        "format",
+        "open",
+        "input",
+        "round",
+        "pow",
+        "divmod",
+        "chr",
+        "ord",
+        "hex",
+        "oct",
+        "bin",
+        "iter",
+        "next",
+        "callable",
+        "vars",
+        "dir",
+        "ValueError",
+        "TypeError",
+        "KeyError",
+        "IndexError",
+        "AttributeError",
+        "RuntimeError",
+        "StopIteration",
+        "Exception",
+        "NotImplementedError",
+    }
+)
 
 
 class PythonIndexAdapter:
@@ -194,7 +263,8 @@ class PythonIndexAdapter:
             qualified_name=qname,
             file_path=self._rel_path,
             range=self._make_range(node),
-            signature=f"class {node.name}" + (f"({', '.join(ast.unparse(b) for b in node.bases)})" if node.bases else ""),
+            signature=f"class {node.name}"
+            + (f"({', '.join(ast.unparse(b) for b in node.bases)})" if node.bases else ""),
             visibility=self._visibility_for(node.name),
             export_status=self._export_status_for(node.name),
             docstring=ast.get_docstring(node),
@@ -227,7 +297,9 @@ class PythonIndexAdapter:
             range=self._make_range(node),
             signature=self._extract_signature(node),
             visibility=self._visibility_for(node.name),
-            export_status=self._export_status_for(node.name) if not parent_class else ExportStatus.UNKNOWN,
+            export_status=self._export_status_for(node.name)
+            if not parent_class
+            else ExportStatus.UNKNOWN,
             docstring=ast.get_docstring(node),
             parent_symbol_id=parent_sid,
             source_hash=self._source_hash(node),
@@ -300,21 +372,21 @@ class PythonIndexAdapter:
                     import_graph=import_graph,
                 )
 
-                edges.append(SymbolEdge(
-                    edge_type=EdgeType.CALLS,
-                    from_symbol=from_sym.symbol_id,
-                    to_symbol=to_sym.symbol_id if to_sym else None,
-                    to_unresolved=callee_name if not to_sym else None,
-                    evidence_refs=[evidence],
-                    confidence=confidence,
-                    resolver="ast",
-                ))
+                edges.append(
+                    SymbolEdge(
+                        edge_type=EdgeType.CALLS,
+                        from_symbol=from_sym.symbol_id,
+                        to_symbol=to_sym.symbol_id if to_sym else None,
+                        to_unresolved=callee_name if not to_sym else None,
+                        evidence_refs=[evidence],
+                        confidence=confidence,
+                        resolver="ast",
+                    )
+                )
 
         return edges
 
-    def _iter_calls_shallow(
-        self, func_node: ast.FunctionDef | ast.AsyncFunctionDef
-    ):
+    def _iter_calls_shallow(self, func_node: ast.FunctionDef | ast.AsyncFunctionDef):
         """Yield all ast.Call nodes directly inside func_node's body.
 
         Unlike ast.walk, this does NOT descend into nested function/class
@@ -410,7 +482,9 @@ class PythonIndexAdapter:
             for sym in symbol_table.by_file(self._rel_path):
                 if sym.kind == SymbolKind.METHOD and sym.name == method_name:
                     # Verify it belongs to the same class via parent_symbol_id
-                    parent = symbol_table.get(sym.parent_symbol_id) if sym.parent_symbol_id else None
+                    parent = (
+                        symbol_table.get(sym.parent_symbol_id) if sym.parent_symbol_id else None
+                    )
                     if parent and parent.name == parent_class_name:
                         return sym, Confidence.HIGH
 
@@ -473,14 +547,16 @@ class PythonIndexAdapter:
     def _visit_import(self, node: ast.Import):
         for alias in node.names:
             resolved = self._resolve_import_path(alias.name, level=0)
-            self._imports.append(ImportStatement(
-                file_path=self._rel_path,
-                module_path=alias.name,
-                imported_names=[],
-                alias=alias.asname,
-                resolved_path=resolved,
-                line=node.lineno,
-            ))
+            self._imports.append(
+                ImportStatement(
+                    file_path=self._rel_path,
+                    module_path=alias.name,
+                    imported_names=[],
+                    alias=alias.asname,
+                    resolved_path=resolved,
+                    line=node.lineno,
+                )
+            )
 
     def _visit_import_from(self, node: ast.ImportFrom):
         module = node.module or ""
@@ -490,7 +566,7 @@ class PythonIndexAdapter:
         module_path = prefix + module
 
         names = []
-        for alias in (node.names or []):
+        for alias in node.names or []:
             if alias.name == "*":
                 names = ["*"]
                 break
@@ -503,12 +579,14 @@ class PythonIndexAdapter:
 
         resolved = self._resolve_import_path(module, level=level)
 
-        self._imports.append(ImportStatement(
-            file_path=self._rel_path,
-            module_path=module_path,
-            imported_names=names,
-            alias=alias,
-            resolved_path=resolved,
-            is_reexport=False,
-            line=node.lineno,
-        ))
+        self._imports.append(
+            ImportStatement(
+                file_path=self._rel_path,
+                module_path=module_path,
+                imported_names=names,
+                alias=alias,
+                resolved_path=resolved,
+                is_reexport=False,
+                line=node.lineno,
+            )
+        )

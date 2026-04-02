@@ -1,4 +1,5 @@
 """Tests for EdgeIndex query API."""
+
 import pytest
 
 from codewiki.src.be.index.models import SymbolEdge, EdgeType, Confidence
@@ -9,8 +10,10 @@ from codewiki.src.be.index.edge_index import EdgeIndex
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_edge(from_sym: str, to_sym: str | None, edge_type: EdgeType,
-              to_unresolved: str | None = None) -> SymbolEdge:
+
+def make_edge(
+    from_sym: str, to_sym: str | None, edge_type: EdgeType, to_unresolved: str | None = None
+) -> SymbolEdge:
     return SymbolEdge(
         edge_type=edge_type,
         from_symbol=from_sym,
@@ -24,6 +27,7 @@ def make_edge(from_sym: str, to_sym: str | None, edge_type: EdgeType,
 # ---------------------------------------------------------------------------
 # Test 1: callers_of
 # ---------------------------------------------------------------------------
+
 
 def test_callers_of():
     """callers_of('B') returns edges from A→B and C→B."""
@@ -44,6 +48,7 @@ def test_callers_of():
 # Test 2: callees_of
 # ---------------------------------------------------------------------------
 
+
 def test_callees_of():
     """callees_of('A') returns A→B (CALLS) and A→C (IMPORTS)."""
     e_ab = make_edge("A", "B", EdgeType.CALLS)
@@ -63,12 +68,13 @@ def test_callees_of():
 # Test 3: edges_of — all types (no filter)
 # ---------------------------------------------------------------------------
 
+
 def test_edges_of_all_types():
     """edges_of returns all edges involving a symbol as source or target."""
     e_ax = make_edge("A", "X", EdgeType.IMPORTS)
     e_ay = make_edge("A", "Y", EdgeType.CALLS)
     e_az = make_edge("A", "Z", EdgeType.EXTENDS)
-    e_ba = make_edge("B", "A", EdgeType.CALLS)   # A as target
+    e_ba = make_edge("B", "A", EdgeType.CALLS)  # A as target
     e_bc = make_edge("B", "C", EdgeType.IMPORTS)  # A not involved
 
     idx = EdgeIndex([e_ax, e_ay, e_az, e_ba, e_bc])
@@ -87,11 +93,12 @@ def test_edges_of_all_types():
 # Test 4: edges_of — filtered by type
 # ---------------------------------------------------------------------------
 
+
 def test_edges_of_filtered_by_type():
     """edges_of(sym, edge_type=CALLS) returns only CALLS edges."""
     e_ax = make_edge("A", "X", EdgeType.IMPORTS)
     e_ay = make_edge("A", "Y", EdgeType.CALLS)
-    e_ba = make_edge("B", "A", EdgeType.CALLS)   # A as target (CALLS)
+    e_ba = make_edge("B", "A", EdgeType.CALLS)  # A as target (CALLS)
     e_ca = make_edge("C", "A", EdgeType.EXTENDS)  # A as target (EXTENDS)
 
     idx = EdgeIndex([e_ax, e_ay, e_ba, e_ca])
@@ -107,6 +114,7 @@ def test_edges_of_filtered_by_type():
 # ---------------------------------------------------------------------------
 # Test 5: dependency_subgraph
 # ---------------------------------------------------------------------------
+
 
 def test_dependency_subgraph():
     """subgraph({A, B}) returns only A→B, not A→D or B→C."""
@@ -127,6 +135,7 @@ def test_dependency_subgraph():
 # Test 6: empty EdgeIndex
 # ---------------------------------------------------------------------------
 
+
 def test_empty_edge_index():
     """EdgeIndex([]) returns empty lists for all queries."""
     idx = EdgeIndex([])
@@ -142,6 +151,7 @@ def test_empty_edge_index():
 # Test 7: callers_of unknown symbol
 # ---------------------------------------------------------------------------
 
+
 def test_callers_of_unknown_symbol():
     """callers_of for a symbol with no incoming edges returns []."""
     e_ab = make_edge("A", "B", EdgeType.CALLS)
@@ -153,6 +163,7 @@ def test_callers_of_unknown_symbol():
 # ---------------------------------------------------------------------------
 # Test 8: unresolved edges in callees — not indexed in _by_to
 # ---------------------------------------------------------------------------
+
 
 def test_unresolved_edges_in_callees():
     """Edge with to_symbol=None, to_unresolved='foo':
@@ -178,6 +189,7 @@ def test_unresolved_edges_in_callees():
 # Test 9: IndexProducts has edge_index after construction
 # ---------------------------------------------------------------------------
 
+
 def test_index_products_has_edge_index():
     """IndexProducts auto-creates edge_index via __post_init__."""
     from codewiki.src.be.index.index_builder import IndexProducts
@@ -201,6 +213,7 @@ def test_index_products_has_edge_index():
 # ---------------------------------------------------------------------------
 # Test 10: IndexProducts from_dict round-trip has working edge_index
 # ---------------------------------------------------------------------------
+
 
 def test_index_products_from_dict_has_edge_index():
     """After to_dict/from_dict round-trip, edge_index is rebuilt and functional."""
@@ -233,6 +246,7 @@ def test_index_products_from_dict_has_edge_index():
 # ---------------------------------------------------------------------------
 # Test 11: Self-loop edge should not be duplicated in edges_of
 # ---------------------------------------------------------------------------
+
 
 def test_edges_of_self_loop_not_duplicated():
     """A→A (self-loop / recursive call) must appear exactly once in edges_of('A')."""

@@ -1,6 +1,7 @@
 """
 LLM service factory for creating configured LLM clients.
 """
+
 import sys
 import time
 import logging
@@ -218,6 +219,7 @@ _MAX_RETRY_AFTER = 120.0
 
 def _parse_retry_after(exc: Exception) -> float | None:
     import openai
+
     if not isinstance(exc, openai.RateLimitError):
         return None
     headers = getattr(getattr(exc, "response", None), "headers", {})
@@ -238,7 +240,9 @@ def _sleep_with_jitter(base_delay: float) -> None:
     time.sleep(actual)
 
 
-def _call_llm_streaming(client: OpenAI, model: str, prompt: str, temperature: float, config: Config) -> str:
+def _call_llm_streaming(
+    client: OpenAI, model: str, prompt: str, temperature: float, config: Config
+) -> str:
     chunks: list[str] = []
     with client.chat.completions.create(
         model=model,
@@ -254,7 +258,9 @@ def _call_llm_streaming(client: OpenAI, model: str, prompt: str, temperature: fl
     return "".join(chunks)
 
 
-def _call_claude(client: Anthropic, model: str, prompt: str, temperature: float, config: Config) -> str:
+def _call_claude(
+    client: Anthropic, model: str, prompt: str, temperature: float, config: Config
+) -> str:
     response = client.messages.create(
         model=model,
         max_tokens=config.max_tokens,
@@ -276,14 +282,20 @@ def call_llm(prompt: str, config: Config, model: str = None, temperature: float 
         model = config.main_model
 
     prompt_tokens = count_tokens(prompt)
-    if config.long_context_model and prompt_tokens > config.long_context_threshold and model == config.main_model:
+    if (
+        config.long_context_model
+        and prompt_tokens > config.long_context_threshold
+        and model == config.main_model
+    ):
         _logger.info(
             f"Switching model: {model} → {config.long_context_model} "
             f"(prompt {prompt_tokens} tokens > threshold {config.long_context_threshold})"
         )
         model = config.long_context_model
 
-    _logger.debug(f"call_llm: model={model}, prompt_tokens={prompt_tokens}, temperature={temperature}")
+    _logger.debug(
+        f"call_llm: model={model}, prompt_tokens={prompt_tokens}, temperature={temperature}"
+    )
 
     client, provider_type = _create_client_for_model(config, model)
     if _has_provider_registry(config):
@@ -302,12 +314,12 @@ def call_llm(prompt: str, config: Config, model: str = None, temperature: float 
                 f"⚠  LLM retry {attempt}/{len(_RETRY_DELAYS)}"
                 f" — model={model}"
                 f" — waiting {wait}s"
-                f" — reason: {last_exc}"
-                + (" [streaming]" if use_streaming else "")
+                f" — reason: {last_exc}" + (" [streaming]" if use_streaming else "")
             )
             _logger.warning(msg)
             try:
                 from tqdm import tqdm as _tqdm
+
                 _tqdm.write(msg, file=sys.stderr)
             except Exception:
                 print(msg, file=sys.stderr, flush=True)
@@ -320,13 +332,16 @@ def call_llm(prompt: str, config: Config, model: str = None, temperature: float 
             _logger.info(start_msg)
             try:
                 from tqdm import tqdm as _tqdm
+
                 _tqdm.write(start_msg, file=sys.stderr)
             except Exception:
                 print(start_msg, file=sys.stderr, flush=True)
         try:
             if provider_type in {"openai_compatible", "azure_openai"}:
                 if use_streaming:
-                    content = _call_llm_streaming(client, resolved_model_name, prompt, temperature, config)
+                    content = _call_llm_streaming(
+                        client, resolved_model_name, prompt, temperature, config
+                    )
                 else:
                     response = client.chat.completions.create(
                         model=resolved_model_name,
@@ -342,8 +357,7 @@ def call_llm(prompt: str, config: Config, model: str = None, temperature: float 
             elapsed = time.time() - t0
             _logger.debug(
                 f"call_llm [model={model}]: success in {elapsed:.1f}s, "
-                f"response length={len(content)}"
-                + (" [streaming]" if use_streaming else "")
+                f"response length={len(content)}" + (" [streaming]" if use_streaming else "")
             )
             return content
         except Exception as exc:

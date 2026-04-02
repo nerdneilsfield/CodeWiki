@@ -1,16 +1,30 @@
 """Tests for generic adapter: Node → Symbol 1:1 conversion."""
+
 import pytest
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.index.adapters.generic_adapter import GenericIndexAdapter
 from codewiki.src.be.index.models import SymbolKind, Visibility, ExportStatus
 
 
-def _node(cid="src.main.Foo", name="Foo", ctype="class", rel_path="src/main.py",
-          docstring="", start=1, end=10):
+def _node(
+    cid="src.main.Foo",
+    name="Foo",
+    ctype="class",
+    rel_path="src/main.py",
+    docstring="",
+    start=1,
+    end=10,
+):
     return Node(
-        id=cid, name=name, component_type=ctype, file_path=f"/repo/{rel_path}",
-        relative_path=rel_path, start_line=start, end_line=end,
-        has_docstring=bool(docstring), docstring=docstring,
+        id=cid,
+        name=name,
+        component_type=ctype,
+        file_path=f"/repo/{rel_path}",
+        relative_path=rel_path,
+        start_line=start,
+        end_line=end,
+        has_docstring=bool(docstring),
+        docstring=docstring,
     )
 
 

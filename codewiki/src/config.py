@@ -4,17 +4,18 @@ import argparse
 import os
 import sys
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Constants
-OUTPUT_BASE_DIR = 'output'
-DEPENDENCY_GRAPHS_DIR = 'dependency_graphs'
-DOCS_DIR = 'docs'
-FIRST_MODULE_TREE_FILENAME = 'first_module_tree.json'
-MODULE_TREE_FILENAME = 'module_tree.json'
-OVERVIEW_FILENAME = 'overview.md'
-GENERATION_STATE_FILENAME = 'generation_state.json'
-INTERNAL_SUBDIR = '.codewiki'
+OUTPUT_BASE_DIR = "output"
+DEPENDENCY_GRAPHS_DIR = "dependency_graphs"
+DOCS_DIR = "docs"
+FIRST_MODULE_TREE_FILENAME = "first_module_tree.json"
+MODULE_TREE_FILENAME = "module_tree.json"
+OVERVIEW_FILENAME = "overview.md"
+GENERATION_STATE_FILENAME = "generation_state.json"
+INTERNAL_SUBDIR = ".codewiki"
 postprocess_fix_links = True
 MAX_DEPTH = 2
 # Default max token settings
@@ -31,27 +32,32 @@ MAX_TOKEN_PER_LEAF_MODULE = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE
 # CLI context detection
 _CLI_CONTEXT = False
 
+
 def set_cli_context(enabled: bool = True):
     """Set whether we're running in CLI context (vs web app)."""
     global _CLI_CONTEXT
     _CLI_CONTEXT = enabled
 
+
 def is_cli_context() -> bool:
     """Check if running in CLI context."""
     return _CLI_CONTEXT
 
+
 # LLM services
 # In CLI mode, these will be loaded from ~/.codewiki/config.json + keyring
 # In web app mode, use environment variables
-MAIN_MODEL = os.getenv('MAIN_MODEL', 'claude-sonnet-4')
-FALLBACK_MODEL_1 = os.getenv('FALLBACK_MODEL_1', 'glm-4p5')
-CLUSTER_MODEL = os.getenv('CLUSTER_MODEL', MAIN_MODEL)
-LLM_BASE_URL = os.getenv('LLM_BASE_URL', 'http://0.0.0.0:4000/')
-LLM_API_KEY = os.getenv('LLM_API_KEY', 'sk-1234')
+MAIN_MODEL = os.getenv("MAIN_MODEL", "claude-sonnet-4")
+FALLBACK_MODEL_1 = os.getenv("FALLBACK_MODEL_1", "glm-4p5")
+CLUSTER_MODEL = os.getenv("CLUSTER_MODEL", MAIN_MODEL)
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://0.0.0.0:4000/")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "sk-1234")
+
 
 @dataclass
 class Config:
     """Configuration class for CodeWiki."""
+
     repo_path: str
     output_dir: str
     dependency_graph_dir: str
@@ -82,75 +88,77 @@ class Config:
     agent_instructions: Optional[Dict[str, Any]] = None
     # Multi-provider registry for the TOML-based config system
     providers: Optional[List[Any]] = None
-    
+
     @property
     def include_patterns(self) -> Optional[List[str]]:
         """Get file include patterns from agent instructions."""
         if self.agent_instructions:
-            return self.agent_instructions.get('include_patterns')
+            return self.agent_instructions.get("include_patterns")
         return None
-    
+
     @property
     def exclude_patterns(self) -> Optional[List[str]]:
         """Get file exclude patterns from agent instructions."""
         if self.agent_instructions:
-            return self.agent_instructions.get('exclude_patterns')
+            return self.agent_instructions.get("exclude_patterns")
         return None
-    
+
     @property
     def focus_modules(self) -> Optional[List[str]]:
         """Get focus modules from agent instructions."""
         if self.agent_instructions:
-            return self.agent_instructions.get('focus_modules')
+            return self.agent_instructions.get("focus_modules")
         return None
-    
+
     @property
     def doc_type(self) -> Optional[str]:
         """Get documentation type from agent instructions."""
         if self.agent_instructions:
-            return self.agent_instructions.get('doc_type')
+            return self.agent_instructions.get("doc_type")
         return None
-    
+
     @property
     def custom_instructions(self) -> Optional[str]:
         """Get custom instructions from agent instructions."""
         if self.agent_instructions:
-            return self.agent_instructions.get('custom_instructions')
+            return self.agent_instructions.get("custom_instructions")
         return None
-    
+
     def get_prompt_addition(self) -> str:
         """Generate prompt additions based on agent instructions."""
         if not self.agent_instructions:
             return ""
-        
+
         additions = []
-        
+
         if self.doc_type:
             doc_type_instructions = {
-                'api': "Focus on API documentation: endpoints, parameters, return types, and usage examples.",
-                'architecture': "Focus on architecture documentation: system design, component relationships, and data flow.",
-                'user-guide': "Focus on user guide documentation: how to use features, step-by-step tutorials.",
-                'developer': "Focus on developer documentation: code structure, contribution guidelines, and implementation details.",
+                "api": "Focus on API documentation: endpoints, parameters, return types, and usage examples.",
+                "architecture": "Focus on architecture documentation: system design, component relationships, and data flow.",
+                "user-guide": "Focus on user guide documentation: how to use features, step-by-step tutorials.",
+                "developer": "Focus on developer documentation: code structure, contribution guidelines, and implementation details.",
             }
             if self.doc_type.lower() in doc_type_instructions:
                 additions.append(doc_type_instructions[self.doc_type.lower()])
             else:
                 additions.append(f"Focus on generating {self.doc_type} documentation.")
-        
+
         if self.focus_modules:
-            additions.append(f"Pay special attention to and provide more detailed documentation for these modules: {', '.join(self.focus_modules)}")
-        
+            additions.append(
+                f"Pay special attention to and provide more detailed documentation for these modules: {', '.join(self.focus_modules)}"
+            )
+
         if self.custom_instructions:
             additions.append(f"Additional instructions: {self.custom_instructions}")
-        
+
         return "\n".join(additions) if additions else ""
-    
+
     @classmethod
-    def from_args(cls, args: argparse.Namespace) -> 'Config':
+    def from_args(cls, args: argparse.Namespace) -> "Config":
         """Create configuration from parsed arguments."""
         repo_name = os.path.basename(os.path.normpath(args.repo_path))
-        sanitized_repo_name = ''.join(c if c.isalnum() else '_' for c in repo_name)
-        
+        sanitized_repo_name = "".join(c if c.isalnum() else "_" for c in repo_name)
+
         return cls(
             repo_path=args.repo_path,
             output_dir=OUTPUT_BASE_DIR,
@@ -161,9 +169,9 @@ class Config:
             llm_api_key=LLM_API_KEY,
             main_model=MAIN_MODEL,
             cluster_model=CLUSTER_MODEL,
-            fallback_model=FALLBACK_MODEL_1
+            fallback_model=FALLBACK_MODEL_1,
         )
-    
+
     @classmethod
     def from_cli(
         cls,
@@ -183,8 +191,8 @@ class Config:
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
         max_retries: int = DEFAULT_MAX_RETRIES,
         output_language: str = "en",
-        agent_instructions: Optional[Dict[str, Any]] = None
-    ) -> 'Config':
+        agent_instructions: Optional[Dict[str, Any]] = None,
+    ) -> "Config":
         """
         Create configuration for CLI context.
         """
@@ -210,7 +218,7 @@ class Config:
             max_concurrent=max_concurrent,
             max_retries=max_retries,
             output_language=output_language,
-            agent_instructions=agent_instructions
+            agent_instructions=agent_instructions,
         )
 
 

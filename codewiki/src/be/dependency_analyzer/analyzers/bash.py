@@ -10,12 +10,59 @@ from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationsh
 logger = logging.getLogger(__name__)
 
 _BUILTIN_COMMANDS = {
-    "echo", "printf", "read", "exit", "return", "export", "local", "declare",
-    "unset", "set", "shift", "source", ".", "cd", "pwd", "ls", "mkdir", "rm",
-    "cp", "mv", "cat", "grep", "sed", "awk", "find", "test", "[", "[[",
-    "if", "then", "else", "fi", "for", "while", "do", "done", "case", "esac",
-    "true", "false", ":", "eval", "exec", "trap", "wait", "kill", "jobs",
-    "pushd", "popd", "type", "which", "command", "builtin",
+    "echo",
+    "printf",
+    "read",
+    "exit",
+    "return",
+    "export",
+    "local",
+    "declare",
+    "unset",
+    "set",
+    "shift",
+    "source",
+    ".",
+    "cd",
+    "pwd",
+    "ls",
+    "mkdir",
+    "rm",
+    "cp",
+    "mv",
+    "cat",
+    "grep",
+    "sed",
+    "awk",
+    "find",
+    "test",
+    "[",
+    "[[",
+    "if",
+    "then",
+    "else",
+    "fi",
+    "for",
+    "while",
+    "do",
+    "done",
+    "case",
+    "esac",
+    "true",
+    "false",
+    ":",
+    "eval",
+    "exec",
+    "trap",
+    "wait",
+    "kill",
+    "jobs",
+    "pushd",
+    "popd",
+    "type",
+    "which",
+    "command",
+    "builtin",
 }
 
 
@@ -38,7 +85,7 @@ class TreeSitterBashAnalyzer:
             rel_path = str(self.file_path)
         for ext in (".sh", ".bash", ".zsh"):
             if rel_path.endswith(ext):
-                rel_path = rel_path[:-len(ext)]
+                rel_path = rel_path[: -len(ext)]
                 break
         return rel_path.replace("/", ".").replace("\\", ".")
 
@@ -80,7 +127,7 @@ class TreeSitterBashAnalyzer:
                     component_type="function",
                     file_path=str(self.file_path),
                     relative_path=self._get_relative_path(),
-                    source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                    source_code="\n".join(lines[node.start_point[0] : node.end_point[0] + 1]),
                     start_line=node.start_point[0] + 1,
                     end_line=node.end_point[0] + 1,
                     has_docstring=False,
@@ -115,12 +162,14 @@ class TreeSitterBashAnalyzer:
                 if cmd_name and cmd_name not in _BUILTIN_COMMANDS:
                     caller_id = self._find_containing_fn(node, top_level_nodes)
                     if caller_id and cmd_name in top_level_nodes:
-                        self.call_relationships.append(CallRelationship(
-                            caller=caller_id,
-                            callee=self._get_component_id(cmd_name),
-                            call_line=node.start_point[0] + 1,
-                            is_resolved=True,
-                        ))
+                        self.call_relationships.append(
+                            CallRelationship(
+                                caller=caller_id,
+                                callee=self._get_component_id(cmd_name),
+                                call_line=node.start_point[0] + 1,
+                                is_resolved=True,
+                            )
+                        )
 
         for child in node.children:
             self._extract_relationships(child, top_level_nodes)

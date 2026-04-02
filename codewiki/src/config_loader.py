@@ -156,7 +156,9 @@ class AppConfig:
             overrides.main_model if overrides.main_model is not None else generation.main_model
         )
         cluster_model = (
-            overrides.cluster_model if overrides.cluster_model is not None else generation.cluster_model
+            overrides.cluster_model
+            if overrides.cluster_model is not None
+            else generation.cluster_model
         )
         fallback_models = (
             overrides.fallback_models
@@ -241,7 +243,9 @@ def _resolve_env_ref(value: Any) -> Any:
     return value
 
 
-def resolve_model_ref(model_ref: str, providers: Optional[Iterable[ProviderConfig]] = None) -> ResolvedModel:
+def resolve_model_ref(
+    model_ref: str, providers: Optional[Iterable[ProviderConfig]] = None
+) -> ResolvedModel:
     if not model_ref or "/" not in model_ref:
         raise ValueError("Model reference must use provider/model format")
 
@@ -260,9 +264,7 @@ def resolve_model_ref(model_ref: str, providers: Optional[Iterable[ProviderConfi
 
     provider = provider_map[provider_name]
     if provider.model_list and model_name not in provider.model_list:
-        raise ValueError(
-            f"Model '{model_name}' is not declared for provider '{provider_name}'"
-        )
+        raise ValueError(f"Model '{model_name}' is not declared for provider '{provider_name}'")
 
     credential_source = None
     if provider.api_keys:

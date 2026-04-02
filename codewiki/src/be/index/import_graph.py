@@ -1,5 +1,6 @@
 # codewiki/src/be/index/import_graph.py
 """ImportGraph: file-level import relationships and symbol resolution."""
+
 from collections import defaultdict
 from typing import Optional
 
@@ -12,7 +13,9 @@ class ImportGraph:
 
     def __init__(self, imports: list[ImportStatement]):
         self._by_file: dict[str, list[ImportStatement]] = defaultdict(list)
-        self._by_resolved: dict[str, list[str]] = defaultdict(list)  # resolved_path → [importing files]
+        self._by_resolved: dict[str, list[str]] = defaultdict(
+            list
+        )  # resolved_path → [importing files]
 
         for imp in imports:
             self._by_file[imp.file_path].append(imp)

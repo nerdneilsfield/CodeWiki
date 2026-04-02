@@ -1,11 +1,14 @@
 """Task 8: Cross-file data flow analyzer — comprehensive tests"""
+
 from codewiki.src.be.dependency_analyzer.analysis.data_flow_analyzer import DataFlowAnalyzer
 from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationship
 
 
 def _node(nid, name, params=None, source_code=""):
     return Node(
-        id=nid, name=name, component_type="function",
+        id=nid,
+        name=name,
+        component_type="function",
         file_path=f"/repo/{nid.split('.')[0]}.cpp",
         relative_path=f"{nid.split('.')[0]}.cpp",
         parameters=params or [],
@@ -15,12 +18,16 @@ def _node(nid, name, params=None, source_code=""):
 
 def _call(caller, callee, line=10):
     return CallRelationship(
-        caller=caller, callee=callee,
-        call_line=line, is_resolved=True, relationship_type="call",
+        caller=caller,
+        callee=callee,
+        call_line=line,
+        is_resolved=True,
+        relationship_type="call",
     )
 
 
 # ── basic flow edge creation ───────────────────────────────────────────────────
+
 
 def test_flow_edges_key_present():
     analyzer = DataFlowAnalyzer({_node("a.f", "f").__dict__["id"]: _node("a.f", "f")}, [])
@@ -109,10 +116,12 @@ def test_multiple_relationships_produce_edges():
 
 # ── ownership pattern detection ────────────────────────────────────────────────
 
+
 def test_malloc_ownership_detected():
     functions = {
-        "main.init": _node("main.init", "init",
-            source_code="void init() { int* p = malloc(100); }"),
+        "main.init": _node(
+            "main.init", "init", source_code="void init() { int* p = malloc(100); }"
+        ),
     }
     analyzer = DataFlowAnalyzer(functions, [])
     result = analyzer.analyze()
@@ -123,8 +132,11 @@ def test_malloc_ownership_detected():
 
 def test_malloc_free_pair_detected():
     functions = {
-        "main.alloc_and_free": _node("main.alloc_and_free", "alloc_and_free",
-            source_code="void f() { int* p = malloc(100); free(p); }"),
+        "main.alloc_and_free": _node(
+            "main.alloc_and_free",
+            "alloc_and_free",
+            source_code="void f() { int* p = malloc(100); free(p); }",
+        ),
     }
     analyzer = DataFlowAnalyzer(functions, [])
     result = analyzer.analyze()
@@ -137,8 +149,9 @@ def test_malloc_free_pair_detected():
 
 def test_smart_ptr_detected():
     functions = {
-        "a.use_ptr": _node("a.use_ptr", "use_ptr",
-            source_code="void f() { std::unique_ptr<int> p; }"),
+        "a.use_ptr": _node(
+            "a.use_ptr", "use_ptr", source_code="void f() { std::unique_ptr<int> p; }"
+        ),
     }
     analyzer = DataFlowAnalyzer(functions, [])
     result = analyzer.analyze()
@@ -149,8 +162,7 @@ def test_smart_ptr_detected():
 
 def test_no_ownership_for_clean_function():
     functions = {
-        "a.clean": _node("a.clean", "clean",
-            source_code="int add(int a, int b) { return a + b; }"),
+        "a.clean": _node("a.clean", "clean", source_code="int add(int a, int b) { return a + b; }"),
     }
     analyzer = DataFlowAnalyzer(functions, [])
     result = analyzer.analyze()
@@ -162,8 +174,7 @@ def test_no_ownership_for_clean_function():
 
 def test_ownership_pattern_structure():
     functions = {
-        "main.leak": _node("main.leak", "leak",
-            source_code="void leak() { int* p = malloc(10); }"),
+        "main.leak": _node("main.leak", "leak", source_code="void leak() { int* p = malloc(10); }"),
     }
     analyzer = DataFlowAnalyzer(functions, [])
     result = analyzer.analyze()

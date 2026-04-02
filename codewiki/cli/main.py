@@ -15,7 +15,7 @@ from codewiki import __version__
 def cli(ctx):
     """
     CodeWiki: Transform codebases into comprehensive documentation.
-    
+
     Generate AI-powered documentation for your code repositories with support
     for Python, Java, JavaScript, TypeScript, C, C++, and C#.
     """
@@ -28,7 +28,7 @@ def version():
     """Display version information."""
     click.echo(f"CodeWiki CLI v{__version__}")
     click.echo("Python-based documentation generator using AI analysis")
-    
+
 
 # Import commands
 from codewiki.cli.commands.config import config_group
@@ -55,4 +55,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

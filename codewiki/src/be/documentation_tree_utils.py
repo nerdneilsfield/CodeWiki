@@ -86,8 +86,7 @@ def dedup_docs_directory(working_dir: str) -> dict[str, list]:
         files.sort(key=lambda name: len(contents.get(name, "")), reverse=True)
         winner = files[0]
         all_similar = all(
-            content_similarity(contents[winner], contents[other]) > 0.8
-            for other in files[1:]
+            content_similarity(contents[winner], contents[other]) > 0.8 for other in files[1:]
         )
         if not all_similar:
             logger.warning(
@@ -166,7 +165,9 @@ def build_generation_tasks(tree: Dict[str, Any], config: Config) -> list[DocTask
         for key, info in children.items():
             current_path = parent_path + [key]
             nested = info.get("children") or {}
-            nested_child_ids = _walk(nested, current_path) if isinstance(nested, dict) and nested else []
+            nested_child_ids = (
+                _walk(nested, current_path) if isinstance(nested, dict) and nested else []
+            )
             doc_id = doc_id_for_path(tree, current_path)
             tasks.append(
                 DocTask(
@@ -176,7 +177,12 @@ def build_generation_tasks(tree: Dict[str, Any], config: Config) -> list[DocTask
                     output_file=info.get("_doc_filename", module_doc_filename(current_path)),
                     depends_on=nested_child_ids,
                     input_hash=stable_hash(
-                        [*sorted(info.get("components", [])), *nested_child_ids, config.output_language, "v7"]
+                        [
+                            *sorted(info.get("components", [])),
+                            *nested_child_ids,
+                            config.output_language,
+                            "v7",
+                        ]
                     ),
                     language=config.output_language,
                     prompt_version="v7",

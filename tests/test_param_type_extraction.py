@@ -1,16 +1,18 @@
 """Task 7: C/C++ parameter extraction — comprehensive tests"""
+
 from codewiki.src.be.dependency_analyzer.analyzers.c import analyze_c_file
 from codewiki.src.be.dependency_analyzer.analyzers.cpp import analyze_cpp_file
 
 
 # ── C parameter extraction ─────────────────────────────────────────────────────
 
+
 def test_c_param_names_extracted():
-    code = '''
+    code = """
 void process(int* data, const char* name, int count) {
     // body
 }
-'''
+"""
     nodes, rels = analyze_c_file("/tmp/test.c", code, "/tmp")
     func = next(n for n in nodes if n.name == "process")
     assert func.parameters is not None
@@ -21,11 +23,11 @@ void process(int* data, const char* name, int count) {
 
 
 def test_c_no_params_function():
-    code = '''
+    code = """
 void init(void) {
     // no params
 }
-'''
+"""
     nodes, rels = analyze_c_file("/tmp/test.c", code, "/tmp")
     func = next((n for n in nodes if n.name == "init"), None)
     if func is not None:
@@ -35,9 +37,9 @@ void init(void) {
 
 
 def test_c_single_param():
-    code = '''
+    code = """
 int square(int x) { return x * x; }
-'''
+"""
     nodes, rels = analyze_c_file("/tmp/test.c", code, "/tmp")
     func = next(n for n in nodes if n.name == "square")
     assert func.parameters is not None
@@ -46,9 +48,9 @@ int square(int x) { return x * x; }
 
 
 def test_c_pointer_params():
-    code = '''
+    code = """
 void memcopy(void* dst, const void* src, int n) {}
-'''
+"""
     nodes, rels = analyze_c_file("/tmp/test.c", code, "/tmp")
     func = next(n for n in nodes if n.name == "memcopy")
     assert func.parameters is not None
@@ -58,10 +60,10 @@ void memcopy(void* dst, const void* src, int n) {}
 
 
 def test_c_multiple_functions_each_has_params():
-    code = '''
+    code = """
 void foo(int a, int b) {}
 void bar(float x) {}
-'''
+"""
     nodes, rels = analyze_c_file("/tmp/test.c", code, "/tmp")
     funcs = {n.name: n for n in nodes if n.component_type == "function"}
     assert "foo" in funcs
@@ -75,10 +77,11 @@ void bar(float x) {}
 
 # ── C++ parameter extraction ───────────────────────────────────────────────────
 
+
 def test_cpp_param_names_extracted():
-    code = '''
+    code = """
 void transfer(int* src, int* dst, int n) {}
-'''
+"""
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", code, "/tmp")
     func = next(n for n in nodes if n.name == "transfer")
     assert func.parameters is not None
@@ -88,9 +91,9 @@ void transfer(int* src, int* dst, int n) {}
 
 
 def test_cpp_reference_param():
-    code = '''
+    code = """
 void increment(int& val) { val++; }
-'''
+"""
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", code, "/tmp")
     func = next(n for n in nodes if n.name == "increment")
     assert func.parameters is not None
@@ -98,9 +101,9 @@ void increment(int& val) { val++; }
 
 
 def test_cpp_const_ref_param():
-    code = '''
+    code = """
 void print_val(const std::string& s) {}
-'''
+"""
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", code, "/tmp")
     func = next(n for n in nodes if n.name == "print_val")
     assert func.parameters is not None
@@ -108,13 +111,13 @@ void print_val(const std::string& s) {}
 
 
 def test_cpp_unique_ptr_param():
-    code = '''
+    code = """
 #include <memory>
 void take_ownership(std::unique_ptr<int> ptr) {}
 void share(std::shared_ptr<int> ptr) {}
 void borrow(const int& ref) {}
 void mutate(int* ptr) {}
-'''
+"""
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", code, "/tmp")
     funcs = {n.name: n for n in nodes if n.component_type in ("function", "method")}
     assert funcs["take_ownership"].parameters is not None
@@ -123,12 +126,12 @@ void mutate(int* ptr) {}
 
 
 def test_cpp_class_method_params():
-    code = '''
+    code = """
 class Processor {
 public:
     void run(int* data, int size) {}
 };
-'''
+"""
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", code, "/tmp")
     method = next((n for n in nodes if n.name == "run"), None)
     if method is not None and method.parameters is not None:
@@ -136,10 +139,10 @@ public:
 
 
 def test_cpp_no_crash_empty_params():
-    code = '''
+    code = """
 void no_params() {}
 int get_value() { return 42; }
-'''
+"""
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", code, "/tmp")
     funcs = {n.name: n for n in nodes if n.component_type == "function"}
     assert "no_params" in funcs

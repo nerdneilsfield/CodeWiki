@@ -1,14 +1,14 @@
 # tests/test_perf_python_analyzer.py
 from codewiki.src.be.dependency_analyzer.analyzers.python import PythonASTAnalyzer
 
-SAMPLE = '''
+SAMPLE = """
 class Foo:
     def bar(self):
         self.baz()
 
 def standalone():
     pass
-'''
+"""
 
 
 def test_cached_paths_set_on_init():
@@ -39,6 +39,7 @@ def test_get_module_path_returns_cached_value():
 def test_analysis_still_works_after_caching():
     """Full analysis must still produce correct results."""
     from codewiki.src.be.dependency_analyzer.analyzers.python import analyze_python_file
+
     nodes, rels = analyze_python_file("/repo/pkg/mod.py", SAMPLE, "/repo")
     assert any(n.name == "Foo" for n in nodes)
     assert any(n.name == "standalone" for n in nodes)

@@ -13,6 +13,7 @@ from codewiki.src.be.guide_generator import GuideGenerator, _PROMPT_VERSIONS
 def _minimal_config():
     """Return a minimal Config-like object for testing."""
     from codewiki.src.config import Config
+
     return Config(
         repo_path="/tmp/fake-repo",
         output_dir="/tmp/output",
@@ -106,6 +107,7 @@ def test_should_regenerate_when_input_changes():
 
 # ── Contract tests (Task 7b) ─────────────────────────────────────────────────
 
+
 def test_sanitize_slug_strips_unsafe_chars():
     assert GuideGenerator._sanitize_slug("hello-world") == "hello-world"
     assert GuideGenerator._sanitize_slug("../../../etc/passwd") == "etcpasswd"
@@ -154,9 +156,7 @@ def test_parse_json_response_fallback():
     assert result == {}
 
     # Valid JSON in tags
-    result = GuideGenerator._parse_json_response(
-        '<OUTLINE>{"sections": []}</OUTLINE>', "OUTLINE"
-    )
+    result = GuideGenerator._parse_json_response('<OUTLINE>{"sections": []}</OUTLINE>', "OUTLINE")
     assert result == {"sections": []}
 
 
@@ -174,11 +174,13 @@ def test_static_site_guide_navigation():
         (docs_dir / "overview.md").write_text("# Overview\nHello", encoding="utf-8")
 
         # Guide .md stubs
-        for slug in ("guide-getting-started", "guide-beginners-guide",
-                      "guide-build-and-organization", "guide-core-algorithms"):
-            (docs_dir / f"{slug}.md").write_text(
-                f"# {slug}\nPlaceholder", encoding="utf-8"
-            )
+        for slug in (
+            "guide-getting-started",
+            "guide-beginners-guide",
+            "guide-build-and-organization",
+            "guide-core-algorithms",
+        ):
+            (docs_dir / f"{slug}.md").write_text(f"# {slug}\nPlaceholder", encoding="utf-8")
         # Sub-page
         (docs_dir / "guide-beginners-guide-setup.md").write_text(
             "# Setup\nPlaceholder", encoding="utf-8"
@@ -223,7 +225,7 @@ def test_json_validation_failure_is_reported_as_failed():
 
             gen._call_llm_with_fallback = bad_llm
 
-            with patch.object(gen, '_regenerate_overview', new_callable=AsyncMock):
+            with patch.object(gen, "_regenerate_overview", new_callable=AsyncMock):
                 await gen.run()
 
             # Beginner guide should be FAILED, not success
@@ -259,7 +261,7 @@ def test_run_continues_on_guide_failure():
             gen.generate_build_analysis = counting_guide
             gen.generate_algorithm_deepdive = counting_guide
 
-            with patch.object(gen, '_regenerate_overview', new_callable=AsyncMock):
+            with patch.object(gen, "_regenerate_overview", new_callable=AsyncMock):
                 await gen.run()
 
             # 3 guides should have run despite the first one failing

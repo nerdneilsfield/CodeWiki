@@ -31,6 +31,7 @@ class _DummyProgress:
 @pytest.mark.asyncio
 async def test_run_module_queue_processes_children_before_parent(tmp_path, monkeypatch):
     from codewiki.src.be.documentation_scheduler import run_module_queue
+
     monkeypatch.setattr("codewiki.src.be.documentation_scheduler.tqdm", _DummyProgress)
 
     graph_tree = {
@@ -44,7 +45,16 @@ async def test_run_module_queue_processes_children_before_parent(tmp_path, monke
     }
     order = []
 
-    async def process_module(name, components, component_ids, path, working_dir, tree_manager, gen_state=None, state_mgr=None):
+    async def process_module(
+        name,
+        components,
+        component_ids,
+        path,
+        working_dir,
+        tree_manager,
+        gen_state=None,
+        state_mgr=None,
+    ):
         order.append(("module", tuple(path)))
         return {}, "test/model"
 
@@ -66,7 +76,9 @@ async def test_run_module_queue_processes_children_before_parent(tmp_path, monke
         timeout=2,
     )
 
-    child_positions = [i for i, item in enumerate(order) if item[1] in {("Parent", "ChildA"), ("Parent", "ChildB")}]
+    child_positions = [
+        i for i, item in enumerate(order) if item[1] in {("Parent", "ChildA"), ("Parent", "ChildB")}
+    ]
     parent_position = order.index(("module", ("Parent",)))
     overview_position = order.index(("overview", ()))
 
@@ -78,6 +90,7 @@ async def test_run_module_queue_processes_children_before_parent(tmp_path, monke
 @pytest.mark.asyncio
 async def test_run_module_queue_marks_failed_tasks_in_state(tmp_path, monkeypatch):
     from codewiki.src.be.documentation_scheduler import run_module_queue
+
     monkeypatch.setattr("codewiki.src.be.documentation_scheduler.tqdm", _DummyProgress)
 
     async def _fast_sleep(_seconds):
@@ -98,7 +111,16 @@ async def test_run_module_queue_marks_failed_tasks_in_state(tmp_path, monkeypatc
     )
     manager = GenerationStateManager(state, str(tmp_path / "generation_state.json"))
 
-    async def process_module(name, components, component_ids, path, working_dir, tree_manager, gen_state=None, state_mgr=None):
+    async def process_module(
+        name,
+        components,
+        component_ids,
+        path,
+        working_dir,
+        tree_manager,
+        gen_state=None,
+        state_mgr=None,
+    ):
         raise RuntimeError("boom")
 
     config = SimpleNamespace(max_concurrent=1, main_model="test/main")

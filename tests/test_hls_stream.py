@@ -1,7 +1,8 @@
 """Task 11: HLS stream parameter and pragma detection — comprehensive tests"""
+
 from codewiki.src.be.dependency_analyzer.analyzers.cpp import analyze_cpp_file
 
-STREAM_CODE = '''
+STREAM_CODE = """
 #include <hls_stream.h>
 
 void producer(hls::stream<int>& out, int* mem, int n) {
@@ -23,9 +24,9 @@ void consumer(hls::stream<int>& in, int* mem, int n) {
         mem[i] = in.read();
     }
 }
-'''
+"""
 
-MULTI_STREAM_CODE = '''
+MULTI_STREAM_CODE = """
 #include <hls_stream.h>
 
 void filter(hls::stream<int>& in_stream, hls::stream<int>& out_stream) {
@@ -35,10 +36,11 @@ void filter(hls::stream<int>& in_stream, hls::stream<int>& out_stream) {
     int val = in_stream.read();
     out_stream.write(val * 2);
 }
-'''
+"""
 
 
 # ── producer function ──────────────────────────────────────────────────────────
+
 
 def test_producer_function_extracted():
     nodes, rels = analyze_cpp_file("/tmp/stream.cpp", STREAM_CODE, "/tmp")
@@ -57,8 +59,11 @@ def test_producer_axis_pragma():
     nodes, rels = analyze_cpp_file("/tmp/stream.cpp", STREAM_CODE, "/tmp")
     producer = next(n for n in nodes if n.name == "producer")
     axis_pragma = next(
-        (p for p in producer.hls_pragmas
-         if p.pragma_type == "INTERFACE" and p.params.get("subtype") == "axis"),
+        (
+            p
+            for p in producer.hls_pragmas
+            if p.pragma_type == "INTERFACE" and p.params.get("subtype") == "axis"
+        ),
         None,
     )
     assert axis_pragma is not None
@@ -68,7 +73,8 @@ def test_producer_axis_port_name():
     nodes, rels = analyze_cpp_file("/tmp/stream.cpp", STREAM_CODE, "/tmp")
     producer = next(n for n in nodes if n.name == "producer")
     axis_pragma = next(
-        p for p in producer.hls_pragmas
+        p
+        for p in producer.hls_pragmas
         if p.pragma_type == "INTERFACE" and p.params.get("subtype") == "axis"
     )
     assert axis_pragma.params.get("port") == "out"
@@ -78,8 +84,7 @@ def test_producer_m_axi_pragma():
     nodes, rels = analyze_cpp_file("/tmp/stream.cpp", STREAM_CODE, "/tmp")
     producer = next(n for n in nodes if n.name == "producer")
     m_axi = next(
-        (p for p in producer.hls_pragmas
-         if p.params.get("subtype") == "m_axi"),
+        (p for p in producer.hls_pragmas if p.params.get("subtype") == "m_axi"),
         None,
     )
     assert m_axi is not None
@@ -89,13 +94,12 @@ def test_producer_m_axi_pragma():
 def test_producer_pipeline_pragma():
     nodes, rels = analyze_cpp_file("/tmp/stream.cpp", STREAM_CODE, "/tmp")
     producer = next(n for n in nodes if n.name == "producer")
-    pipeline = next(
-        (p for p in producer.hls_pragmas if p.pragma_type == "PIPELINE"), None
-    )
+    pipeline = next((p for p in producer.hls_pragmas if p.pragma_type == "PIPELINE"), None)
     assert pipeline is not None
 
 
 # ── consumer function ──────────────────────────────────────────────────────────
+
 
 def test_consumer_function_extracted():
     nodes, rels = analyze_cpp_file("/tmp/stream.cpp", STREAM_CODE, "/tmp")
@@ -114,8 +118,11 @@ def test_consumer_axis_pragma():
     nodes, rels = analyze_cpp_file("/tmp/stream.cpp", STREAM_CODE, "/tmp")
     consumer = next(n for n in nodes if n.name == "consumer")
     axis_pragma = next(
-        (p for p in consumer.hls_pragmas
-         if p.pragma_type == "INTERFACE" and p.params.get("subtype") == "axis"),
+        (
+            p
+            for p in consumer.hls_pragmas
+            if p.pragma_type == "INTERFACE" and p.params.get("subtype") == "axis"
+        ),
         None,
     )
     assert axis_pragma is not None
@@ -125,7 +132,8 @@ def test_consumer_axis_port_name():
     nodes, rels = analyze_cpp_file("/tmp/stream.cpp", STREAM_CODE, "/tmp")
     consumer = next(n for n in nodes if n.name == "consumer")
     axis_pragma = next(
-        p for p in consumer.hls_pragmas
+        p
+        for p in consumer.hls_pragmas
         if p.pragma_type == "INTERFACE" and p.params.get("subtype") == "axis"
     )
     assert axis_pragma.params.get("port") == "in"
@@ -140,25 +148,32 @@ def test_consumer_has_params():
 
 # ── axis hardware semantic ─────────────────────────────────────────────────────
 
+
 def test_axis_hardware_semantic():
     nodes, rels = analyze_cpp_file("/tmp/stream.cpp", STREAM_CODE, "/tmp")
     producer = next(n for n in nodes if n.name == "producer")
     axis_pragma = next(
-        p for p in producer.hls_pragmas
+        p
+        for p in producer.hls_pragmas
         if p.pragma_type == "INTERFACE" and p.params.get("subtype") == "axis"
     )
     assert len(axis_pragma.hardware_semantic) > 0
-    assert "AXI-Stream" in axis_pragma.hardware_semantic or "stream" in axis_pragma.hardware_semantic.lower()
+    assert (
+        "AXI-Stream" in axis_pragma.hardware_semantic
+        or "stream" in axis_pragma.hardware_semantic.lower()
+    )
 
 
 # ── multi-stream filter ────────────────────────────────────────────────────────
+
 
 def test_multi_stream_both_axis_extracted():
     nodes, rels = analyze_cpp_file("/tmp/multi.cpp", MULTI_STREAM_CODE, "/tmp")
     filt = next((n for n in nodes if n.name == "filter"), None)
     assert filt is not None
     axis_pragmas = [
-        p for p in filt.hls_pragmas
+        p
+        for p in filt.hls_pragmas
         if p.pragma_type == "INTERFACE" and p.params.get("subtype") == "axis"
     ]
     assert len(axis_pragmas) == 2

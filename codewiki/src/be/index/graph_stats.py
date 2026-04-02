@@ -1,4 +1,5 @@
 """GraphStats: summary statistics for the index graph."""
+
 from collections import Counter
 
 from pydantic import BaseModel
@@ -12,7 +13,7 @@ class GraphStats(BaseModel):
     All dict keys are EdgeType.value strings (e.g. "imports", "calls").
     """
 
-    edge_counts: dict[str, int]        # EdgeType.value → total edge count
+    edge_counts: dict[str, int]  # EdgeType.value → total edge count
     unresolved_counts: dict[str, int]  # EdgeType.value → count where to_unresolved is set
     unresolved_ratios: dict[str, float]  # EdgeType.value → ratio in [0.0, 1.0]
     total_symbols: int

@@ -1,25 +1,26 @@
 """Task 10: Vitis .cfg parser — comprehensive tests"""
+
 from codewiki.src.be.dependency_analyzer.analyzers.vitis_cfg import analyze_vitis_cfg
 
-HLS_CFG = '''
+HLS_CFG = """
 [hls]
 flow_target=vitis
 syn.file=./mm2s.cpp
 syn.file_cflags=./mm2s.cpp,-I./include
 syn.top=mm2s
 syn.output.format=xo
-'''
+"""
 
-SYSTEM_CFG = '''
+SYSTEM_CFG = """
 [connectivity]
 nk=mm2s:1:mm2s_1
 nk=s2mm:1:s2mm_1
 stream_connect=mm2s_1.s:s2mm_1.s
 sp=mm2s_1.mem:DDR[0]
 sp=s2mm_1.mem:DDR[1]
-'''
+"""
 
-MULTI_STREAM_CFG = '''
+MULTI_STREAM_CFG = """
 [connectivity]
 nk=producer:1:prod_1
 nk=filter:1:filt_1
@@ -29,17 +30,17 @@ stream_connect=filt_1.out:cons_1.in
 sp=prod_1.mem:DDR[0]
 sp=cons_1.mem:DDR[1]
 sp=cons_1.out_mem:DDR[2]
-'''
+"""
 
-NON_VITIS_CFG = '''
+NON_VITIS_CFG = """
 [database]
 host=localhost
 port=5432
 name=mydb
 password=secret
-'''
+"""
 
-PLAIN_APP_CFG = '''
+PLAIN_APP_CFG = """
 [server]
 host=0.0.0.0
 port=8080
@@ -47,10 +48,11 @@ port=8080
 [logging]
 level=INFO
 file=/var/log/app.log
-'''
+"""
 
 
 # ── hls section: top function ──────────────────────────────────────────────────
+
 
 def test_hls_top_function_extracted():
     nodes, rels = analyze_vitis_cfg("/tmp/hls.cfg", HLS_CFG, "/tmp")
@@ -72,6 +74,7 @@ def test_hls_top_is_hls_kernel():
 
 # ── hls section: source files ─────────────────────────────────────────────────
 
+
 def test_hls_source_file_relationship():
     nodes, rels = analyze_vitis_cfg("/tmp/hls.cfg", HLS_CFG, "/tmp")
     src_rels = [r for r in rels if r.relationship_type == "hls_source"]
@@ -86,6 +89,7 @@ def test_hls_source_callee_name():
 
 
 # ── connectivity section: kernel instances ────────────────────────────────────
+
 
 def test_kernel_instance_nodes():
     nodes, rels = analyze_vitis_cfg("/tmp/system.cfg", SYSTEM_CFG, "/tmp")
@@ -102,6 +106,7 @@ def test_kernel_instance_names():
 
 
 # ── connectivity section: stream connections ──────────────────────────────────
+
 
 def test_stream_connect_relationship():
     nodes, rels = analyze_vitis_cfg("/tmp/system.cfg", SYSTEM_CFG, "/tmp")
@@ -123,6 +128,7 @@ def test_multiple_stream_connections():
 
 # ── connectivity section: memory mappings ─────────────────────────────────────
 
+
 def test_memory_mapping_relationships():
     nodes, rels = analyze_vitis_cfg("/tmp/system.cfg", SYSTEM_CFG, "/tmp")
     mem_rels = [r for r in rels if r.relationship_type == "memory_map"]
@@ -143,6 +149,7 @@ def test_multiple_memory_mappings():
 
 
 # ── content sniffing: non-Vitis cfg returns nothing ───────────────────────────
+
 
 def test_non_vitis_cfg_returns_empty():
     """A non-Vitis .cfg file should produce no nodes or relationships."""

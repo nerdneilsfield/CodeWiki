@@ -14,14 +14,14 @@ from codewiki.cli.utils.errors import (
     ConfigurationError,
     handle_error,
     EXIT_SUCCESS,
-    EXIT_CONFIG_ERROR
+    EXIT_CONFIG_ERROR,
 )
 from codewiki.cli.utils.validation import (
     validate_url,
     validate_api_key,
     validate_model_name,
     is_top_tier_model,
-    mask_api_key
+    mask_api_key,
 )
 
 _LEGACY_WARNING = (
@@ -100,10 +100,11 @@ def parse_patterns(patterns_str: str) -> List[str]:
     """Parse comma-separated patterns into a list."""
     if not patterns_str:
         return []
-    return [p.strip() for p in patterns_str.split(',') if p.strip()]
+    return [p.strip() for p in patterns_str.split(",") if p.strip()]
 
 
 # ── config group ──────────────────────────────────────────────────────────────
+
 
 @click.group(name="config")
 def config_group():
@@ -112,6 +113,7 @@ def config_group():
 
 
 # ── config init ───────────────────────────────────────────────────────────────
+
 
 @config_group.command(name="init")
 @click.option(
@@ -159,6 +161,7 @@ def config_init(output: str, force: bool):
 
 
 # ── config validate ───────────────────────────────────────────────────────────
+
 
 @config_group.command(name="validate")
 @click.option(
@@ -311,6 +314,7 @@ def _validate_legacy(quick: bool, verbose: bool) -> None:
     if not quick:
         try:
             from openai import OpenAI
+
             client = OpenAI(api_key=api_key, base_url=config.base_url)
             client.models.list()
             click.secho("✓ API connectivity test successful", fg="green")
@@ -324,6 +328,7 @@ def _validate_legacy(quick: bool, verbose: bool) -> None:
 
 
 # ── config show ───────────────────────────────────────────────────────────────
+
 
 @config_group.command(name="show")
 @click.option(
@@ -479,7 +484,9 @@ def _show_legacy(output_json: bool) -> None:
             "max_token_per_leaf_module": config.max_token_per_leaf_module if config else 16000,
             "max_depth": config.max_depth if config else 2,
             "max_concurrent": config.max_concurrent if config else 3,
-            "agent_instructions": config.agent_instructions.to_dict() if config and config.agent_instructions else {},
+            "agent_instructions": config.agent_instructions.to_dict()
+            if config and config.agent_instructions
+            else {},
             "config_file": str(manager.config_file_path),
             "_legacy": True,
         }
@@ -545,6 +552,7 @@ def _show_legacy(output_json: bool) -> None:
 
 # ── config set (legacy, deprecated) ──────────────────────────────────────────
 
+
 @config_group.command(name="set")
 @click.option("--api-key", type=str, help="LLM API key (stored securely in system keychain)")
 @click.option("--base-url", type=str, help="LLM API base URL")
@@ -595,79 +603,91 @@ def config_set(
     click.echo()
 
     try:
-        if not any([
-            api_key, base_url, main_model, cluster_model, fallback_model,
-            long_context_model, long_context_threshold, max_tokens,
-            max_token_per_module, max_token_per_leaf_module, max_depth,
-            max_concurrent, max_retries, language,
-        ]):
+        if not any(
+            [
+                api_key,
+                base_url,
+                main_model,
+                cluster_model,
+                fallback_model,
+                long_context_model,
+                long_context_threshold,
+                max_tokens,
+                max_token_per_module,
+                max_token_per_leaf_module,
+                max_depth,
+                max_concurrent,
+                max_retries,
+                language,
+            ]
+        ):
             click.echo("No options provided. Use --help for usage information.")
             sys.exit(EXIT_CONFIG_ERROR)
 
         validated_data = {}
 
         if api_key:
-            validated_data['api_key'] = validate_api_key(api_key)
+            validated_data["api_key"] = validate_api_key(api_key)
         if base_url:
-            validated_data['base_url'] = validate_url(base_url)
+            validated_data["base_url"] = validate_url(base_url)
         if main_model:
-            validated_data['main_model'] = validate_model_name(main_model)
+            validated_data["main_model"] = validate_model_name(main_model)
         if cluster_model:
-            validated_data['cluster_model'] = validate_model_name(cluster_model)
+            validated_data["cluster_model"] = validate_model_name(cluster_model)
         if fallback_model:
             for name in fallback_model.split(","):
                 validate_model_name(name.strip())
-            validated_data['fallback_model'] = fallback_model
+            validated_data["fallback_model"] = fallback_model
         if long_context_model:
-            validated_data['long_context_model'] = validate_model_name(long_context_model)
+            validated_data["long_context_model"] = validate_model_name(long_context_model)
         if long_context_threshold is not None:
             if long_context_threshold < 1:
                 raise ConfigurationError("long_context_threshold must be a positive integer")
-            validated_data['long_context_threshold'] = long_context_threshold
+            validated_data["long_context_threshold"] = long_context_threshold
         if max_tokens is not None:
             if max_tokens < 1:
                 raise ConfigurationError("max_tokens must be a positive integer")
-            validated_data['max_tokens'] = max_tokens
+            validated_data["max_tokens"] = max_tokens
         if max_token_per_module is not None:
             if max_token_per_module < 1:
                 raise ConfigurationError("max_token_per_module must be a positive integer")
-            validated_data['max_token_per_module'] = max_token_per_module
+            validated_data["max_token_per_module"] = max_token_per_module
         if max_token_per_leaf_module is not None:
             if max_token_per_leaf_module < 1:
                 raise ConfigurationError("max_token_per_leaf_module must be a positive integer")
-            validated_data['max_token_per_leaf_module'] = max_token_per_leaf_module
+            validated_data["max_token_per_leaf_module"] = max_token_per_leaf_module
         if max_depth is not None:
             if max_depth < 1:
                 raise ConfigurationError("max_depth must be a positive integer")
-            validated_data['max_depth'] = max_depth
+            validated_data["max_depth"] = max_depth
         if max_concurrent is not None:
             if max_concurrent < 1:
                 raise ConfigurationError("max_concurrent must be a positive integer")
-            validated_data['max_concurrent'] = max_concurrent
+            validated_data["max_concurrent"] = max_concurrent
         if max_retries is not None:
             if max_retries < 0:
                 raise ConfigurationError("max_retries must be a non-negative integer")
-            validated_data['max_retries'] = max_retries
+            validated_data["max_retries"] = max_retries
         if language is not None:
-            validated_data['output_language'] = language.strip().lower()
+            validated_data["output_language"] = language.strip().lower()
 
         manager = ConfigManager()
         manager.load()
         manager.save(
-            api_key=validated_data.get('api_key'),
-            base_url=validated_data.get('base_url'),
-            main_model=validated_data.get('main_model'),
-            cluster_model=validated_data.get('cluster_model'),
-            fallback_model=validated_data.get('fallback_model'),
-            long_context_model=validated_data.get('long_context_model'),
-            long_context_threshold=validated_data.get('long_context_threshold'),
-            max_tokens=validated_data.get('max_tokens'),
-            max_token_per_module=validated_data.get('max_token_per_module'),
-            max_token_per_leaf_module=validated_data.get('max_token_per_leaf_module'),
-            max_depth=validated_data.get('max_depth'),
-            max_concurrent=validated_data.get('max_concurrent'),
-            max_retries=validated_data.get('max_retries'),
-            output_language=validated_data.get('output_language'),
+            api_key=validated_data.get("api_key"),
+            base_url=validated_data.get("base_url"),
+            main_model=validated_data.get("main_model"),
+            cluster_model=validated_data.get("cluster_model"),
+            fallback_model=validated_data.get("fallback_model"),
+            long_context_model=validated_data.get("long_context_model"),
+            long_context_threshold=validated_data.get("long_context_threshold"),
+            max_tokens=validated_data.get("max_tokens"),
+            max_token_per_module=validated_data.get("max_token_per_module"),
+            max_token_per_leaf_module=validated_data.get("max_token_per_leaf_module"),
+            max_depth=validated_data.get("max_depth"),
+            max_concurrent=validated_data.get("max_concurrent"),
+            max_retries=validated_data.get("max_retries"),
+            output_language=validated_data.get("output_language"),
         )
 
         click.echo()
@@ -715,20 +735,25 @@ def config_set(
 
 # ── config agent (legacy, deprecated) ────────────────────────────────────────
 
+
 @config_group.command(name="agent")
-@click.option("--include", "-i", type=str, default=None,
-              help="Comma-separated file patterns to include")
-@click.option("--exclude", "-e", type=str, default=None,
-              help="Comma-separated patterns to exclude")
-@click.option("--focus", "-f", type=str, default=None,
-              help="Comma-separated modules/paths to focus on")
-@click.option("--doc-type", "-t",
-              type=click.Choice(['api', 'architecture', 'user-guide', 'developer'],
-                                case_sensitive=False),
-              default=None,
-              help="Default type of documentation to generate")
-@click.option("--instructions", type=str, default=None,
-              help="Custom instructions for the documentation agent")
+@click.option(
+    "--include", "-i", type=str, default=None, help="Comma-separated file patterns to include"
+)
+@click.option("--exclude", "-e", type=str, default=None, help="Comma-separated patterns to exclude")
+@click.option(
+    "--focus", "-f", type=str, default=None, help="Comma-separated modules/paths to focus on"
+)
+@click.option(
+    "--doc-type",
+    "-t",
+    type=click.Choice(["api", "architecture", "user-guide", "developer"], case_sensitive=False),
+    default=None,
+    help="Default type of documentation to generate",
+)
+@click.option(
+    "--instructions", type=str, default=None, help="Custom instructions for the documentation agent"
+)
 @click.option("--clear", is_flag=True, help="Clear all agent instructions")
 def config_agent(
     include: Optional[str],

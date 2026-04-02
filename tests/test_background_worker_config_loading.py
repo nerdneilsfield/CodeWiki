@@ -6,7 +6,10 @@ def test_background_worker_build_runtime_config_uses_app_config(tmp_path):
     from codewiki.src.fe.background_worker import BackgroundWorker
 
     config_path = tmp_path / "codewiki.toml"
-    config_path.write_text("[runtime]\noutput_dir='docs'\n[generation]\nmain_model='openai/gpt-4o-mini'\ncluster_model='openai/gpt-4o-mini'\n[[providers]]\nname='openai'\ntype='openai_compatible'\nmodel_list=['gpt-4o-mini']\napi_keys=[]\n", encoding="utf-8")
+    config_path.write_text(
+        "[runtime]\noutput_dir='docs'\n[generation]\nmain_model='openai/gpt-4o-mini'\ncluster_model='openai/gpt-4o-mini'\n[[providers]]\nname='openai'\ntype='openai_compatible'\nmodel_list=['gpt-4o-mini']\napi_keys=[]\n",
+        encoding="utf-8",
+    )
 
     app_config = MagicMock()
     sentinel_runtime = object()
@@ -29,7 +32,10 @@ def test_background_worker_build_runtime_config_loads_when_no_app_config(tmp_pat
     from codewiki.src.fe.background_worker import BackgroundWorker
 
     config_path = tmp_path / "codewiki.toml"
-    config_path.write_text("[runtime]\noutput_dir='docs'\n[generation]\nmain_model='openai/gpt-4o-mini'\ncluster_model='openai/gpt-4o-mini'\n[[providers]]\nname='openai'\ntype='openai_compatible'\nmodel_list=['gpt-4o-mini']\napi_keys=[]\n", encoding="utf-8")
+    config_path.write_text(
+        "[runtime]\noutput_dir='docs'\n[generation]\nmain_model='openai/gpt-4o-mini'\ncluster_model='openai/gpt-4o-mini'\n[[providers]]\nname='openai'\ntype='openai_compatible'\nmodel_list=['gpt-4o-mini']\napi_keys=[]\n",
+        encoding="utf-8",
+    )
 
     app_config = MagicMock()
     sentinel_runtime = object()
@@ -37,7 +43,9 @@ def test_background_worker_build_runtime_config_loads_when_no_app_config(tmp_pat
 
     worker = BackgroundWorker(cache_manager=MagicMock(), config_path=str(config_path))
 
-    with patch("codewiki.src.fe.background_worker.load_app_config", return_value=app_config) as mock_load:
+    with patch(
+        "codewiki.src.fe.background_worker.load_app_config", return_value=app_config
+    ) as mock_load:
         result = worker._build_runtime_config(temp_repo_dir="/tmp/repo", docs_dir="/tmp/docs")
 
     assert result is sentinel_runtime
@@ -76,17 +84,24 @@ def test_process_job_sets_main_model_from_toml(tmp_path):
     )
     worker.job_status["test-job"] = job
 
-    with patch("codewiki.src.fe.background_worker.load_app_config", return_value=app_config), \
-         patch("codewiki.src.fe.background_worker.GitHubRepoProcessor") as mock_gh, \
-         patch("codewiki.src.fe.background_worker.DocumentationGenerator") as mock_gen_cls:
-        mock_gh.get_repo_info.return_value = {"full_name": "owner/repo", "clone_url": "https://github.com/owner/repo.git"}
+    with (
+        patch("codewiki.src.fe.background_worker.load_app_config", return_value=app_config),
+        patch("codewiki.src.fe.background_worker.GitHubRepoProcessor") as mock_gh,
+        patch("codewiki.src.fe.background_worker.DocumentationGenerator") as mock_gen_cls,
+    ):
+        mock_gh.get_repo_info.return_value = {
+            "full_name": "owner/repo",
+            "clone_url": "https://github.com/owner/repo.git",
+        }
         mock_gh.clone_repository.return_value = True
         mock_gen = mock_gen_cls.return_value
 
         fake_loop = MagicMock()
         fake_loop.run_until_complete = MagicMock(return_value=None)
-        with patch("asyncio.new_event_loop", return_value=fake_loop), \
-             patch("asyncio.set_event_loop"):
+        with (
+            patch("asyncio.new_event_loop", return_value=fake_loop),
+            patch("asyncio.set_event_loop"),
+        ):
             worker._process_job("test-job")
 
     assert job.main_model == "openai/gpt-4o-mini", (

@@ -2,6 +2,7 @@
 
 Aligned with v3.md sections 5.2 (schema) and 5.4 (VALIDATE_TREE pseudocode).
 """
+
 import copy
 import hashlib
 from typing import Optional
@@ -198,9 +199,7 @@ def validate_tree(tree: ModuleTree, all_component_ids: set[str]) -> list[str]:
                     f"Cycle detected: module '{child.module_id}' is both ancestor and child"
                 )
             else:
-                cycle_errors.extend(
-                    _check_cycles(child, ancestor_ids | {child.module_id})
-                )
+                cycle_errors.extend(_check_cycles(child, ancestor_ids | {child.module_id}))
         return cycle_errors
 
     errors.extend(_check_cycles(tree.root, {tree.root.module_id}))
@@ -231,9 +230,7 @@ def _node_to_legacy(node: ModuleNode) -> dict:
     return {
         "path": node.path,
         "components": list(node.members.components),
-        "children": {
-            child.title: _node_to_legacy(child) for child in node.children
-        },
+        "children": {child.title: _node_to_legacy(child) for child in node.children},
     }
 
 

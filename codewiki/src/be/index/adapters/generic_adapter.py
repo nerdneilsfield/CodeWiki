@@ -1,12 +1,19 @@
 # codewiki/src/be/index/adapters/generic_adapter.py
 """Generic adapter: converts existing Node objects to Symbol (1:1 fallback)."""
+
 import hashlib
 from typing import Optional
 
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.index.models import (
-    Symbol, SymbolKind, Visibility, ExportStatus, SourceRange,
-    SymbolEdge, EdgeType, Confidence,
+    Symbol,
+    SymbolKind,
+    Visibility,
+    ExportStatus,
+    SourceRange,
+    SymbolEdge,
+    EdgeType,
+    Confidence,
 )
 
 _KIND_MAP = {
@@ -77,32 +84,34 @@ class GenericIndexAdapter:
                 # Best-effort: derive path from qualified caller name
                 parts = rel.caller.rsplit(".", 1)
                 evidence_file = parts[0].replace(".", "/") if parts else ""
-            evidence = [SourceRange(
-                file_path=evidence_file,
-                start_line=rel.call_line or 0,
-                start_col=0,
-                end_line=rel.call_line or 0,
-                end_col=0,
-            )]
+            evidence = [
+                SourceRange(
+                    file_path=evidence_file,
+                    start_line=rel.call_line or 0,
+                    start_col=0,
+                    end_line=rel.call_line or 0,
+                    end_col=0,
+                )
+            ]
 
-            edges.append(SymbolEdge(
-                edge_type=EdgeType.CALLS,
-                from_symbol=caller_sym.symbol_id if caller_sym else f"unresolved:{rel.caller}",
-                to_symbol=callee_sym.symbol_id if callee_sym else None,
-                to_unresolved=rel.callee if callee_sym is None else None,
-                evidence_refs=evidence,
-                confidence=confidence,
-                resolver="call_graph_analyzer",
-            ))
+            edges.append(
+                SymbolEdge(
+                    edge_type=EdgeType.CALLS,
+                    from_symbol=caller_sym.symbol_id if caller_sym else f"unresolved:{rel.caller}",
+                    to_symbol=callee_sym.symbol_id if callee_sym else None,
+                    to_unresolved=rel.callee if callee_sym is None else None,
+                    evidence_refs=evidence,
+                    confidence=confidence,
+                    resolver="call_graph_analyzer",
+                )
+            )
 
         return edges
 
     def _convert_one(self, node: Node) -> Symbol:
         kind = _KIND_MAP.get(node.component_type, SymbolKind.FUNCTION)
         rel_path = node.relative_path.replace("\\", "/")
-        source_hash = hashlib.sha256(
-            (node.source_code or node.id).encode()
-        ).hexdigest()[:16]
+        source_hash = hashlib.sha256((node.source_code or node.id).encode()).hexdigest()[:16]
 
         return Symbol(
             symbol_id=f"{self.lang}:{rel_path}#{node.name}:{node.start_line}({kind.value})",

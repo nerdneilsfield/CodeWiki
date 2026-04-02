@@ -2,6 +2,7 @@
 
 Aligned with v3.md section 5.1 edge weight strategy.
 """
+
 import networkx as nx
 from collections import defaultdict
 
@@ -165,7 +166,7 @@ def _extract_file_from_symbol(symbol_id: str) -> str:
         return ""
 
     if symbol_id.startswith("file:"):
-        return symbol_id[len("file:"):]
+        return symbol_id[len("file:") :]
 
     # Format: "lang:path#name(kind)" — both delimiter chars must be present.
     if ":" in symbol_id and "#" in symbol_id:

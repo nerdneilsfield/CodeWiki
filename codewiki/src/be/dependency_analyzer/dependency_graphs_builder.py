@@ -2,23 +2,27 @@ from typing import Dict, List, Any
 import os
 from codewiki.src.config import Config
 from codewiki.src.be.dependency_analyzer.ast_parser import DependencyParser
-from codewiki.src.be.dependency_analyzer.topo_sort import build_graph_from_components, get_leaf_nodes
+from codewiki.src.be.dependency_analyzer.topo_sort import (
+    build_graph_from_components,
+    get_leaf_nodes,
+)
 from codewiki.src.utils import file_manager
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 
 class DependencyGraphBuilder:
     """Handles dependency analysis and graph building."""
-    
+
     def __init__(self, config: Config):
         self.config = config
-    
+
     def build_dependency_graph(self) -> tuple[Dict[str, Any], List[str]]:
         """
         Build and save dependency graph, returning components and leaf nodes.
-        
+
         Returns:
             Tuple of (components, leaf_nodes)
         """
@@ -27,24 +31,22 @@ class DependencyGraphBuilder:
 
         # Prepare dependency graph path
         repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
-        sanitized_repo_name = ''.join(c if c.isalnum() else '_' for c in repo_name)
+        sanitized_repo_name = "".join(c if c.isalnum() else "_" for c in repo_name)
         dependency_graph_path = os.path.join(
-            self.config.dependency_graph_dir, 
-            f"{sanitized_repo_name}_dependency_graph.json"
+            self.config.dependency_graph_dir, f"{sanitized_repo_name}_dependency_graph.json"
         )
         filtered_folders_path = os.path.join(
-            self.config.dependency_graph_dir, 
-            f"{sanitized_repo_name}_filtered_folders.json"
+            self.config.dependency_graph_dir, f"{sanitized_repo_name}_filtered_folders.json"
         )
 
         # Get custom include/exclude patterns from config
         include_patterns = self.config.include_patterns if self.config.include_patterns else None
         exclude_patterns = self.config.exclude_patterns if self.config.exclude_patterns else None
-        
+
         parser = DependencyParser(
             self.config.repo_path,
             include_patterns=include_patterns,
-            exclude_patterns=exclude_patterns
+            exclude_patterns=exclude_patterns,
         )
 
         filtered_folders = None
@@ -59,13 +61,13 @@ class DependencyGraphBuilder:
 
         # Parse repository
         components = parser.parse_repository(filtered_folders)
-        
+
         # Save dependency graph
         parser.save_dependency_graph(dependency_graph_path)
-        
+
         # Build graph for traversal
         graph = build_graph_from_components(components)
-        
+
         # Get leaf nodes
         leaf_nodes = get_leaf_nodes(graph, components)
 
@@ -74,23 +76,23 @@ class DependencyGraphBuilder:
         # Secondary types (function/macro/table): only when no primary types exist
         # in the repo (e.g. pure-C, pure-Bash, pure-CMake, pure-TOML repos).
         PRIMARY_TYPES = {
-            "class",           # Python, Java, C#, PHP, JavaScript, TypeScript
+            "class",  # Python, Java, C#, PHP, JavaScript, TypeScript
             "abstract class",  # PHP, Java
-            "interface",       # Java, C#, TypeScript, Go, PHP
-            "struct",          # C, C++, Go, Rust
-            "enum",            # Rust, PHP, Java, C#, TypeScript
-            "trait",           # Rust, PHP
-            "type",            # Go (type aliases / named types)
+            "interface",  # Java, C#, TypeScript, Go, PHP
+            "struct",  # C, C++, Go, Rust
+            "enum",  # Rust, PHP, Java, C#, TypeScript
+            "trait",  # Rust, PHP
+            "type",  # Go (type aliases / named types)
             # HLS / compiled-language types (always meaningful leaf nodes)
-            "hls_top",         # Vitis HLS top function (set_top / syn.top)
-            "kernel_instance", # Instantiated HLS kernel (nk= in connectivity)
+            "hls_top",  # Vitis HLS top function (set_top / syn.top)
+            "kernel_instance",  # Instantiated HLS kernel (nk= in connectivity)
         }
         SECONDARY_TYPES = {
-            "function",        # Python, C, C++, Bash, CMake, Go
-            "macro",           # CMake, Rust
-            "table",           # TOML top-level tables
-            "table_array",     # TOML arrays of tables
-            "hls_project",     # Vitis HLS project container (open_project)
+            "function",  # Python, C, C++, Bash, CMake, Go
+            "macro",  # CMake, Rust
+            "table",  # TOML top-level tables
+            "table_array",  # TOML arrays of tables
+            "hls_project",  # Vitis HLS project container (open_project)
         }
 
         # Check types among actual leaf nodes (not all components).
@@ -98,9 +100,7 @@ class DependencyGraphBuilder:
         # exists in components but is never a leaf (it depends on C++ functions),
         # so checking all components would incorrectly suppress including "function".
         available_leaf_types = {
-            components[ln].component_type
-            for ln in leaf_nodes
-            if ln in components
+            components[ln].component_type for ln in leaf_nodes if ln in components
         }
 
         valid_types = PRIMARY_TYPES.copy()
@@ -110,14 +110,21 @@ class DependencyGraphBuilder:
         OOP_PRIMARY = PRIMARY_TYPES - {"hls_top", "kernel_instance"}
         if not available_leaf_types & OOP_PRIMARY:
             valid_types |= SECONDARY_TYPES
-        
+
         keep_leaf_nodes = []
         for leaf_node in leaf_nodes:
             # Skip any leaf nodes that are clearly error strings or invalid identifiers
-            if not isinstance(leaf_node, str) or leaf_node.strip() == "" or any(err_keyword in leaf_node.lower() for err_keyword in ['error', 'exception', 'failed', 'invalid']):
+            if (
+                not isinstance(leaf_node, str)
+                or leaf_node.strip() == ""
+                or any(
+                    err_keyword in leaf_node.lower()
+                    for err_keyword in ["error", "exception", "failed", "invalid"]
+                )
+            ):
                 logger.warning(f"Skipping invalid leaf node identifier: '{leaf_node}'")
                 continue
-                
+
             if leaf_node in components:
                 if components[leaf_node].component_type in valid_types:
                     keep_leaf_nodes.append(leaf_node)
@@ -126,5 +133,5 @@ class DependencyGraphBuilder:
                     pass
             else:
                 logger.warning(f"Leaf node {leaf_node} not found in components, removing it")
-        
+
         return components, keep_leaf_nodes

@@ -1,4 +1,5 @@
 """TS/JS adapter: extracts classes, methods, functions, and imports via tree-sitter."""
+
 import hashlib
 import logging
 import os
@@ -8,8 +9,15 @@ from typing import Optional
 from tree_sitter import Parser, Language
 
 from codewiki.src.be.index.models import (
-    Symbol, ImportStatement, SymbolKind, Visibility, ExportStatus, SourceRange,
-    SymbolEdge, EdgeType, Confidence,
+    Symbol,
+    ImportStatement,
+    SymbolKind,
+    Visibility,
+    ExportStatus,
+    SourceRange,
+    SymbolEdge,
+    EdgeType,
+    Confidence,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,6 +40,7 @@ def _get_ts_parser() -> "Parser | None":
             with _TS_LANGUAGE_LOCK:
                 if _TS_LANGUAGE is None:
                     import tree_sitter_typescript
+
                     _TS_LANGUAGE = Language(tree_sitter_typescript.language_typescript())
         p = getattr(_TS_PARSER_LOCAL, "parser", None)
         if p is None:
@@ -49,6 +58,7 @@ def _get_js_parser() -> "Parser | None":
             with _JS_LANGUAGE_LOCK:
                 if _JS_LANGUAGE is None:
                     import tree_sitter_javascript
+
                     _JS_LANGUAGE = Language(tree_sitter_javascript.language())
         p = getattr(_JS_PARSER_LOCAL, "parser", None)
         if p is None:
@@ -137,8 +147,9 @@ class TSJSIndexAdapter:
     # ── Class handling ─────────────────────────────────────────────────────
 
     def _handle_class(self, node, exported: bool) -> None:
-        name_node = self._find_child_by_type(node, "type_identifier") or \
-                    self._find_child_by_type(node, "identifier")
+        name_node = self._find_child_by_type(node, "type_identifier") or self._find_child_by_type(
+            node, "identifier"
+        )
         if name_node is None:
             return
 
@@ -164,10 +175,9 @@ class TSJSIndexAdapter:
             extends_clause = self._find_child_by_type(heritage, "extends_clause")
             if extends_clause is not None:
                 # The base class identifier immediately follows the `extends` keyword
-                base_node = (
-                    self._find_child_by_type(extends_clause, "type_identifier")
-                    or self._find_child_by_type(extends_clause, "identifier")
-                )
+                base_node = self._find_child_by_type(
+                    extends_clause, "type_identifier"
+                ) or self._find_child_by_type(extends_clause, "identifier")
                 if base_node is not None:
                     base_name = self._node_text(base_node)
                     signature = f"class {name} extends {base_name}"
@@ -192,8 +202,9 @@ class TSJSIndexAdapter:
 
     def _handle_method(self, node, class_name: str, class_sid: str) -> Optional[Symbol]:
         """Extract a method_definition node inside a class body."""
-        name_node = self._find_child_by_type(node, "property_identifier") or \
-                    self._find_child_by_type(node, "identifier")
+        name_node = self._find_child_by_type(
+            node, "property_identifier"
+        ) or self._find_child_by_type(node, "identifier")
         if name_node is None:
             return None
 
@@ -274,10 +285,10 @@ class TSJSIndexAdapter:
         if ext in self._RESOLVE_EXTENSIONS:
             candidates = [base_abs]
         else:
-            candidates = (
-                [base_abs + e for e in self._RESOLVE_EXTENSIONS]
-                + [os.path.join(base_abs, "index.ts"), os.path.join(base_abs, "index.js")]
-            )
+            candidates = [base_abs + e for e in self._RESOLVE_EXTENSIONS] + [
+                os.path.join(base_abs, "index.ts"),
+                os.path.join(base_abs, "index.js"),
+            ]
 
         for candidate in candidates:
             if os.path.isfile(candidate):
@@ -308,14 +319,16 @@ class TSJSIndexAdapter:
         import_clause = self._find_child_by_type(node, "import_clause")
         if import_clause is None:
             # bare `import 'module'` — no names
-            self._imports.append(ImportStatement(
-                file_path=self._rel_path,
-                module_path=module_path,
-                imported_names=[],
-                alias=None,
-                resolved_path=resolved_path,
-                line=line,
-            ))
+            self._imports.append(
+                ImportStatement(
+                    file_path=self._rel_path,
+                    module_path=module_path,
+                    imported_names=[],
+                    alias=None,
+                    resolved_path=resolved_path,
+                    line=line,
+                )
+            )
             return
 
         # Check for namespace import: `* as name`
@@ -323,28 +336,32 @@ class TSJSIndexAdapter:
         if namespace_import is not None:
             # `* as name` — find the identifier after `as`
             alias = self._extract_namespace_alias(namespace_import)
-            self._imports.append(ImportStatement(
-                file_path=self._rel_path,
-                module_path=module_path,
-                imported_names=["*"],
-                alias=alias,
-                resolved_path=resolved_path,
-                line=line,
-            ))
+            self._imports.append(
+                ImportStatement(
+                    file_path=self._rel_path,
+                    module_path=module_path,
+                    imported_names=["*"],
+                    alias=alias,
+                    resolved_path=resolved_path,
+                    line=line,
+                )
+            )
             return
 
         # Check for named imports: `{ Foo, Bar }`
         named_imports = self._find_child_by_type(import_clause, "named_imports")
         if named_imports is not None:
             names = self._extract_named_imports(named_imports)
-            self._imports.append(ImportStatement(
-                file_path=self._rel_path,
-                module_path=module_path,
-                imported_names=names,
-                alias=None,
-                resolved_path=resolved_path,
-                line=line,
-            ))
+            self._imports.append(
+                ImportStatement(
+                    file_path=self._rel_path,
+                    module_path=module_path,
+                    imported_names=names,
+                    alias=None,
+                    resolved_path=resolved_path,
+                    line=line,
+                )
+            )
             return
 
         # Default import: `React` (identifier directly inside import_clause)
@@ -354,14 +371,16 @@ class TSJSIndexAdapter:
                 default_name = self._node_text(child)
                 break
 
-        self._imports.append(ImportStatement(
-            file_path=self._rel_path,
-            module_path=module_path,
-            imported_names=[default_name] if default_name else [],
-            alias=None,
-            resolved_path=resolved_path,
-            line=line,
-        ))
+        self._imports.append(
+            ImportStatement(
+                file_path=self._rel_path,
+                module_path=module_path,
+                imported_names=[default_name] if default_name else [],
+                alias=None,
+                resolved_path=resolved_path,
+                line=line,
+            )
+        )
 
     def _extract_import_source(self, import_node) -> Optional[str]:
         """Extract the module path string from an import_statement."""
@@ -439,14 +458,23 @@ class TSJSIndexAdapter:
     # ── CALLS extraction (Pass 2) ───────────────────────────────────────────
 
     # JS/TS builtins that are never worth recording as CALLS edges.
-    _JS_BUILTINS: frozenset[str] = frozenset({
-        "console.log", "console.warn", "console.error",
-        "setTimeout", "setInterval",
-        "parseInt", "parseFloat",
-        "JSON.stringify", "JSON.parse",
-        "Array.isArray", "Object.keys", "Object.values",
-        "Promise.resolve",
-    })
+    _JS_BUILTINS: frozenset[str] = frozenset(
+        {
+            "console.log",
+            "console.warn",
+            "console.error",
+            "setTimeout",
+            "setInterval",
+            "parseInt",
+            "parseFloat",
+            "JSON.stringify",
+            "JSON.parse",
+            "Array.isArray",
+            "Object.keys",
+            "Object.values",
+            "Promise.resolve",
+        }
+    )
 
     def extract_calls(self, symbol_table, import_graph) -> list[SymbolEdge]:
         """Walk the stored AST and emit CALLS edges for every call_expression.
@@ -471,8 +499,9 @@ class TSJSIndexAdapter:
         self._collect_calls(self._root, edges, symbol_table, import_graph, file_sym_by_name)
         return edges
 
-    def _collect_calls(self, node, edges: list[SymbolEdge], symbol_table,
-                       import_graph, file_sym_by_name: dict) -> None:
+    def _collect_calls(
+        self, node, edges: list[SymbolEdge], symbol_table, import_graph, file_sym_by_name: dict
+    ) -> None:
         """Recursively walk AST nodes and emit a SymbolEdge per call_expression."""
         if node.type == "call_expression":
             self._handle_call_expression(node, edges, symbol_table, import_graph, file_sym_by_name)
@@ -481,8 +510,9 @@ class TSJSIndexAdapter:
         for child in node.children:
             self._collect_calls(child, edges, symbol_table, import_graph, file_sym_by_name)
 
-    def _handle_call_expression(self, call_node, edges: list[SymbolEdge], symbol_table,
-                                 import_graph, file_sym_by_name: dict) -> None:
+    def _handle_call_expression(
+        self, call_node, edges: list[SymbolEdge], symbol_table, import_graph, file_sym_by_name: dict
+    ) -> None:
         """Emit a SymbolEdge for a single call_expression node."""
         function_node = self._find_child_by_type(call_node, "function")
         if function_node is None:
@@ -507,20 +537,22 @@ class TSJSIndexAdapter:
         from_id = from_sym.symbol_id if from_sym else f"file:{self._rel_path}"
 
         call_line = call_node.start_point[0] + 1
-        evidence = [SourceRange(
-            file_path=self._rel_path,
-            start_line=call_line,
-            start_col=call_node.start_point[1],
-            end_line=call_line,
-            end_col=call_node.end_point[1],
-        )]
+        evidence = [
+            SourceRange(
+                file_path=self._rel_path,
+                start_line=call_line,
+                start_col=call_node.start_point[1],
+                end_line=call_line,
+                end_col=call_node.end_point[1],
+            )
+        ]
 
         to_sym: Optional[Symbol] = None
         confidence = Confidence.LOW
 
         # 1. this.method() resolution
         if is_member and callee_name.startswith("this."):
-            method_name = callee_name[len("this."):]
+            method_name = callee_name[len("this.") :]
             to_sym = self._resolve_this_method(method_name, from_sym, symbol_table)
             if to_sym:
                 confidence = Confidence.HIGH
@@ -543,15 +575,17 @@ class TSJSIndexAdapter:
             if to_sym:
                 confidence = Confidence.HIGH
 
-        edges.append(SymbolEdge(
-            edge_type=EdgeType.CALLS,
-            from_symbol=from_id,
-            to_symbol=to_sym.symbol_id if to_sym else None,
-            to_unresolved=callee_name if to_sym is None else None,
-            evidence_refs=evidence,
-            confidence=confidence,
-            resolver="treesitter",
-        ))
+        edges.append(
+            SymbolEdge(
+                edge_type=EdgeType.CALLS,
+                from_symbol=from_id,
+                to_symbol=to_sym.symbol_id if to_sym else None,
+                to_unresolved=callee_name if to_sym is None else None,
+                evidence_refs=evidence,
+                confidence=confidence,
+                resolver="treesitter",
+            )
+        )
 
     def _extract_callee_name(self, function_node) -> tuple[str, bool]:
         """Return (callee_name, is_member_expression).
@@ -580,8 +614,9 @@ class TSJSIndexAdapter:
             return self._node_text(function_node), True
         return "", False
 
-    def _resolve_this_method(self, method_name: str, from_sym: Optional[Symbol],
-                              symbol_table) -> Optional[Symbol]:
+    def _resolve_this_method(
+        self, method_name: str, from_sym: Optional[Symbol], symbol_table
+    ) -> Optional[Symbol]:
         """Resolve this.method() by looking at sibling methods of the enclosing class."""
         if from_sym is None:
             return None
@@ -608,7 +643,8 @@ class TSJSIndexAdapter:
 
         # Candidates: symbols in this file whose range contains the call line.
         candidates = [
-            s for s in self._symbols
+            s
+            for s in self._symbols
             if s.file_path == self._rel_path
             and s.kind in (SymbolKind.FUNCTION, SymbolKind.METHOD)
             and s.range.start_line <= call_line <= s.range.end_line

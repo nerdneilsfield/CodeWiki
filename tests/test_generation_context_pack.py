@@ -3,6 +3,7 @@
 Run with:
     python3.13 -m pytest tests/test_generation_context_pack.py -q
 """
+
 from dataclasses import dataclass, field
 
 import pytest
@@ -25,12 +26,14 @@ from codewiki.src.be.index.models import (
 @dataclass
 class _MockNode:
     """Minimal stand-in for a clustering Node."""
+
     relative_path: str
 
 
 @dataclass
 class _MockIndexProducts:
     """Minimal stand-in for IndexProducts — only what context_pack needs."""
+
     cards: list[ComponentCard] = field(default_factory=list)
     edges: list[SymbolEdge] = field(default_factory=list)
 
@@ -149,8 +152,12 @@ def test_build_context_pack_with_index(module_components, components, index_with
     assert "LoginService" in result["symbol_cards"][0]
     # Result must have all required keys
     required_keys = {
-        "symbol_cards", "boundary_edges", "internal_edges",
-        "evidence_snippets", "glossary_context", "link_map_context",
+        "symbol_cards",
+        "boundary_edges",
+        "internal_edges",
+        "evidence_snippets",
+        "glossary_context",
+        "link_map_context",
     }
     assert required_keys == set(result.keys())
 
@@ -245,7 +252,8 @@ def test_build_context_pack_evidence_refs(module_components, components):
     card = _make_card(symbol_id=MODULE_SYMBOL, file_context=f"{MODULE_FILE}:10")
     ref = _source_range(MODULE_FILE, line=42)
     edge = _make_edge(
-        MODULE_SYMBOL, EXTERNAL_SYMBOL,
+        MODULE_SYMBOL,
+        EXTERNAL_SYMBOL,
         EdgeType.CALLS,
         evidence_refs=[ref],
     )

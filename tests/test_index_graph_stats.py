@@ -1,14 +1,23 @@
 """Tests for GraphStats computation."""
+
 import pytest
 
 from codewiki.src.be.index.models import (
-    Symbol, SymbolEdge, SymbolKind, EdgeType, Confidence, SourceRange, Visibility, ExportStatus,
+    Symbol,
+    SymbolEdge,
+    SymbolKind,
+    EdgeType,
+    Confidence,
+    SourceRange,
+    Visibility,
+    ExportStatus,
 )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_symbol(symbol_id: str, name: str = "Sym") -> Symbol:
     return Symbol(
@@ -43,6 +52,7 @@ def make_edge(
 # Test 1: edge_counts_by_type
 # ---------------------------------------------------------------------------
 
+
 def test_edge_counts_by_type():
     """3 IMPORTS + 2 CALLS + 1 EXTENDS → edge_counts maps each type correctly."""
     from codewiki.src.be.index.graph_stats import GraphStats
@@ -68,6 +78,7 @@ def test_edge_counts_by_type():
 # Test 2: unresolved_ratio
 # ---------------------------------------------------------------------------
 
+
 def test_unresolved_ratio():
     """3 CALLS edges, 1 with to_unresolved set → unresolved_ratios['calls'] ≈ 0.333."""
     from codewiki.src.be.index.graph_stats import GraphStats
@@ -89,6 +100,7 @@ def test_unresolved_ratio():
 # Test 3: empty_stats — no ZeroDivisionError, all zeros
 # ---------------------------------------------------------------------------
 
+
 def test_empty_stats():
     """0 symbols, 0 edges → all zeros, no ZeroDivisionError, ratios default to 0.0."""
     from codewiki.src.be.index.graph_stats import GraphStats
@@ -106,15 +118,15 @@ def test_empty_stats():
 # Test 4: total_counts
 # ---------------------------------------------------------------------------
 
+
 def test_total_counts():
     """total_symbols and total_edges are counted correctly."""
     from codewiki.src.be.index.graph_stats import GraphStats
 
     symbols = [make_symbol(f"sym{i}") for i in range(5)]
-    edges = (
-        [make_edge("A", EdgeType.IMPORTS) for _ in range(4)]
-        + [make_edge("B", EdgeType.CALLS) for _ in range(3)]
-    )
+    edges = [make_edge("A", EdgeType.IMPORTS) for _ in range(4)] + [
+        make_edge("B", EdgeType.CALLS) for _ in range(3)
+    ]
 
     stats = GraphStats.compute(symbols, edges)
 
@@ -126,14 +138,14 @@ def test_total_counts():
 # Test 5: stats_serializable — round-trip through model_dump / model_validate
 # ---------------------------------------------------------------------------
 
+
 def test_stats_serializable():
     """model_dump() produces a plain dict; model_validate() round-trips back correctly."""
     from codewiki.src.be.index.graph_stats import GraphStats
 
-    edges = (
-        [make_edge("A", EdgeType.IMPORTS) for _ in range(2)]
-        + [make_edge("B", EdgeType.CALLS, to_sym=None, to_unresolved="fn")]
-    )
+    edges = [make_edge("A", EdgeType.IMPORTS) for _ in range(2)] + [
+        make_edge("B", EdgeType.CALLS, to_sym=None, to_unresolved="fn")
+    ]
     symbols = [make_symbol("A"), make_symbol("B")]
 
     original = GraphStats.compute(symbols, edges)
@@ -158,6 +170,7 @@ def test_stats_serializable():
 # ---------------------------------------------------------------------------
 # Additional edge cases
 # ---------------------------------------------------------------------------
+
 
 def test_multiple_unresolved_same_type():
     """All edges unresolved → ratio == 1.0."""

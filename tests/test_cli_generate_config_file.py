@@ -11,7 +11,10 @@ def test_load_generation_app_config_uses_explicit_toml_path(tmp_path):
     from codewiki.cli.commands import generate as mod
 
     config_path = tmp_path / "codewiki.toml"
-    config_path.write_text("[runtime]\noutput_dir='docs'\n[generation]\nmain_model='openai/gpt-4o-mini'\ncluster_model='openai/gpt-4o-mini'\n[[providers]]\nname='openai'\ntype='openai_compatible'\nmodel_list=['gpt-4o-mini']\napi_keys=[]\n", encoding="utf-8")
+    config_path.write_text(
+        "[runtime]\noutput_dir='docs'\n[generation]\nmain_model='openai/gpt-4o-mini'\ncluster_model='openai/gpt-4o-mini'\n[[providers]]\nname='openai'\ntype='openai_compatible'\nmodel_list=['gpt-4o-mini']\napi_keys=[]\n",
+        encoding="utf-8",
+    )
     sentinel = object()
 
     with patch.object(mod, "load_app_config", return_value=sentinel) as mock_load:
@@ -31,8 +34,10 @@ def test_load_generation_app_config_falls_back_to_legacy_manager_when_no_config_
     legacy_manager.get_api_key.return_value = "sk-test"
     sentinel = object()
 
-    with patch.object(mod, "ConfigManager", return_value=legacy_manager), \
-         patch.object(mod, "_legacy_config_to_app_config", return_value=sentinel) as mock_convert:
+    with (
+        patch.object(mod, "ConfigManager", return_value=legacy_manager),
+        patch.object(mod, "_legacy_config_to_app_config", return_value=sentinel) as mock_convert,
+    ):
         result = mod._load_generation_app_config(None)
 
     assert result is sentinel
@@ -88,12 +93,14 @@ def test_generate_command_uses_new_config_loading_path(tmp_path):
         statistics=MagicMock(total_files_analyzed=0, total_tokens_used=0),
     )
 
-    with patch.object(mod, "_load_generation_app_config", return_value=app_config) as mock_load, \
-         patch.object(mod, "validate_repository", return_value=(repo_dir, {})), \
-         patch.object(mod, "check_writable_output"), \
-         patch.object(mod, "is_git_repository", return_value=False), \
-         patch.object(mod, "CLIDocumentationGenerator") as mock_generator_cls, \
-         patch.object(mod, "display_post_generation_instructions"):
+    with (
+        patch.object(mod, "_load_generation_app_config", return_value=app_config) as mock_load,
+        patch.object(mod, "validate_repository", return_value=(repo_dir, {})),
+        patch.object(mod, "check_writable_output"),
+        patch.object(mod, "is_git_repository", return_value=False),
+        patch.object(mod, "CLIDocumentationGenerator") as mock_generator_cls,
+        patch.object(mod, "display_post_generation_instructions"),
+    ):
         mock_generator = mock_generator_cls.return_value
         mock_generator.generate.return_value = fake_job
 

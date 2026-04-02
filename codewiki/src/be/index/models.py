@@ -3,6 +3,7 @@
 All file_path fields are relative to the repository root — never absolute.
 This ensures index products are portable across machines.
 """
+
 from enum import Enum
 from typing import Optional
 
@@ -56,6 +57,7 @@ class Confidence(str, Enum):
 
 class SourceRange(BaseModel):
     """A span in a source file. file_path is relative to repo root."""
+
     file_path: str
     start_line: int
     start_col: int
@@ -65,6 +67,7 @@ class SourceRange(BaseModel):
 
 class Symbol(BaseModel):
     """A code symbol with full metadata and evidence position."""
+
     symbol_id: str
     lang: str
     kind: SymbolKind
@@ -83,6 +86,7 @@ class Symbol(BaseModel):
 
 class ImportStatement(BaseModel):
     """A single import/require/use statement in a file."""
+
     file_path: str
     module_path: str
     imported_names: list[str] = []
@@ -94,6 +98,7 @@ class ImportStatement(BaseModel):
 
 class SymbolEdge(BaseModel):
     """A directed relationship between symbols, with evidence."""
+
     edge_type: EdgeType
     from_symbol: str
     to_symbol: Optional[str] = None
@@ -105,6 +110,7 @@ class SymbolEdge(BaseModel):
 
 class ComponentCard(BaseModel):
     """Lightweight symbol summary for LLM context packs."""
+
     symbol_id: str
     signature: str
     docstring_summary: str

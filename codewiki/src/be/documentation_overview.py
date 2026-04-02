@@ -155,7 +155,9 @@ async def generate_parent_module_docs(
     state_mgr = ctx.state_mgr
     config = ctx.config
 
-    module_name = module_path[-1] if module_path else os.path.basename(os.path.normpath(config.repo_path))
+    module_name = (
+        module_path[-1] if module_path else os.path.basename(os.path.normpath(config.repo_path))
+    )
 
     if ctx.tree_manager:
         module_tree = await ctx.tree_manager.get_snapshot()
@@ -170,7 +172,8 @@ async def generate_parent_module_docs(
         output_file = gen_state.get_output_file(doc_id) if gen_state else None
         output_path = os.path.join(
             working_dir,
-            output_file or doc_id_for_path(module_tree, module_path).split("module:", 1)[-1] + ".md",
+            output_file
+            or doc_id_for_path(module_tree, module_path).split("module:", 1)[-1] + ".md",
         )
 
     child_hashes = collect_child_doc_hashes(
@@ -186,12 +189,18 @@ async def generate_parent_module_docs(
         child_hashes,
         extra=[config.output_language, "overview-v7", "/".join(module_path)],
     )
-    parent_doc_id = "overview:root" if not module_path else doc_id_for_path(module_tree, module_path)
+    parent_doc_id = (
+        "overview:root" if not module_path else doc_id_for_path(module_tree, module_path)
+    )
 
     existing = output_path if os.path.exists(output_path) else None
     if existing and os.path.getsize(existing) > 100:
         parent_task = gen_state.get_task(parent_doc_id) if gen_state else None
-        if parent_task and parent_task.status == "completed" and parent_task.input_hash == current_input_hash:
+        if (
+            parent_task
+            and parent_task.status == "completed"
+            and parent_task.input_hash == current_input_hash
+        ):
             logger.debug("✓ Docs already exists at %s (children unchanged)", existing)
             return module_tree
         logger.info("↻ Child docs changed for '%s', regenerating", module_name)

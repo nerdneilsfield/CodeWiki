@@ -11,4 +11,3 @@ __license__ = "MIT"
 from codewiki.cli.main import cli
 
 __all__ = ["cli", "__version__"]
-

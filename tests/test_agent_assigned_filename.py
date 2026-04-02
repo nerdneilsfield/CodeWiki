@@ -54,6 +54,5 @@ def test_doc_id_for_path_prefers_module_id_then_filename(tmp_path):
 
     assert doc_id_for_path(tree, ["CLI Transport"]) == "module:mod-cli"
     assert (
-        doc_id_for_path(tree, ["CLI Transport", "io_abstractions"])
-        == "module:cli-io_abstractions"
+        doc_id_for_path(tree, ["CLI Transport", "io_abstractions"]) == "module:cli-io_abstractions"
     )

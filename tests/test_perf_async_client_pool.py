@@ -44,6 +44,7 @@ def test_make_provider_reuses_cached_provider():
 
 def _make_dummy_config(long_context_model=None):
     from unittest.mock import MagicMock
+
     cfg = MagicMock()
     cfg.llm_base_url = "http://test-host/"
     cfg.llm_api_key = "key-test"
@@ -66,8 +67,9 @@ def test_create_agent_does_not_call_create_fallback_models_per_module():
     import codewiki.src.be.agent_orchestrator as orch_mod
 
     cfg = _make_dummy_config()
-    with patch.object(orch_mod, "create_fallback_models",
-                      wraps=orch_mod.create_fallback_models) as mock_cfm:
+    with patch.object(
+        orch_mod, "create_fallback_models", wraps=orch_mod.create_fallback_models
+    ) as mock_cfm:
         orch = AgentOrchestrator(cfg)
         calls_after_init = mock_cfm.call_count  # exactly 1 call from __init__
 
@@ -89,8 +91,9 @@ def test_create_agent_reuses_long_context_model_for_large_prompts():
     import codewiki.src.be.agent_orchestrator as orch_mod
 
     cfg = _make_dummy_config(long_context_model="long-ctx-model")
-    with patch.object(orch_mod, "create_long_context_model",
-                      wraps=orch_mod.create_long_context_model) as mock_clcm:
+    with patch.object(
+        orch_mod, "create_long_context_model", wraps=orch_mod.create_long_context_model
+    ) as mock_clcm:
         orch = AgentOrchestrator(cfg)
         calls_after_init = mock_clcm.call_count  # exactly 1 call from __init__
 

@@ -34,7 +34,11 @@ def get_processing_order(
     def collect_modules(tree: Dict[str, Any], path: List[str]):
         for module_name, module_info in tree.items():
             current_path = path + [module_name]
-            if module_info.get("children") and isinstance(module_info["children"], dict) and module_info["children"]:
+            if (
+                module_info.get("children")
+                and isinstance(module_info["children"], dict)
+                and module_info["children"]
+            ):
                 collect_modules(module_info["children"], current_path)
                 processing_order.append((current_path, module_name))
             else:
@@ -179,9 +183,8 @@ async def run_module_queue(
         return False
 
     def _retry_delay(attempt: int, exc: Exception) -> int:
-        is_model_quality = (
-            isinstance(exc, UnexpectedModelBehavior)
-            or (isinstance(exc, openai.APIStatusError) and exc.status_code == 400)
+        is_model_quality = isinstance(exc, UnexpectedModelBehavior) or (
+            isinstance(exc, openai.APIStatusError) and exc.status_code == 400
         )
         if is_model_quality:
             return 0
@@ -212,7 +215,9 @@ async def run_module_queue(
                         )
                         if delay:
                             retry_after = _get_retry_after(last_exc)
-                            actual_delay = retry_after if retry_after is not None else _jitter(delay)
+                            actual_delay = (
+                                retry_after if retry_after is not None else _jitter(delay)
+                            )
                             await asyncio.sleep(actual_delay)
                     try:
                         if key == ROOT_KEY:

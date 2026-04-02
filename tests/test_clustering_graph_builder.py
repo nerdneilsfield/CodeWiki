@@ -2,6 +2,7 @@
 
 TDD: tests written before implementation.
 """
+
 import pytest
 import networkx as nx
 
@@ -18,6 +19,7 @@ from codewiki.src.be.clustering.graph_builder import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _edge(
     from_sym: str,
@@ -51,9 +53,13 @@ _SYMBOL_B = "py:src/b.py#Bar(class)"
 # _extract_file_from_symbol unit tests
 # ---------------------------------------------------------------------------
 
+
 class TestExtractFileFromSymbol:
     def test_lang_prefixed_format(self):
-        assert _extract_file_from_symbol("py:src/auth/login.py#LoginService(class)") == "src/auth/login.py"
+        assert (
+            _extract_file_from_symbol("py:src/auth/login.py#LoginService(class)")
+            == "src/auth/login.py"
+        )
 
     def test_ts_format(self):
         assert _extract_file_from_symbol("ts:src/app.ts#AppService(class)") == "src/app.ts"
@@ -71,6 +77,7 @@ class TestExtractFileFromSymbol:
 # ---------------------------------------------------------------------------
 # Weight constants sanity
 # ---------------------------------------------------------------------------
+
 
 class TestWeightConstants:
     def test_imports_high_weight(self):
@@ -110,6 +117,7 @@ class TestWeightConstants:
 # ---------------------------------------------------------------------------
 # build_clustering_graph — individual edge type / confidence tests
 # ---------------------------------------------------------------------------
+
 
 class TestImportsEdgeWeight:
     """Test 1: IMPORTS HIGH → weight 1.0 on graph edge."""
@@ -175,6 +183,7 @@ class TestExtendsEdgeWeight:
 # Weight accumulation
 # ---------------------------------------------------------------------------
 
+
 class TestWeightAccumulation:
     """Test 4: 2 IMPORTS edges between same pair → accumulated weight 2.0."""
 
@@ -193,8 +202,8 @@ class TestWeightAccumulation:
         symbol_a2 = "py:src/a.py#Baz(function)"
         symbol_b2 = "py:src/b.py#Qux(function)"
         edges = [
-            _edge(_SYMBOL_A, _SYMBOL_B, EdgeType.IMPORTS, Confidence.HIGH),   # 1.0
-            _edge(symbol_a2, symbol_b2, EdgeType.CALLS, Confidence.HIGH),      # 0.5
+            _edge(_SYMBOL_A, _SYMBOL_B, EdgeType.IMPORTS, Confidence.HIGH),  # 1.0
+            _edge(symbol_a2, symbol_b2, EdgeType.CALLS, Confidence.HIGH),  # 0.5
         ]
         g = build_clustering_graph(edges, {_COMP_A, _COMP_B}, _FILE_MAP_AB)
         assert g[_COMP_A][_COMP_B]["weight"] == pytest.approx(1.5)
@@ -204,16 +213,14 @@ class TestWeightAccumulation:
 # Weight cap
 # ---------------------------------------------------------------------------
 
+
 class TestWeightCap:
     """Test 5: many edges between same pair → capped at MAX_EDGE_WEIGHT (3.0)."""
 
     def test_cap_at_max(self):
         syms_a = [f"py:src/a.py#Sym{i}(function)" for i in range(10)]
         syms_b = [f"py:src/b.py#Sym{i}(function)" for i in range(10)]
-        edges = [
-            _edge(syms_a[i], syms_b[i], EdgeType.IMPORTS, Confidence.HIGH)
-            for i in range(10)
-        ]
+        edges = [_edge(syms_a[i], syms_b[i], EdgeType.IMPORTS, Confidence.HIGH) for i in range(10)]
         g = build_clustering_graph(edges, {_COMP_A, _COMP_B}, _FILE_MAP_AB)
         w = g[_COMP_A][_COMP_B]["weight"]
         assert w == pytest.approx(MAX_EDGE_WEIGHT)
@@ -222,10 +229,7 @@ class TestWeightCap:
         """Weight of exactly MAX_EDGE_WEIGHT from 3 IMPORTS HIGH edges passes uncapped."""
         syms_a = [f"py:src/a.py#Sym{i}(function)" for i in range(3)]
         syms_b = [f"py:src/b.py#Sym{i}(function)" for i in range(3)]
-        edges = [
-            _edge(syms_a[i], syms_b[i], EdgeType.IMPORTS, Confidence.HIGH)
-            for i in range(3)
-        ]
+        edges = [_edge(syms_a[i], syms_b[i], EdgeType.IMPORTS, Confidence.HIGH) for i in range(3)]
         g = build_clustering_graph(edges, {_COMP_A, _COMP_B}, _FILE_MAP_AB)
         assert g[_COMP_A][_COMP_B]["weight"] == pytest.approx(3.0)
 
@@ -233,6 +237,7 @@ class TestWeightCap:
 # ---------------------------------------------------------------------------
 # Co-location edges
 # ---------------------------------------------------------------------------
+
 
 class TestCoLocationEdges:
     """Test 6: 2 components in same file → edge with CO_LOCATION_WEIGHT."""
@@ -274,6 +279,7 @@ class TestCoLocationEdges:
 # Isolated nodes
 # ---------------------------------------------------------------------------
 
+
 class TestIsolatedNodesPresent:
     """Test 7: component with no edges still in graph."""
 
@@ -301,6 +307,7 @@ class TestIsolatedNodesPresent:
 # ---------------------------------------------------------------------------
 # Unresolved edges excluded
 # ---------------------------------------------------------------------------
+
 
 class TestUnresolvedEdgesExcluded:
     """Test 8: edge with to_symbol=None → no graph edge."""
@@ -339,6 +346,7 @@ class TestUnresolvedEdgesExcluded:
 # No self-loops
 # ---------------------------------------------------------------------------
 
+
 class TestNoSelfLoops:
     """Test 9: edge from component to itself → not in graph."""
 
@@ -355,10 +363,12 @@ class TestNoSelfLoops:
         """General check: build_clustering_graph never produces self-loops."""
         symbols_a = [f"py:src/a.py#Sym{i}(function)" for i in range(5)]
         symbols_b = [f"py:src/b.py#Sym{i}(function)" for i in range(5)]
-        all_edges = (
-            [_edge(symbols_a[i], symbols_a[(i + 1) % 5], EdgeType.CALLS, Confidence.HIGH) for i in range(5)]
-            + [_edge(symbols_a[i], symbols_b[i], EdgeType.IMPORTS, Confidence.MEDIUM) for i in range(5)]
-        )
+        all_edges = [
+            _edge(symbols_a[i], symbols_a[(i + 1) % 5], EdgeType.CALLS, Confidence.HIGH)
+            for i in range(5)
+        ] + [
+            _edge(symbols_a[i], symbols_b[i], EdgeType.IMPORTS, Confidence.MEDIUM) for i in range(5)
+        ]
         g = build_clustering_graph(all_edges, {_COMP_A, _COMP_B}, _FILE_MAP_AB)
         assert nx.number_of_selfloops(g) == 0
 
@@ -366,6 +376,7 @@ class TestNoSelfLoops:
 # ---------------------------------------------------------------------------
 # Empty input
 # ---------------------------------------------------------------------------
+
 
 class TestEmptyInput:
     """Test 10: no edges, no components → empty graph."""
@@ -393,6 +404,7 @@ class TestEmptyInput:
 # ---------------------------------------------------------------------------
 # Edge cases / boundary conditions
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCasesAndBoundary:
     def test_unknown_edge_type_uses_default_weight(self):
@@ -441,6 +453,7 @@ class TestEdgeCasesAndBoundary:
     def test_large_component_set_performance(self):
         """Build graph with 500 components and 1000 edges within a reasonable time."""
         import time
+
         n = 500
         comp_ids = {f"src/mod_{i}.py::Class_{i}" for i in range(n)}
         file_map = {f"src/mod_{i}.py::Class_{i}": f"src/mod_{i}.py" for i in range(n)}
@@ -491,7 +504,8 @@ class TestRealAnalyzerComponentIds:
         edge = _edge(
             "py:codewiki/src/be/auth/handler.py#AuthHandler(class)",
             "py:codewiki/src/be/api/router.py#Router(class)",
-            EdgeType.IMPORTS, Confidence.HIGH,
+            EdgeType.IMPORTS,
+            Confidence.HIGH,
         )
         g = build_clustering_graph([edge], {comp_a, comp_b}, file_map)
         assert g.has_edge(comp_a, comp_b)
@@ -511,7 +525,8 @@ class TestRealAnalyzerComponentIds:
         edge = _edge(
             "py:module/path.py#ClassA(class)",
             "py:module/other.py#ClassC(class)",
-            EdgeType.CALLS, Confidence.HIGH,
+            EdgeType.CALLS,
+            Confidence.HIGH,
         )
         g = build_clustering_graph([edge], {comp_a, comp_b, comp_c}, file_map)
         assert g.has_edge(comp_a, comp_c)
@@ -537,7 +552,8 @@ class TestRealAnalyzerComponentIds:
         edge = _edge(
             "ts:src/app.ts#handleRequest(method)",
             "ts:src/other.ts#OtherClass(class)",
-            EdgeType.CALLS, Confidence.HIGH,
+            EdgeType.CALLS,
+            Confidence.HIGH,
         )
         g = build_clustering_graph([edge], {comp_method, comp_class, comp_other}, file_map)
         # Method component should have an edge to other
@@ -548,6 +564,7 @@ class TestRealAnalyzerComponentIds:
     def test_method_component_name_extraction(self):
         """Verify extract_component_name handles method-level dot-separated IDs."""
         from codewiki.src.be.clustering.graph_builder import extract_component_name
+
         # Last segment for dot-separated
         assert extract_component_name("module.path.ClassName.method_name") == "method_name"
         assert extract_component_name("module.path.ClassName") == "ClassName"

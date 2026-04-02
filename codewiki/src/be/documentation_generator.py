@@ -51,6 +51,7 @@ from codewiki.src.be.documentation_scheduler import (
     run_module_queue as run_module_queue_impl,
 )
 
+
 class DocumentationGenerator:
     """Main documentation generation orchestrator."""
 
@@ -82,21 +83,27 @@ class DocumentationGenerator:
         """Try to detect the GitHub/remote URL from git config."""
         try:
             import subprocess
+
             result = subprocess.run(
-                ['git', 'remote', 'get-url', 'origin'],
-                cwd=repo_path, capture_output=True, text=True, timeout=5
+                ["git", "remote", "get-url", "origin"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if result.returncode == 0:
                 url = result.stdout.strip()
-                if url.startswith('git@github.com:'):
-                    url = url.replace('git@github.com:', 'https://github.com/')
-                url = url.rstrip('/').removesuffix('.git')
+                if url.startswith("git@github.com:"):
+                    url = url.replace("git@github.com:", "https://github.com/")
+                url = url.rstrip("/").removesuffix(".git")
                 return url
         except Exception:
             pass
         return None
 
-    def create_documentation_metadata(self, working_dir: str, components: Dict[str, Any], num_leaf_nodes: int):
+    def create_documentation_metadata(
+        self, working_dir: str, components: Dict[str, Any], num_leaf_nodes: int
+    ):
         """Create a metadata file with documentation generation information."""
         from datetime import datetime
 
@@ -108,24 +115,20 @@ class DocumentationGenerator:
                 "generator_version": "1.0.1",
                 "repo_path": self.config.repo_path,
                 "repo_url": repo_url,
-                "commit_id": self.commit_id
+                "commit_id": self.commit_id,
             },
             "statistics": {
                 "total_components": len(components),
                 "leaf_nodes": num_leaf_nodes,
-                "max_depth": self.config.max_depth
+                "max_depth": self.config.max_depth,
             },
-            "files_generated": [
-                "overview.md",
-                "module_tree.json",
-                "first_module_tree.json"
-            ]
+            "files_generated": ["overview.md", "module_tree.json", "first_module_tree.json"],
         }
 
         # Add generated markdown files to the metadata
         try:
             for file_path in os.listdir(working_dir):
-                if file_path.endswith('.md') and file_path not in metadata["files_generated"]:
+                if file_path.endswith(".md") and file_path not in metadata["files_generated"]:
                     metadata["files_generated"].append(file_path)
         except Exception as e:
             logger.warning(f"Could not list generated files: {e}")
@@ -138,14 +141,17 @@ class DocumentationGenerator:
     ) -> List[List[tuple]]:
         return get_processing_levels_impl(module_tree, parent_path)
 
-    def get_processing_order(self, module_tree: Dict[str, Any], parent_path: Optional[List[str]] = None) -> List[tuple[List[str], str]]:
+    def get_processing_order(
+        self, module_tree: Dict[str, Any], parent_path: Optional[List[str]] = None
+    ) -> List[tuple[List[str], str]]:
         return get_processing_order_impl(module_tree, parent_path)
 
     def is_leaf_module(self, module_info: Dict[str, Any]) -> bool:
         return is_leaf_module_impl(module_info)
 
-    def build_overview_structure(self, module_tree: Dict[str, Any], module_path: List[str],
-                                 working_dir: str) -> Dict[str, Any]:
+    def build_overview_structure(
+        self, module_tree: Dict[str, Any], module_path: List[str], working_dir: str
+    ) -> Dict[str, Any]:
         return build_overview_structure_impl(
             OverviewContext(
                 config=self.config,
@@ -158,7 +164,9 @@ class DocumentationGenerator:
 
     # ── Main entry point ─────────────────────────────────────────────────
 
-    async def generate_module_documentation(self, components: Dict[str, Any], leaf_nodes: List[str]) -> str:
+    async def generate_module_documentation(
+        self, components: Dict[str, Any], leaf_nodes: List[str]
+    ) -> str:
         """Generate documentation for all modules using level-based concurrency."""
         # Prepare output directory
         working_dir = os.path.abspath(self.config.docs_dir)
@@ -202,7 +210,9 @@ class DocumentationGenerator:
             try:
                 await self._state_mgr.bulk_add_tasks(planned_tasks)
             except ValueError as exc:
-                logger.warning("Skipping colliding planned tasks during initial ledger load: %s", exc)
+                logger.warning(
+                    "Skipping colliding planned tasks during initial ledger load: %s", exc
+                )
                 for task in planned_tasks:
                     try:
                         await self._state_mgr.add_task(task)
@@ -229,7 +239,9 @@ class DocumentationGenerator:
                                 task.doc_id,
                                 item_exc,
                             )
-            await self._state_mgr.mark_stale({task.doc_id: task.input_hash for task in planned_tasks})
+            await self._state_mgr.mark_stale(
+                {task.doc_id: task.input_hash for task in planned_tasks}
+            )
         await self._state_mgr.promote_ready()
 
         # ── Dynamic task-queue concurrent path ────────────────────────────
@@ -238,10 +250,16 @@ class DocumentationGenerator:
         max_retries = self.config.max_retries
 
         graph_tree = await tree_manager.get_snapshot()
-        logger.info(f"📊 Running queue on {len(graph_tree)} top-level modules (concurrency={max_concurrent})")
+        logger.info(
+            f"📊 Running queue on {len(graph_tree)} top-level modules (concurrency={max_concurrent})"
+        )
         await self._run_module_queue(
-            graph_tree, components, working_dir, tree_manager,
-            desc="Generating docs", include_root=False,
+            graph_tree,
+            components,
+            working_dir,
+            tree_manager,
+            desc="Generating docs",
+            include_root=False,
         )
 
         # ── Fill any modules whose .md was not written ────────────────────
@@ -269,7 +287,9 @@ class DocumentationGenerator:
             working_dir=working_dir,
             tree_manager=tree_manager,
             process_module=self.agent_orchestrator.process_module,
-            generate_root_overview=(lambda: self.generate_parent_module_docs([], working_dir, tree_manager)),
+            generate_root_overview=(
+                lambda: self.generate_parent_module_docs([], working_dir, tree_manager)
+            ),
             desc=desc,
             include_root=include_root,
             gen_state=self._gen_state,
@@ -319,9 +339,12 @@ class DocumentationGenerator:
             module_path,
         )
 
-    async def generate_parent_module_docs(self, module_path: List[str],
-                                        working_dir: str,
-                                        tree_manager: Optional[ModuleTreeManager] = None) -> Dict[str, Any]:
+    async def generate_parent_module_docs(
+        self,
+        module_path: List[str],
+        working_dir: str,
+        tree_manager: Optional[ModuleTreeManager] = None,
+    ) -> Dict[str, Any]:
         return await generate_parent_module_docs_impl(
             OverviewContext(
                 config=self.config,
@@ -346,6 +369,7 @@ class DocumentationGenerator:
             # Build v3 index (symbol table, import graph, component cards)
             try:
                 from codewiki.src.be.index.index_builder import IndexBuilder
+
                 index_builder = IndexBuilder(
                     repo_path=self.config.repo_path,
                     include_patterns=self.config.include_patterns,
@@ -354,7 +378,9 @@ class DocumentationGenerator:
                 )
                 self.index_products = index_builder.build()
             except Exception:
-                logger.warning("Index build failed; continuing without index products", exc_info=True)
+                logger.warning(
+                    "Index build failed; continuing without index products", exc_info=True
+                )
                 self.index_products = None
 
             # Cluster modules
@@ -366,7 +392,11 @@ class DocumentationGenerator:
             existing_state = GenerationState.load(state_path)
             current_config_fp = config_fingerprint(self.config)
 
-            cached_tree = file_manager.load_json(first_module_tree_path) if os.path.exists(first_module_tree_path) else None
+            cached_tree = (
+                file_manager.load_json(first_module_tree_path)
+                if os.path.exists(first_module_tree_path)
+                else None
+            )
 
             need_recluster = True
             if cached_tree:
@@ -388,7 +418,9 @@ class DocumentationGenerator:
             else:
                 logger.debug(f"Clustering modules (no valid cache at {first_module_tree_path})")
                 module_tree = cluster_modules(
-                    leaf_nodes, components, self.config,
+                    leaf_nodes,
+                    components,
+                    self.config,
                     index_products=self.index_products,
                 )
                 if module_tree:
@@ -401,15 +433,20 @@ class DocumentationGenerator:
             # v2: build global assets and inject into agent orchestrator
             try:
                 from codewiki.src.be.generation.glossary import build_glossary, build_link_map
+
                 glossary = build_glossary(self.index_products) if self.index_products else {}
                 link_map = build_link_map(module_tree) if module_tree else {}
                 self.agent_orchestrator.set_generation_context(
                     index_products=self.index_products,
                     global_assets={"glossary": glossary, "link_map": link_map},
                 )
-                logger.info(f"Generation v2 context set: {len(glossary)} glossary terms, {len(link_map)} link map entries")
+                logger.info(
+                    f"Generation v2 context set: {len(glossary)} glossary terms, {len(link_map)} link map entries"
+                )
             except Exception:
-                logger.warning("Failed to set generation v2 context; continuing without", exc_info=True)
+                logger.warning(
+                    "Failed to set generation v2 context; continuing without", exc_info=True
+                )
 
             existing_state.repo_commit = self.commit_id or ""
             existing_state.config_fingerprint = current_config_fp
@@ -434,9 +471,12 @@ class DocumentationGenerator:
 
             # Phase: post-processing fix (markdown + math + mermaid)
             from codewiki.src.be.docs_fixer import fix_docs
+
             fix_docs(working_dir, self.config)
 
-            logger.debug(f"Documentation generation completed successfully using dynamic programming!")
+            logger.debug(
+                f"Documentation generation completed successfully using dynamic programming!"
+            )
             logger.debug(f"Processing order: leaf modules → parent modules → repository overview")
             logger.debug(f"Documentation saved to: {working_dir}")
 

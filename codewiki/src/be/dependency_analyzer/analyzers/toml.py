@@ -65,7 +65,12 @@ class TreeSitterTOMLAnalyzer:
             if node.type == "table":
                 # [section.subsection] — grab the key path as name
                 key_node = next(
-                    (c for c in node.children if c.type in ("key", "dotted_key", "bare_key", "quoted_key")), None
+                    (
+                        c
+                        for c in node.children
+                        if c.type in ("key", "dotted_key", "bare_key", "quoted_key")
+                    ),
+                    None,
                 )
                 if key_node:
                     name = self._node_text(key_node).strip()
@@ -80,7 +85,9 @@ class TreeSitterTOMLAnalyzer:
                             component_type="table",
                             file_path=str(self.file_path),
                             relative_path=self._get_relative_path(),
-                            source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                            source_code="\n".join(
+                                lines[node.start_point[0] : node.end_point[0] + 1]
+                            ),
                             start_line=node.start_point[0] + 1,
                             end_line=node.end_point[0] + 1,
                             has_docstring=False,
@@ -96,7 +103,12 @@ class TreeSitterTOMLAnalyzer:
 
             elif node.type == "table_array_element":
                 key_node = next(
-                    (c for c in node.children if c.type in ("key", "dotted_key", "bare_key", "quoted_key")), None
+                    (
+                        c
+                        for c in node.children
+                        if c.type in ("key", "dotted_key", "bare_key", "quoted_key")
+                    ),
+                    None,
                 )
                 if key_node:
                     name = self._node_text(key_node).strip()
@@ -110,7 +122,9 @@ class TreeSitterTOMLAnalyzer:
                             component_type="table_array",
                             file_path=str(self.file_path),
                             relative_path=self._get_relative_path(),
-                            source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                            source_code="\n".join(
+                                lines[node.start_point[0] : node.end_point[0] + 1]
+                            ),
                             start_line=node.start_point[0] + 1,
                             end_line=node.end_point[0] + 1,
                             has_docstring=False,

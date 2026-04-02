@@ -51,16 +51,14 @@ def _match_by_name_or_stem(
     """
     lower = name.lower()
     # 1. Exact match on the component-name portion (after '::')
-    by_name = [
-        cid for cid in components
-        if '::' in cid and cid.split('::')[-1].lower() == lower
-    ]
+    by_name = [cid for cid in components if "::" in cid and cid.split("::")[-1].lower() == lower]
     if by_name:
         return by_name
 
     # 2. Exact match on file stem (e.g. 'orchestrator' → orchestrator.py)
     by_stem = [
-        cid for cid, node in components.items()
+        cid
+        for cid, node in components.items()
         if PurePosixPath(node.relative_path).stem.lower() == lower
     ]
     if by_stem:
@@ -68,8 +66,9 @@ def _match_by_name_or_stem(
 
     # 3. Substring: name appears as a whole word in the component ID
     by_substr = [
-        cid for cid in components
-        if lower in cid.lower().replace('_', ' ').replace('-', ' ').split()
+        cid
+        for cid in components
+        if lower in cid.lower().replace("_", " ").replace("-", " ").split()
     ]
     return by_substr
 
@@ -101,9 +100,7 @@ def _resolve_leaf_node(
     normalized = leaf_node.replace("\\", "/")
     file_components = path_index.get(normalized, [])
     if file_components:
-        logger.debug(
-            f"Resolved file path '{leaf_node}' to {len(file_components)} component(s)"
-        )
+        logger.debug(f"Resolved file path '{leaf_node}' to {len(file_components)} component(s)")
         return file_components
 
     # LLM returned a short name — try component name / file stem matching
@@ -135,7 +132,9 @@ def _filter_and_resolve_nodes(
     return result
 
 
-def format_potential_core_components(leaf_nodes: List[str], components: Dict[str, Node]) -> tuple[str, str]:
+def format_potential_core_components(
+    leaf_nodes: List[str], components: Dict[str, Node]
+) -> tuple[str, str]:
     """
     Format the potential core components into a string that can be used in the prompt.
 
@@ -203,8 +202,19 @@ def _heuristic_cluster_name(
     members, similar to GitNexus's heuristic labeling.
     """
     _GENERIC = {
-        "src", "lib", "core", "utils", "common", "shared", "helpers",
-        "internal", "pkg", "app", "main", "index", "mod",
+        "src",
+        "lib",
+        "core",
+        "utils",
+        "common",
+        "shared",
+        "helpers",
+        "internal",
+        "pkg",
+        "app",
+        "main",
+        "index",
+        "mod",
     }
     dir_counts: Dict[str, int] = defaultdict(int)
     for cid in members:
@@ -267,7 +277,7 @@ def graph_pre_cluster(
         by_file[components[cid].relative_path].append(cid)
     for file_nodes in by_file.values():
         for i, a in enumerate(file_nodes):
-            for b in file_nodes[i + 1:]:
+            for b in file_nodes[i + 1 :]:
                 if not G.has_edge(a, b):
                     G.add_edge(a, b, weight=0.3)
 
@@ -373,7 +383,9 @@ def _format_graph_clusters_hint(
     for name, members in clusters.items():
         # Show the cluster with its members and dependency summary
         file_set = sorted({components[cid].relative_path for cid in members if cid in components})
-        lines.append(f"  Cluster \"{name}\" ({len(members)} components across {len(file_set)} file(s)):")
+        lines.append(
+            f'  Cluster "{name}" ({len(members)} components across {len(file_set)} file(s)):'
+        )
         for cid in members[:15]:
             ctype = components[cid].component_type if cid in components else "?"
             lines.append(f"    - {cid} ({ctype})")
@@ -418,10 +430,16 @@ def cluster_modules(
     if index_products is not None:
         try:
             from codewiki.src.be.clustering.pipeline import cluster_modules_v2
+
             result = cluster_modules_v2(
-                leaf_nodes, components, config, index_products,
-                current_module_tree, current_module_name,
-                current_module_path, _token_threshold,
+                leaf_nodes,
+                components,
+                config,
+                index_products,
+                current_module_tree,
+                current_module_name,
+                current_module_path,
+                _token_threshold,
             )
             if result:  # v2 produced valid output
                 return result
@@ -435,11 +453,7 @@ def cluster_modules(
         # Mirror is_complex_module: only attempt sub-clustering if components
         # span more than one file.  Token size doesn't matter here — the agent
         # will sub-cluster any multi-file module regardless of token count.
-        unique_files = {
-            components[cid].relative_path
-            for cid in leaf_nodes
-            if cid in components
-        }
+        unique_files = {components[cid].relative_path for cid in leaf_nodes if cid in components}
         n_files = len(unique_files)
         logger.debug(
             f"Sub-clustering '{current_module_name}' "
@@ -466,7 +480,9 @@ def cluster_modules(
             )
             return {}
 
-    potential_core_components, potential_core_components_with_code = format_potential_core_components(leaf_nodes, components)
+    potential_core_components, potential_core_components_with_code = (
+        format_potential_core_components(leaf_nodes, components)
+    )
 
     # ── Step 1: Graph-based pre-clustering ────────────────────────────────
     graph_clusters, cross_edges = graph_pre_cluster(leaf_nodes, components)
@@ -480,12 +496,15 @@ def cluster_modules(
 
     # ── Step 2: LLM refinement ────────────────────────────────────────────
     prompt = format_cluster_prompt(
-        potential_core_components, current_module_tree, current_module_name,
+        potential_core_components,
+        current_module_tree,
+        current_module_name,
         graph_clusters_hint=graph_hint,
     )
     response = call_llm(prompt, config, model=config.cluster_model)
 
     module_tree = None
+
     def _strip_code_fence(text: str) -> str:
         stripped = text.strip()
         if stripped.startswith("```"):
@@ -508,11 +527,15 @@ def cluster_modules(
             return None
 
     if "<GROUPED_COMPONENTS>" in response and "</GROUPED_COMPONENTS>" in response:
-        response_content = response.split("<GROUPED_COMPONENTS>")[1].split("</GROUPED_COMPONENTS>")[0]
+        response_content = response.split("<GROUPED_COMPONENTS>")[1].split("</GROUPED_COMPONENTS>")[
+            0
+        ]
         module_tree = _try_parse(response_content)
     else:
         # Accept bare JSON/dict responses as a fallback
-        logger.warning("LLM response missing <GROUPED_COMPONENTS> tags — attempting to parse raw response")
+        logger.warning(
+            "LLM response missing <GROUPED_COMPONENTS> tags — attempting to parse raw response"
+        )
         module_tree = _try_parse(response)
 
     # ── Step 3: Fallback to graph clusters if LLM failed ──────────────────
@@ -552,7 +575,9 @@ def cluster_modules(
 
     # check if the module tree is valid
     if len(module_tree) <= 1:
-        logger.debug(f"Skipping clustering for {current_module_name} because the module tree is too small: {len(module_tree)} modules")
+        logger.debug(
+            f"Skipping clustering for {current_module_name} because the module tree is too small: {len(module_tree)} modules"
+        )
         return {}
 
     # Log what the LLM produced
@@ -560,8 +585,7 @@ def cluster_modules(
     logger.info(
         f"LLM produced {len(module_tree)} modules for {context}: "
         + ", ".join(
-            f"{name}({len(info.get('components', []))})"
-            for name, info in module_tree.items()
+            f"{name}({len(info.get('components', []))})" for name, info in module_tree.items()
         )
     )
 
@@ -580,8 +604,12 @@ def cluster_modules(
         sub_leaf_nodes = module_info.get("components", [])
         valid_sub_leaf_nodes = _filter_and_resolve_nodes(sub_leaf_nodes, components, path_index)
         return cluster_modules(
-            valid_sub_leaf_nodes, components, config,
-            current_module_tree, module_name, parent_path,
+            valid_sub_leaf_nodes,
+            components,
+            config,
+            current_module_tree,
+            module_name,
+            parent_path,
             _token_threshold=config.max_token_per_leaf_module,
         )
 

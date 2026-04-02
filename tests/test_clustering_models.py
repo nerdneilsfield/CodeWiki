@@ -2,6 +2,7 @@
 
 Written BEFORE implementation per TDD workflow (RED phase).
 """
+
 import json
 import copy
 import pytest
@@ -21,6 +22,7 @@ from codewiki.src.be.clustering.models import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _leaf(module_id: str, title: str, path: str, components: list[str]) -> ModuleNode:
     """Create a leaf ModuleNode with given components."""
@@ -55,6 +57,7 @@ def _simple_tree(root_components: list[str] | None = None) -> ModuleTree:
 # ---------------------------------------------------------------------------
 # module_id_from_members
 # ---------------------------------------------------------------------------
+
 
 class TestModuleIdFromMembers:
     def test_module_id_deterministic(self):
@@ -92,6 +95,7 @@ class TestModuleIdFromMembers:
 # ---------------------------------------------------------------------------
 # canonicalize_tree
 # ---------------------------------------------------------------------------
+
 
 class TestCanonicalizeTree:
     def test_canonicalize_sorts_members_components(self):
@@ -209,6 +213,7 @@ class TestCanonicalizeTree:
 # ---------------------------------------------------------------------------
 # validate_tree
 # ---------------------------------------------------------------------------
+
 
 def _two_leaf_tree(
     comp_leaf1: list[str],
@@ -341,6 +346,7 @@ class TestValidateTree:
 # to_legacy_dict
 # ---------------------------------------------------------------------------
 
+
 class TestToLegacyDict:
     def test_to_legacy_dict_format(self):
         """Legacy dict has 'path', 'components', and 'children' keys."""
@@ -426,6 +432,7 @@ class TestToLegacyDict:
 # Round-trip serialization
 # ---------------------------------------------------------------------------
 
+
 class TestModuleTreeSerializable:
     def test_module_tree_serializable_round_trip(self):
         """model_dump() -> JSON -> model_validate() round-trip preserves all fields."""
@@ -447,7 +454,13 @@ class TestModuleTreeSerializable:
                 boundary_edges=[{"from": "c1", "to": "c2", "type": "imports"}],
             ),
             children=[child],
-            extra_top_level_modules=[{"module_id": "getting-started", "title": "Getting Started", "path": "getting-started"}],
+            extra_top_level_modules=[
+                {
+                    "module_id": "getting-started",
+                    "title": "Getting Started",
+                    "path": "getting-started",
+                }
+            ],
         )
         tree = ModuleTree(
             schema_version="codewiki.module_tree.v2",
@@ -470,7 +483,9 @@ class TestModuleTreeSerializable:
         assert restored.root.members.symbols == tree.root.members.symbols
         assert restored.root.members.files == tree.root.members.files
         assert restored.root.evidence_refs == tree.root.evidence_refs
-        assert restored.root.constraints.public_api_symbols == tree.root.constraints.public_api_symbols
+        assert (
+            restored.root.constraints.public_api_symbols == tree.root.constraints.public_api_symbols
+        )
         assert restored.root.constraints.boundary_edges == tree.root.constraints.boundary_edges
         assert len(restored.root.children) == 1
         assert restored.root.children[0].module_id == child.module_id
@@ -515,7 +530,9 @@ class TestValidateTreeRequiredModules:
 
     def test_empty_extra_top_level_modules_fails(self):
         root = ModuleNode(
-            module_id="root", title="Root", path="",
+            module_id="root",
+            title="Root",
+            path="",
             members=ModuleMembers(),
             extra_top_level_modules=[],
         )
@@ -525,10 +542,16 @@ class TestValidateTreeRequiredModules:
 
     def test_missing_required_module_fails(self):
         root = ModuleNode(
-            module_id="root", title="Root", path="",
+            module_id="root",
+            title="Root",
+            path="",
             members=ModuleMembers(),
             extra_top_level_modules=[
-                {"module_id": "getting-started", "title": "Getting Started", "path": "getting-started"},
+                {
+                    "module_id": "getting-started",
+                    "title": "Getting Started",
+                    "path": "getting-started",
+                },
                 # missing tutorial and best-practices
             ],
         )
@@ -539,12 +562,22 @@ class TestValidateTreeRequiredModules:
 
     def test_all_required_modules_present_passes(self):
         root = ModuleNode(
-            module_id="root", title="Root", path="",
+            module_id="root",
+            title="Root",
+            path="",
             members=ModuleMembers(),
             extra_top_level_modules=[
-                {"module_id": "getting-started", "title": "Getting Started", "path": "getting-started"},
+                {
+                    "module_id": "getting-started",
+                    "title": "Getting Started",
+                    "path": "getting-started",
+                },
                 {"module_id": "tutorial", "title": "Tutorial", "path": "tutorial"},
-                {"module_id": "best-practices", "title": "Best Practices", "path": "best-practices"},
+                {
+                    "module_id": "best-practices",
+                    "title": "Best Practices",
+                    "path": "best-practices",
+                },
             ],
         )
         tree = ModuleTree(root=root)

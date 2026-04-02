@@ -1,7 +1,8 @@
 """Task 15: Vitis HLS TCL script analyzer — comprehensive tests"""
+
 from codewiki.src.be.dependency_analyzer.analyzers.tcl import analyze_tcl_file
 
-FULL_SCRIPT = '''
+FULL_SCRIPT = """
 open_project -reset hls_project
 set_top mm2s
 add_files ./mm2s.cpp
@@ -9,9 +10,9 @@ add_files -tb ./mm2s_tb.cpp
 add_files ./utils.cpp -cflags "-I./include"
 csynth_design
 export_design -format ip_catalog -output ./mm2s_export
-'''
+"""
 
-MULTI_FILE_SCRIPT = '''
+MULTI_FILE_SCRIPT = """
 open_project my_kernel_proj
 set_top compute_kernel
 add_files kernel.cpp
@@ -20,18 +21,19 @@ add_files utils/math.cpp
 add_files -tb tb/testbench.cpp
 csynth_design
 export_design -format xo -output ./build/kernel.xo
-'''
+"""
 
-NO_TOP_SCRIPT = '''
+NO_TOP_SCRIPT = """
 open_project orphan_project
 add_files orphan.cpp
 csynth_design
-'''
+"""
 
-EMPTY_SCRIPT = ''
+EMPTY_SCRIPT = ""
 
 
 # ── open_project ──────────────────────────────────────────────────────────────
+
 
 def test_open_project_node_extracted():
     nodes, rels = analyze_tcl_file("/tmp/run_hls.tcl", FULL_SCRIPT, "/tmp")
@@ -52,6 +54,7 @@ def test_open_project_node_has_file_path():
 
 
 # ── set_top ────────────────────────────────────────────────────────────────────
+
 
 def test_set_top_node_extracted():
     nodes, rels = analyze_tcl_file("/tmp/run_hls.tcl", FULL_SCRIPT, "/tmp")
@@ -78,6 +81,7 @@ def test_set_top_different_kernel():
 
 
 # ── add_files ─────────────────────────────────────────────────────────────────
+
 
 def test_add_files_produces_hls_source_rels():
     nodes, rels = analyze_tcl_file("/tmp/run_hls.tcl", FULL_SCRIPT, "/tmp")
@@ -137,6 +141,7 @@ def test_add_files_caller_is_top():
 
 # ── csynth_design ─────────────────────────────────────────────────────────────
 
+
 def test_csynth_design_relationship():
     nodes, rels = analyze_tcl_file("/tmp/run_hls.tcl", FULL_SCRIPT, "/tmp")
     synth_rels = [r for r in rels if r.relationship_type == "hls_synth"]
@@ -158,6 +163,7 @@ def test_csynth_design_caller_is_top():
 
 # ── export_design ─────────────────────────────────────────────────────────────
 
+
 def test_export_design_relationship():
     nodes, rels = analyze_tcl_file("/tmp/run_hls.tcl", FULL_SCRIPT, "/tmp")
     export_rels = [r for r in rels if r.relationship_type == "hls_export"]
@@ -167,8 +173,9 @@ def test_export_design_relationship():
 def test_export_design_callee_is_output():
     nodes, rels = analyze_tcl_file("/tmp/run_hls.tcl", FULL_SCRIPT, "/tmp")
     export_rels = [r for r in rels if r.relationship_type == "hls_export"]
-    assert any("export" in r.callee or "xo" in r.callee or "ip" in r.callee.lower()
-               for r in export_rels)
+    assert any(
+        "export" in r.callee or "xo" in r.callee or "ip" in r.callee.lower() for r in export_rels
+    )
 
 
 def test_export_design_xo_format():
@@ -179,6 +186,7 @@ def test_export_design_xo_format():
 
 
 # ── no set_top fallback ────────────────────────────────────────────────────────
+
 
 def test_no_set_top_still_produces_source_rels():
     """When set_top is absent, add_files should still produce relationships."""

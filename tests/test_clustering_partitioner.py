@@ -2,6 +2,7 @@
 
 TDD: tests written BEFORE implementation.
 """
+
 import pytest
 import networkx as nx
 
@@ -440,10 +441,7 @@ class TestDeterminismFiveRuns:
                 Confidence.HIGH,
             ),
         ]
-        results = [
-            partition_components(component_ids, file_map, edges, seed=42)
-            for _ in range(5)
-        ]
+        results = [partition_components(component_ids, file_map, edges, seed=42) for _ in range(5)]
         # All 5 runs must produce identical output
         for run in results[1:]:
             assert run == results[0], "partition_components is not deterministic"
@@ -457,10 +455,7 @@ class TestDeterminismFiveRuns:
         for i, j in pairs:
             graph.add_edge(component_ids[i], component_ids[j], weight=1.0)
         dir_partitions = {"src": set(component_ids)}
-        results = [
-            detect_communities(graph, dir_partitions, seed=42)
-            for _ in range(5)
-        ]
+        results = [detect_communities(graph, dir_partitions, seed=42) for _ in range(5)]
         for run in results[1:]:
             assert run == results[0], "detect_communities is not deterministic"
 
@@ -529,59 +524,63 @@ class TestPartitionComponentsEndToEnd:
             _edge(
                 "py:src/auth/handler.py#AuthHandler(class)",
                 "py:src/auth/models.py#User(class)",
-                EdgeType.IMPORTS, Confidence.HIGH,
+                EdgeType.IMPORTS,
+                Confidence.HIGH,
             ),
             _edge(
                 "py:src/auth/middleware.py#JWTMiddleware(class)",
                 "py:src/auth/models.py#User(class)",
-                EdgeType.IMPORTS, Confidence.HIGH,
+                EdgeType.IMPORTS,
+                Confidence.HIGH,
             ),
             _edge(
                 "py:src/api/router.py#Router(class)",
                 "py:src/api/views.py#UserView(class)",
-                EdgeType.IMPORTS, Confidence.HIGH,
+                EdgeType.IMPORTS,
+                Confidence.HIGH,
             ),
             _edge(
                 "py:src/api/views.py#UserView(class)",
                 "py:src/api/serializers.py#UserSerializer(class)",
-                EdgeType.CALLS, Confidence.HIGH,
+                EdgeType.CALLS,
+                Confidence.HIGH,
             ),
             _edge(
                 "py:src/core/database.py#Database(class)",
                 "py:src/core/cache.py#Cache(class)",
-                EdgeType.IMPORTS, Confidence.MEDIUM,
+                EdgeType.IMPORTS,
+                Confidence.MEDIUM,
             ),
             _edge(
                 "py:src/core/config.py#Config(class)",
                 "py:src/core/utils.py#Utils(class)",
-                EdgeType.CALLS, Confidence.MEDIUM,
+                EdgeType.CALLS,
+                Confidence.MEDIUM,
             ),
             # Weak cross-dir edges
             _edge(
                 "py:src/auth/handler.py#AuthHandler(class)",
                 "py:src/core/config.py#Config(class)",
-                EdgeType.CALLS, Confidence.LOW,
+                EdgeType.CALLS,
+                Confidence.LOW,
             ),
             _edge(
                 "py:src/api/router.py#Router(class)",
                 "py:src/core/database.py#Database(class)",
-                EdgeType.CALLS, Confidence.LOW,
+                EdgeType.CALLS,
+                Confidence.LOW,
             ),
         ]
 
     def test_all_components_in_output(self):
-        result = partition_components(
-            self.component_ids, self.file_map, self.edges, seed=42
-        )
+        result = partition_components(self.component_ids, self.file_map, self.edges, seed=42)
         all_members = []
         for cluster in result:
             all_members.extend(cluster)
         assert sorted(all_members) == sorted(self.component_ids)
 
     def test_no_component_in_multiple_clusters(self):
-        result = partition_components(
-            self.component_ids, self.file_map, self.edges, seed=42
-        )
+        result = partition_components(self.component_ids, self.file_map, self.edges, seed=42)
         all_members = []
         for cluster in result:
             all_members.extend(cluster)
@@ -589,23 +588,17 @@ class TestPartitionComponentsEndToEnd:
         assert len(all_members) == len(set(all_members))
 
     def test_clusters_are_sorted_lists(self):
-        result = partition_components(
-            self.component_ids, self.file_map, self.edges, seed=42
-        )
+        result = partition_components(self.component_ids, self.file_map, self.edges, seed=42)
         for cluster in result:
             assert isinstance(cluster, list)
             assert cluster == sorted(cluster)
 
     def test_returns_at_least_one_cluster(self):
-        result = partition_components(
-            self.component_ids, self.file_map, self.edges, seed=42
-        )
+        result = partition_components(self.component_ids, self.file_map, self.edges, seed=42)
         assert len(result) >= 1
 
     def test_result_is_sorted_largest_first(self):
-        result = partition_components(
-            self.component_ids, self.file_map, self.edges, seed=42
-        )
+        result = partition_components(self.component_ids, self.file_map, self.edges, seed=42)
         sizes = [len(c) for c in result]
         assert sizes == sorted(sizes, reverse=True)
 
@@ -633,25 +626,29 @@ class TestSCCExpansionInFinalOutput:
             _edge(
                 "py:src/a_scc.py#AlphaSCC(class)",
                 "py:src/b_scc.py#BetaSCC(class)",
-                EdgeType.IMPORTS, Confidence.HIGH,
+                EdgeType.IMPORTS,
+                Confidence.HIGH,
             ),
             # B imports C
             _edge(
                 "py:src/b_scc.py#BetaSCC(class)",
                 "py:src/c_scc.py#GammaSCC(class)",
-                EdgeType.IMPORTS, Confidence.HIGH,
+                EdgeType.IMPORTS,
+                Confidence.HIGH,
             ),
             # C imports A (creates cycle)
             _edge(
                 "py:src/c_scc.py#GammaSCC(class)",
                 "py:src/a_scc.py#AlphaSCC(class)",
-                EdgeType.IMPORTS, Confidence.HIGH,
+                EdgeType.IMPORTS,
+                Confidence.HIGH,
             ),
             # D connects to A
             _edge(
                 "py:src/d_scc.py#DeltaSCC(class)",
                 "py:src/a_scc.py#AlphaSCC(class)",
-                EdgeType.CALLS, Confidence.MEDIUM,
+                EdgeType.CALLS,
+                Confidence.MEDIUM,
             ),
         ]
         result = partition_components(component_ids, file_map, edges, seed=42)
@@ -672,9 +669,24 @@ class TestSCCExpansionInFinalOutput:
         component_ids = [comp_a, comp_b, comp_c]
         file_map = {c: c.split("::")[0] for c in component_ids}
         edges = [
-            _edge("py:src/a_scc.py#AlphaSCC(class)", "py:src/b_scc.py#BetaSCC(class)", EdgeType.IMPORTS, Confidence.HIGH),
-            _edge("py:src/b_scc.py#BetaSCC(class)", "py:src/c_scc.py#GammaSCC(class)", EdgeType.IMPORTS, Confidence.HIGH),
-            _edge("py:src/c_scc.py#GammaSCC(class)", "py:src/a_scc.py#AlphaSCC(class)", EdgeType.IMPORTS, Confidence.HIGH),
+            _edge(
+                "py:src/a_scc.py#AlphaSCC(class)",
+                "py:src/b_scc.py#BetaSCC(class)",
+                EdgeType.IMPORTS,
+                Confidence.HIGH,
+            ),
+            _edge(
+                "py:src/b_scc.py#BetaSCC(class)",
+                "py:src/c_scc.py#GammaSCC(class)",
+                EdgeType.IMPORTS,
+                Confidence.HIGH,
+            ),
+            _edge(
+                "py:src/c_scc.py#GammaSCC(class)",
+                "py:src/a_scc.py#AlphaSCC(class)",
+                EdgeType.IMPORTS,
+                Confidence.HIGH,
+            ),
         ]
         result = partition_components(component_ids, file_map, edges, seed=42)
         all_members = set()
@@ -716,9 +728,7 @@ class TestTinyClusterMerged:
         # (unless there's only one cluster total)
         if len(communities) > 1:
             for community in communities:
-                assert len(community) >= 3, (
-                    f"Tiny cluster not merged: {community}"
-                )
+                assert len(community) >= 3, f"Tiny cluster not merged: {community}"
 
     def test_all_members_preserved_after_merge(self):
         """Merging tiny clusters must not lose any component."""

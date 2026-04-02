@@ -6,12 +6,16 @@ Tests cover:
 2. cluster_modules_v2 pipeline (legacy format, determinism, component coverage)
 3. cluster_modules() dispatch (with / without index_products)
 """
+
 import pytest
 from unittest.mock import MagicMock, patch
 
 from codewiki.src.be.clustering.models import (
-    ModuleNode, ModuleTree, ModuleMembers,
-    module_id_from_members, to_legacy_dict,
+    ModuleNode,
+    ModuleTree,
+    ModuleMembers,
+    module_id_from_members,
+    to_legacy_dict,
 )
 from codewiki.src.be.dependency_analyzer.models.core import Node
 
@@ -19,6 +23,7 @@ from codewiki.src.be.dependency_analyzer.models.core import Node
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_node(cid: str, relative_path: str, depends_on=None) -> Node:
     """Create a minimal mock Node for testing."""
@@ -55,6 +60,7 @@ def _make_components_and_leaf_nodes(spec: list[tuple[str, str]]) -> tuple[dict, 
 # ---------------------------------------------------------------------------
 # Part 1: naming.py — heuristic_cluster_name & name_clusters
 # ---------------------------------------------------------------------------
+
 
 class TestHeuristicClusterName:
     def test_uses_most_common_directory(self):
@@ -180,6 +186,7 @@ class TestNameClusters:
 # Part 2: pipeline.py — cluster_modules_v2
 # ---------------------------------------------------------------------------
 
+
 def _build_10_component_spec():
     """10 components split evenly across 2 directories."""
     spec = []
@@ -278,8 +285,7 @@ class TestClusterModulesV2Determinism:
         config = MagicMock()
 
         results = [
-            cluster_modules_v2(leaf_nodes, components, config, index_products)
-            for _ in range(3)
+            cluster_modules_v2(leaf_nodes, components, config, index_products) for _ in range(3)
         ]
         assert results[0] == results[1] == results[2], (
             "pipeline is non-deterministic across identical calls"
@@ -316,9 +322,7 @@ class TestClusterModulesV2ComponentCoverage:
         # root node wraps everything — assigned should include all input leaf nodes
         # (root's children components list aggregates everything)
         # We check at least that the module-level components collectively cover all inputs
-        assert assigned >= expected, (
-            f"Missing components: {expected - assigned}"
-        )
+        assert assigned >= expected, f"Missing components: {expected - assigned}"
 
 
 class TestClusterModulesV2SingleCluster:
@@ -343,6 +347,7 @@ class TestClusterModulesV2SingleCluster:
 # Part 3: cluster_modules() dispatch
 # ---------------------------------------------------------------------------
 
+
 class TestClusterModulesDispatch:
     """test_cluster_modules_dispatch_with/without_index_products"""
 
@@ -361,7 +366,9 @@ class TestClusterModulesDispatch:
             return_value={"FakeModule": {"path": "x", "components": leaf_nodes, "children": {}}},
         ) as mock_v2:
             result = cluster_modules(
-                leaf_nodes, components, config,
+                leaf_nodes,
+                components,
+                config,
                 index_products=index_products,
             )
         mock_v2.assert_called_once()
@@ -376,9 +383,7 @@ class TestClusterModulesDispatch:
         config = MagicMock()
         config.max_token_per_module = 999_999  # token count >> threshold → short-circuits to {}
 
-        with patch(
-            "codewiki.src.be.clustering.pipeline.cluster_modules_v2"
-        ) as mock_v2:
+        with patch("codewiki.src.be.clustering.pipeline.cluster_modules_v2") as mock_v2:
             # No index_products kwarg → v1 path
             result = cluster_modules(leaf_nodes, components, config)
 
@@ -400,7 +405,9 @@ class TestClusterModulesDispatch:
         ):
             # Should NOT raise — falls back to v1 which may return {}
             result = cluster_modules(
-                leaf_nodes, components, config,
+                leaf_nodes,
+                components,
+                config,
                 index_products=index_products,
             )
         assert isinstance(result, dict)
@@ -420,7 +427,9 @@ class TestClusterModulesDispatch:
             return_value={},
         ) as mock_v2:
             result = cluster_modules(
-                leaf_nodes, components, config,
+                leaf_nodes,
+                components,
+                config,
                 index_products=index_products,
             )
         mock_v2.assert_called_once()
@@ -431,6 +440,7 @@ class TestClusterModulesDispatch:
 # ---------------------------------------------------------------------------
 # Part 4: _compute_module_path helper
 # ---------------------------------------------------------------------------
+
 
 class TestComputeModulePath:
     def test_returns_most_common_parent_dir(self):
@@ -494,10 +504,12 @@ _FILE_MAP = {
     "api/router.py::Router": "api/router.py",
 }
 
-_VALID_LLM_RESPONSE = json.dumps([
-    {"cluster_idx": 0, "title": "认证模块 (Auth Module)", "description": "Handles auth"},
-    {"cluster_idx": 1, "title": "接口模块 (API Module)", "description": "API routes"},
-])
+_VALID_LLM_RESPONSE = json.dumps(
+    [
+        {"cluster_idx": 0, "title": "认证模块 (Auth Module)", "description": "Handles auth"},
+        {"cluster_idx": 1, "title": "接口模块 (API Module)", "description": "API routes"},
+    ]
+)
 
 
 class TestLLMNamingHappyPath:
@@ -569,9 +581,11 @@ class TestLLMNamingFallbackOnWrongCount:
     def test_llm_naming_fallback_on_wrong_count(self):
         from codewiki.src.be.clustering.naming import name_clusters
 
-        short_response = json.dumps([
-            {"cluster_idx": 0, "title": "Only One", "description": "Just one"},
-        ])
+        short_response = json.dumps(
+            [
+                {"cluster_idx": 0, "title": "Only One", "description": "Just one"},
+            ]
+        )
         config = _make_config_with_cluster_model()
         with patch(
             "codewiki.src.be.clustering.naming.call_llm",
@@ -591,9 +605,7 @@ class TestLLMNamingSkippedWithoutConfig:
     def test_llm_naming_skipped_without_config(self):
         from codewiki.src.be.clustering.naming import name_clusters
 
-        with patch(
-            "codewiki.src.be.clustering.naming.call_llm"
-        ) as mock_llm:
+        with patch("codewiki.src.be.clustering.naming.call_llm") as mock_llm:
             result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config=None)
 
         mock_llm.assert_not_called()
@@ -607,9 +619,7 @@ class TestLLMNamingSkippedWithoutClusterModel:
         from codewiki.src.be.clustering.naming import name_clusters
 
         config = _make_config_without_cluster_model()
-        with patch(
-            "codewiki.src.be.clustering.naming.call_llm"
-        ) as mock_llm:
+        with patch("codewiki.src.be.clustering.naming.call_llm") as mock_llm:
             result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
 
         mock_llm.assert_not_called()
@@ -728,7 +738,7 @@ class TestNamingFreezeReusesOldTitle:
         }
         result = _apply_naming_freeze(clusters, names, previous_tree)
         assert result[0]["title"] == "Frozen A"  # frozen
-        assert result[1]["title"] == "New C"      # not frozen
+        assert result[1]["title"] == "New C"  # not frozen
 
     def test_freeze_matches_nested_children(self):
         """Previous tree with nested children: freeze still works."""
@@ -776,11 +786,13 @@ class TestNamingFreezeReusesOldTitle:
 # Part 7: LLM naming validation edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestLLMNamingValidation:
     """Verify LLM naming rejects empty titles/descriptions."""
 
     def test_empty_title_triggers_fallback(self):
         from codewiki.src.be.clustering.naming import name_clusters
+
         clusters = [["auth/a.py::A"]]
         file_map = {"auth/a.py::A": "auth/a.py"}
         config = type("C", (), {"cluster_model": "test-model"})()
@@ -792,6 +804,7 @@ class TestLLMNamingValidation:
 
     def test_empty_description_triggers_fallback(self):
         from codewiki.src.be.clustering.naming import name_clusters
+
         clusters = [["auth/a.py::A"]]
         file_map = {"auth/a.py::A": "auth/a.py"}
         config = type("C", (), {"cluster_model": "test-model"})()

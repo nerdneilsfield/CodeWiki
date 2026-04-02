@@ -1,5 +1,6 @@
 # tests/test_index_ts_js_adapter.py
 """Tests for TS/JS adapter: method extraction, import/export, visibility."""
+
 import textwrap
 import pytest
 from codewiki.src.be.index.adapters.ts_js_adapter import TSJSIndexAdapter
@@ -9,21 +10,25 @@ from codewiki.src.be.index.models import SymbolKind, Visibility, ExportStatus
 def _adapt(code: str, file_path="src/example.ts", repo_path="/repo", lang="typescript"):
     code = textwrap.dedent(code)
     adapter = TSJSIndexAdapter(
-        file_path=file_path, content=code, repo_path=repo_path, language=lang,
+        file_path=file_path,
+        content=code,
+        repo_path=repo_path,
+        language=lang,
     )
     return adapter.extract()
 
 
 # ── Class + method extraction ────────────────────────────────────────────────
 
+
 def test_extracts_class_ts():
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt("""
         class Foo {
             bar(x: number): string {
                 return String(x);
             }
         }
-    ''')
+    """)
     classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
     methods = [s for s in symbols if s.kind == SymbolKind.METHOD]
     assert len(classes) == 1
@@ -34,48 +39,49 @@ def test_extracts_class_ts():
 
 
 def test_extracts_exported_class():
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt("""
         export class AuthService {
             login() {}
         }
-    ''')
+    """)
     classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
     assert classes[0].export_status == ExportStatus.EXPORTED
 
 
 def test_extracts_function_ts():
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt("""
         function greet(name: string): void {
             console.log(name);
         }
-    ''')
+    """)
     funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
     assert len(funcs) == 1
     assert funcs[0].name == "greet"
 
 
 def test_exported_function():
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt("""
         export function helper() {}
-    ''')
+    """)
     funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
     assert funcs[0].export_status == ExportStatus.EXPORTED
 
 
 def test_non_exported_function():
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt("""
         function internal() {}
-    ''')
+    """)
     funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
     assert funcs[0].export_status == ExportStatus.NOT_EXPORTED
 
 
 # ── Import extraction ────────────────────────────────────────────────────────
 
+
 def test_named_import():
-    _, imports = _adapt('''
+    _, imports = _adapt("""
         import { Foo, Bar } from './module';
-    ''')
+    """)
     assert len(imports) >= 1
     imp = imports[0]
     assert "./module" in imp.module_path
@@ -83,17 +89,17 @@ def test_named_import():
 
 
 def test_default_import():
-    _, imports = _adapt('''
+    _, imports = _adapt("""
         import React from 'react';
-    ''')
+    """)
     assert len(imports) >= 1
     assert imports[0].module_path == "react"
 
 
 def test_namespace_import():
-    _, imports = _adapt('''
+    _, imports = _adapt("""
         import * as path from 'path';
-    ''')
+    """)
     assert len(imports) >= 1
     assert imports[0].module_path == "path"
     assert imports[0].alias == "path"
@@ -101,14 +107,19 @@ def test_namespace_import():
 
 # ── JS files work too ────────────────────────────────────────────────────────
 
+
 def test_js_class():
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt(
+        """
         class App {
             render() {
                 return null;
             }
         }
-    ''', file_path="src/app.js", lang="javascript")
+    """,
+        file_path="src/app.js",
+        lang="javascript",
+    )
     classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
     assert len(classes) == 1
     assert classes[0].lang == "javascript"
@@ -116,13 +127,18 @@ def test_js_class():
 
 # ── Paths are relative ───────────────────────────────────────────────────────
 
+
 def test_paths_are_relative():
-    symbols, imports = _adapt('''
+    symbols, imports = _adapt(
+        """
         import { X } from './x';
         export class Foo {
             bar() {}
         }
-    ''', file_path="/repo/src/example.ts", repo_path="/repo")
+    """,
+        file_path="/repo/src/example.ts",
+        repo_path="/repo",
+    )
     for s in symbols:
         assert not s.file_path.startswith("/")
     for i in imports:
@@ -131,15 +147,16 @@ def test_paths_are_relative():
 
 # ── New edge-case tests ───────────────────────────────────────────────────────
 
+
 def test_class_with_multiple_methods_all_extracted():
     """All methods in a class should be extracted as children."""
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt("""
         class MyService {
             methodA() { return 1; }
             methodB() { return 2; }
             methodC() { return 3; }
         }
-    ''')
+    """)
     classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
     methods = [s for s in symbols if s.kind == SymbolKind.METHOD]
     assert len(classes) == 1
@@ -151,14 +168,14 @@ def test_class_with_multiple_methods_all_extracted():
 
 def test_two_classes_in_same_file():
     """Two class declarations in same file should both be extracted."""
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt("""
         class Alpha {
             doAlpha() {}
         }
         class Beta {
             doBeta() {}
         }
-    ''')
+    """)
     classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
     class_names = {c.name for c in classes}
     assert len(classes) == 2
@@ -168,11 +185,11 @@ def test_two_classes_in_same_file():
 
 def test_export_default_class():
     """export default class Foo {} should be EXPORTED."""
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt("""
         export default class DefaultClass {
             run() {}
         }
-    ''')
+    """)
     classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
     # The class may or may not be extracted depending on tree-sitter node type.
     # Either it is found as EXPORTED or it doesn't crash.
@@ -182,11 +199,11 @@ def test_export_default_class():
 
 def test_export_default_function():
     """export default function foo() {} should be EXPORTED or at least not crash."""
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt("""
         export default function defaultFunc() {
             return 42;
         }
-    ''')
+    """)
     assert isinstance(symbols, list)
     # If the function was extracted, verify it doesn't have NOT_EXPORTED status
     funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION and s.name == "defaultFunc"]
@@ -196,9 +213,9 @@ def test_export_default_function():
 
 def test_empty_class_has_zero_methods():
     """Empty class body should produce a CLASS with 0 children."""
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt("""
         class Empty {}
-    ''')
+    """)
     classes = [s for s in symbols if s.kind == SymbolKind.CLASS]
     assert len(classes) == 1
     assert classes[0].name == "Empty"
@@ -207,11 +224,15 @@ def test_empty_class_has_zero_methods():
 
 def test_javascript_function():
     """JavaScript function extraction works like TypeScript."""
-    symbols, _ = _adapt('''
+    symbols, _ = _adapt(
+        """
         function greetUser(name) {
             console.log("Hello " + name);
         }
-    ''', file_path="src/app.js", lang="javascript")
+    """,
+        file_path="src/app.js",
+        lang="javascript",
+    )
     funcs = [s for s in symbols if s.kind == SymbolKind.FUNCTION]
     assert len(funcs) == 1
     assert funcs[0].name == "greetUser"
@@ -220,10 +241,10 @@ def test_javascript_function():
 
 def test_side_effect_import_does_not_crash():
     """import 'side-effect' with no named imports should not crash."""
-    symbols, imports = _adapt('''
+    symbols, imports = _adapt("""
         import 'some-polyfill';
         function main() {}
-    ''')
+    """)
     assert isinstance(symbols, list)
     assert isinstance(imports, list)
     # At minimum, main() function should be extracted
@@ -233,12 +254,12 @@ def test_side_effect_import_does_not_crash():
 
 def test_arrow_function_does_not_crash():
     """Arrow function assigned to const should not crash the adapter."""
-    symbols, imports = _adapt('''
+    symbols, imports = _adapt("""
         const fn = () => {
             return 42;
         };
         class Wrapper {}
-    ''')
+    """)
     assert isinstance(symbols, list)
     assert isinstance(imports, list)
     # The class should still be extracted
@@ -247,6 +268,7 @@ def test_arrow_function_does_not_crash():
 
 
 # ── Import path resolution ────────────────────────────────────────────────────
+
 
 def test_relative_import_resolves_to_ts(tmp_path):
     """Relative import './utils' resolves to utils.ts when that file exists."""
@@ -289,9 +311,7 @@ def test_relative_import_resolves_to_js_fallback(tmp_path):
 def test_relative_import_resolves_tsx_extension(tmp_path):
     """Relative import './components/Button' resolves to components/Button.tsx."""
     (tmp_path / "src" / "components").mkdir(parents=True)
-    (tmp_path / "src" / "components" / "Button.tsx").write_text(
-        "export const Button = () => null;"
-    )
+    (tmp_path / "src" / "components" / "Button.tsx").write_text("export const Button = () => null;")
     importing_file = tmp_path / "src" / "app.ts"
     importing_file.write_text("import { Button } from './components/Button';")
 

@@ -31,7 +31,9 @@ def test_cpp_language_is_singleton():
 
 def test_js_language_is_singleton():
     from codewiki.src.be.dependency_analyzer.analyzers import javascript as js_mod
-    from codewiki.src.be.dependency_analyzer.analyzers.javascript import analyze_javascript_file_treesitter
+    from codewiki.src.be.dependency_analyzer.analyzers.javascript import (
+        analyze_javascript_file_treesitter,
+    )
 
     SAMPLE = "function foo() {}\nfunction bar() { foo(); }\n"
     analyze_javascript_file_treesitter("/tmp/a.js", SAMPLE, "/tmp")

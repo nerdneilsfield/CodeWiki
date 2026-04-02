@@ -1,7 +1,8 @@
 """Task 3: C++ analyzer enhancements — comprehensive tests"""
+
 from codewiki.src.be.dependency_analyzer.analyzers.cpp import analyze_cpp_file
 
-SAMPLE_CPP = '''
+SAMPLE_CPP = """
 #include <vector>
 #include "utils.h"
 
@@ -26,9 +27,9 @@ void demo() {
     c.add(42);
     int m = MyLib::max_val<int>(1, 2);
 }
-'''
+"""
 
-INHERITANCE_CPP = '''
+INHERITANCE_CPP = """
 class Animal {
 public:
     virtual void speak() {}
@@ -45,10 +46,11 @@ class Cat : public Animal {
 public:
     void speak() override {}
 };
-'''
+"""
 
 
 # ── include extraction ─────────────────────────────────────────────────────────
+
 
 def test_include_extraction_count():
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", SAMPLE_CPP, "/tmp")
@@ -73,6 +75,7 @@ def test_include_is_unresolved():
 
 # ── template class extraction ──────────────────────────────────────────────────
 
+
 def test_template_class_extracted():
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", SAMPLE_CPP, "/tmp")
     classes = [n for n in nodes if n.component_type in ("class", "template_class")]
@@ -89,6 +92,7 @@ def test_template_class_has_file_path():
 
 # ── template function extraction ───────────────────────────────────────────────
 
+
 def test_template_function_extracted():
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", SAMPLE_CPP, "/tmp")
     funcs = [n for n in nodes if n.component_type in ("function", "template_function")]
@@ -102,6 +106,7 @@ def test_regular_function_extracted():
 
 
 # ── inheritance ────────────────────────────────────────────────────────────────
+
 
 def test_inheritance_relationship_extracted():
     nodes, rels = analyze_cpp_file("/tmp/inherit.cpp", INHERITANCE_CPP, "/tmp")
@@ -133,6 +138,7 @@ def test_inheritance_is_unresolved():
 
 # ── method calls ───────────────────────────────────────────────────────────────
 
+
 def test_qualified_call_detected():
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", SAMPLE_CPP, "/tmp")
     calls = [r for r in rels if r.relationship_type == "calls"]
@@ -150,6 +156,7 @@ def test_method_call_within_class():
 
 
 # ── node structure ─────────────────────────────────────────────────────────────
+
 
 def test_function_has_start_line():
     nodes, rels = analyze_cpp_file("/tmp/test.cpp", SAMPLE_CPP, "/tmp")

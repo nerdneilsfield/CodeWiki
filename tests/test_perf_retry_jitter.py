@@ -1,5 +1,6 @@
 # tests/test_perf_retry_jitter.py
 """Tests for retry jitter and Retry-After header handling."""
+
 from unittest.mock import MagicMock, patch
 from codewiki.src.be.llm_services import _sleep_with_jitter, _parse_retry_after
 
@@ -29,6 +30,7 @@ def test_jitter_within_bounds():
 def test_parse_retry_after_from_rate_limit_error():
     """_parse_retry_after must extract seconds from 429 response headers."""
     import openai
+
     exc = MagicMock(spec=openai.RateLimitError)
     exc.response = MagicMock()
     exc.response.headers = {"retry-after": "42"}
@@ -45,6 +47,7 @@ def test_parse_retry_after_returns_none_for_non_429():
 def test_parse_retry_after_returns_none_when_header_missing():
     """_parse_retry_after must return None when no Retry-After header present."""
     import openai
+
     exc = MagicMock(spec=openai.RateLimitError)
     exc.response = MagicMock()
     exc.response.headers = {}

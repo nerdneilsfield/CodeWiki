@@ -14,4 +14,3 @@ def test_format_overview_prompt_uses_output_language_block_for_non_english():
     assert "<OUTPUT_LANGUAGE>" in prompt
     assert "Write ALL documentation content in Chinese (Simplified)." in prompt
     assert "IMPORTANT: Write the overview content in Chinese (Simplified)." not in prompt
-

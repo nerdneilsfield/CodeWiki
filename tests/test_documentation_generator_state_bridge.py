@@ -1,4 +1,7 @@
-from codewiki.src.be.documentation_generator import DocumentationGenerator, cleanup_legacy_internal_files
+from codewiki.src.be.documentation_generator import (
+    DocumentationGenerator,
+    cleanup_legacy_internal_files,
+)
 from codewiki.src.config import Config
 from codewiki.src.be.generation_state import GenerationState, DocTask
 from unittest.mock import MagicMock
@@ -46,7 +49,10 @@ def test_build_generation_tasks_freezes_filenames_and_dependencies(tmp_path):
     by_id = {task.doc_id: task for task in tasks}
 
     assert tree["CLI Transport"]["_doc_filename"] == "cli.md"
-    assert tree["CLI Transport"]["children"]["io_abstractions"]["_doc_filename"] == "cli-io_abstractions.md"
+    assert (
+        tree["CLI Transport"]["children"]["io_abstractions"]["_doc_filename"]
+        == "cli-io_abstractions.md"
+    )
     assert by_id["module:mod-cli-io"].output_file == "cli-io_abstractions.md"
     assert by_id["module:mod-cli"].depends_on == ["module:mod-cli-io"]
     assert by_id["overview:root"].depends_on == ["module:mod-cli"]
@@ -180,8 +186,13 @@ def test_run_orchestrates_generation_pipeline_in_order(tmp_path, monkeypatch):
     gen.generate_module_documentation = _fake_generate_module_documentation
     gen.create_documentation_metadata = _fake_create_metadata
 
-    monkeypatch.setattr("codewiki.src.be.documentation_generator.cluster_modules", lambda *args, **kwargs: module_tree)
-    monkeypatch.setattr("codewiki.src.be.documentation_generator.GuideGenerator", _DummyGuideGenerator)
+    monkeypatch.setattr(
+        "codewiki.src.be.documentation_generator.cluster_modules",
+        lambda *args, **kwargs: module_tree,
+    )
+    monkeypatch.setattr(
+        "codewiki.src.be.documentation_generator.GuideGenerator", _DummyGuideGenerator
+    )
     monkeypatch.setattr("codewiki.src.be.docs_fixer.fix_docs", _fake_fix_docs)
 
     # Bypass index build and context wiring details; the orchestration order is the contract here.

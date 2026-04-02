@@ -1,27 +1,52 @@
 # tests/test_index_component_card.py
 """Tests for ComponentCard builder."""
+
 import pytest
 from codewiki.src.be.index.models import (
-    Symbol, SymbolKind, SourceRange, SymbolEdge, EdgeType, Confidence, ComponentCard,
+    Symbol,
+    SymbolKind,
+    SourceRange,
+    SymbolEdge,
+    EdgeType,
+    Confidence,
+    ComponentCard,
 )
 from codewiki.src.be.index.component_card import CardBuilder
 
 
-def _sym(sid="py:src/a.py#Foo(class)", name="Foo", kind=SymbolKind.CLASS,
-         sig="class Foo(Base)", doc="Handles authentication.\nWith multiple lines of detail.",
-         file_path="src/a.py", start=1, end=50):
+def _sym(
+    sid="py:src/a.py#Foo(class)",
+    name="Foo",
+    kind=SymbolKind.CLASS,
+    sig="class Foo(Base)",
+    doc="Handles authentication.\nWith multiple lines of detail.",
+    file_path="src/a.py",
+    start=1,
+    end=50,
+):
     return Symbol(
-        symbol_id=sid, lang="python", kind=kind, name=name,
-        qualified_name=f"src.a.{name}", file_path=file_path,
-        range=SourceRange(file_path=file_path, start_line=start, start_col=0, end_line=end, end_col=0),
-        signature=sig, docstring=doc, source_hash="h",
+        symbol_id=sid,
+        lang="python",
+        kind=kind,
+        name=name,
+        qualified_name=f"src.a.{name}",
+        file_path=file_path,
+        range=SourceRange(
+            file_path=file_path, start_line=start, start_col=0, end_line=end, end_col=0
+        ),
+        signature=sig,
+        docstring=doc,
+        source_hash="h",
     )
 
 
 def _edge(from_s, to_s, etype=EdgeType.CALLS):
     return SymbolEdge(
-        edge_type=etype, from_symbol=from_s, to_symbol=to_s,
-        confidence=Confidence.HIGH, resolver="ast",
+        edge_type=etype,
+        from_symbol=from_s,
+        to_symbol=to_s,
+        confidence=Confidence.HIGH,
+        resolver="ast",
     )
 
 
@@ -78,6 +103,7 @@ def test_file_context():
 
 # ── New edge-case tests ───────────────────────────────────────────────────────
 
+
 def test_no_signature_falls_back_to_name():
     """When symbol has no signature, card.signature should fall back to symbol.name."""
     sym = _sym(sig=None)
@@ -97,6 +123,7 @@ def test_single_sentence_docstring_not_truncated():
 def test_edge_with_to_unresolved_included_in_key_edges():
     """Edges where to_symbol is None but to_unresolved is set should appear in key_edges."""
     from codewiki.src.be.index.models import SymbolEdge, EdgeType, Confidence
+
     sym = _sym(sid="s1")
     edge = SymbolEdge(
         edge_type=EdgeType.CALLS,

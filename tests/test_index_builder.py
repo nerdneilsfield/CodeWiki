@@ -1,5 +1,6 @@
 # tests/test_index_builder.py
 """Tests for IndexBuilder: end-to-end index construction."""
+
 import textwrap
 import pytest
 from codewiki.src.be.index.index_builder import IndexBuilder, IndexProducts
@@ -13,22 +14,26 @@ def sample_repo(tmp_path):
     src.mkdir()
 
     (src / "__init__.py").write_text("")
-    (src / "main.py").write_text(textwrap.dedent('''
+    (src / "main.py").write_text(
+        textwrap.dedent('''
         from .utils import helper
 
         class App:
             """Main application."""
             def run(self):
                 helper()
-    '''))
-    (src / "utils.py").write_text(textwrap.dedent('''
+    ''')
+    )
+    (src / "utils.py").write_text(
+        textwrap.dedent('''
         def helper():
             """A helper function."""
             pass
 
         def _internal():
             pass
-    '''))
+    ''')
+    )
     return str(tmp_path)
 
 
@@ -85,6 +90,7 @@ def test_products_serializable(sample_repo):
 
 # ── New edge-case tests ───────────────────────────────────────────────────────
 
+
 def test_empty_directory_produces_zero_symbols(tmp_path):
     """Empty directory (no source files) should produce IndexProducts with 0 symbols."""
     builder = IndexBuilder(repo_path=str(tmp_path))
@@ -117,9 +123,7 @@ def test_file_with_syntax_error_does_not_crash(tmp_path):
 
 def test_repo_with_typescript_files(tmp_path):
     """Repo with TypeScript files should have TS symbols extracted."""
-    (tmp_path / "app.ts").write_text(
-        "export class AppService {\n    run() {}\n}\n"
-    )
+    (tmp_path / "app.ts").write_text("export class AppService {\n    run() {}\n}\n")
     builder = IndexBuilder(repo_path=str(tmp_path))
     products = builder.build()
     assert isinstance(products, IndexProducts)
@@ -141,10 +145,13 @@ def test_from_dict_round_trip_preserves_symbol_count_and_relative_paths(sample_r
     for sym in restored.symbol_table.all_symbols():
         assert not sym.file_path.startswith("/"), f"Absolute path after round-trip: {sym.file_path}"
     for imp in restored.import_graph.all_imports():
-        assert not imp.file_path.startswith("/"), f"Absolute import path after round-trip: {imp.file_path}"
+        assert not imp.file_path.startswith("/"), (
+            f"Absolute import path after round-trip: {imp.file_path}"
+        )
 
 
 # ── Caching tests (RED — will fail until caching is implemented) ──────────────
+
 
 def test_cache_saves_and_loads(sample_repo, tmp_path):
     """Build once: cache file appears. Build again: returns same products (same symbol count)."""
@@ -166,10 +173,9 @@ def test_cache_saves_and_loads(sample_repo, tmp_path):
     # Second build with same output_dir should return same symbol count
     builder2 = IndexBuilder(repo_path=sample_repo, output_dir=output_dir)
     products_second = builder2.build()
-    assert (len(products_second.symbol_table.all_symbols()) ==
-            len(products_first.symbol_table.all_symbols())), (
-        "Second build (cache hit) should return same symbol count as first build"
-    )
+    assert len(products_second.symbol_table.all_symbols()) == len(
+        products_first.symbol_table.all_symbols()
+    ), "Second build (cache hit) should return same symbol count as first build"
 
 
 def test_cache_miss_on_different_version(sample_repo, tmp_path, monkeypatch):
@@ -211,36 +217,44 @@ def test_cache_handles_corrupted_file(sample_repo, tmp_path):
 
     builder = IndexBuilder(repo_path=sample_repo, output_dir=str(output_dir))
     products = builder.build()
-    assert isinstance(products, IndexProducts), "Corrupted cache must be treated as a miss, not a crash"
+    assert isinstance(products, IndexProducts), (
+        "Corrupted cache must be treated as a miss, not a crash"
+    )
     assert products.symbol_table is not None
 
 
 # ── EXTENDS edge tests ────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def inheritance_repo(tmp_path):
     """Repo with a local base class and a subclass."""
-    (tmp_path / "base.py").write_text(textwrap.dedent('''\
+    (tmp_path / "base.py").write_text(
+        textwrap.dedent('''\
         class Animal:
             """Base animal class."""
             def speak(self):
                 pass
-    '''))
-    (tmp_path / "child.py").write_text(textwrap.dedent('''\
+    ''')
+    )
+    (tmp_path / "child.py").write_text(
+        textwrap.dedent('''\
         from base import Animal
 
         class Dog(Animal):
             """A dog."""
             def speak(self):
                 return "woof"
-    '''))
+    ''')
+    )
     return str(tmp_path)
 
 
 @pytest.fixture
 def multi_base_repo(tmp_path):
     """Repo where a class inherits from multiple local bases."""
-    (tmp_path / "mixins.py").write_text(textwrap.dedent('''\
+    (tmp_path / "mixins.py").write_text(
+        textwrap.dedent("""\
         class LogMixin:
             def log(self):
                 pass
@@ -248,14 +262,17 @@ def multi_base_repo(tmp_path):
         class SerializeMixin:
             def serialize(self):
                 pass
-    '''))
-    (tmp_path / "service.py").write_text(textwrap.dedent('''\
+    """)
+    )
+    (tmp_path / "service.py").write_text(
+        textwrap.dedent('''\
         from mixins import LogMixin, SerializeMixin
 
         class Service(LogMixin, SerializeMixin):
             """Service with multiple bases."""
             pass
-    '''))
+    ''')
+    )
     return str(tmp_path)
 
 
@@ -269,8 +286,7 @@ def test_extends_edge_created_for_local_base_class(inheritance_repo):
 
     # The Dog→Animal edge must have a resolved to_symbol
     dog_extends = [
-        e for e in extends_edges
-        if e.to_symbol is not None and "Animal" in (e.to_symbol or "")
+        e for e in extends_edges if e.to_symbol is not None and "Animal" in (e.to_symbol or "")
     ]
     assert len(dog_extends) >= 1, (
         f"Expected a resolved EXTENDS edge for Dog→Animal. Edges: {extends_edges}"
@@ -283,21 +299,21 @@ def test_extends_edge_created_for_local_base_class(inheritance_repo):
 
 def test_extends_edge_unresolved_for_external_base(tmp_path):
     """Python class inheriting from an external (stdlib/third-party) base → to_unresolved set."""
-    (tmp_path / "model.py").write_text(textwrap.dedent('''\
+    (tmp_path / "model.py").write_text(
+        textwrap.dedent("""\
         from pydantic import BaseModel
 
         class MyModel(BaseModel):
             name: str
-    '''))
+    """)
+    )
     builder = IndexBuilder(repo_path=str(tmp_path))
     products = builder.build()
 
     extends_edges = [e for e in products.edges if e.edge_type == EdgeType.EXTENDS]
     assert len(extends_edges) >= 1
 
-    base_model_edge = next(
-        (e for e in extends_edges if e.to_unresolved == "BaseModel"), None
-    )
+    base_model_edge = next((e for e in extends_edges if e.to_unresolved == "BaseModel"), None)
     assert base_model_edge is not None, (
         f"Expected an unresolved EXTENDS edge for BaseModel. Edges: {extends_edges}"
     )
@@ -307,11 +323,13 @@ def test_extends_edge_unresolved_for_external_base(tmp_path):
 
 def test_no_extends_edge_for_class_without_base(tmp_path):
     """A plain class with no base classes produces no EXTENDS edges."""
-    (tmp_path / "plain.py").write_text(textwrap.dedent('''\
+    (tmp_path / "plain.py").write_text(
+        textwrap.dedent('''\
         class Standalone:
             """No inheritance."""
             pass
-    '''))
+    ''')
+    )
     builder = IndexBuilder(repo_path=str(tmp_path))
     products = builder.build()
 
@@ -335,8 +353,12 @@ def test_multiple_bases_produce_multiple_extends_edges(multi_base_repo):
         e.to_symbol.split("#")[1].split("(")[0] if e.to_symbol else e.to_unresolved
         for e in extends_edges
     }
-    assert "LogMixin" in resolved_names or any("LogMixin" in (e.to_unresolved or "") for e in extends_edges)
-    assert "SerializeMixin" in resolved_names or any("SerializeMixin" in (e.to_unresolved or "") for e in extends_edges)
+    assert "LogMixin" in resolved_names or any(
+        "LogMixin" in (e.to_unresolved or "") for e in extends_edges
+    )
+    assert "SerializeMixin" in resolved_names or any(
+        "SerializeMixin" in (e.to_unresolved or "") for e in extends_edges
+    )
 
 
 def test_extends_edges_serializable(inheritance_repo):
@@ -356,13 +378,15 @@ def test_extends_edges_serializable(inheritance_repo):
 
 def test_extends_evidence_refs_point_to_class_definition(tmp_path):
     """The evidence_ref for an EXTENDS edge points to the subclass definition line."""
-    (tmp_path / "shapes.py").write_text(textwrap.dedent('''\
+    (tmp_path / "shapes.py").write_text(
+        textwrap.dedent("""\
         class Shape:
             pass
 
         class Circle(Shape):
             pass
-    '''))
+    """)
+    )
     builder = IndexBuilder(repo_path=str(tmp_path))
     products = builder.build()
 

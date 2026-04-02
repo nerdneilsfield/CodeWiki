@@ -1,5 +1,6 @@
 # codewiki/src/be/index/symbol_table.py
 """SymbolTable: indexed collection of Symbols with fast lookups."""
+
 from collections import defaultdict
 from typing import Optional
 

@@ -1,5 +1,6 @@
 # tests/test_index_import_graph.py
 """Tests for ImportGraph: file-level import edges and resolution."""
+
 import pytest
 from codewiki.src.be.index.models import ImportStatement, SymbolKind, SourceRange, Symbol
 from codewiki.src.be.index.import_graph import ImportGraph
@@ -8,16 +9,23 @@ from codewiki.src.be.index.symbol_table import SymbolTable
 
 def _imp(file_path, module_path, names=None, resolved=None, alias=None, line=1):
     return ImportStatement(
-        file_path=file_path, module_path=module_path,
-        imported_names=names or [], resolved_path=resolved,
-        alias=alias, line=line,
+        file_path=file_path,
+        module_path=module_path,
+        imported_names=names or [],
+        resolved_path=resolved,
+        alias=alias,
+        line=line,
     )
 
 
 def _sym(sid, name, file_path="src/a.py", kind=SymbolKind.FUNCTION):
     return Symbol(
-        symbol_id=sid, lang="python", kind=kind, name=name,
-        qualified_name=f"src.a.{name}", file_path=file_path,
+        symbol_id=sid,
+        lang="python",
+        kind=kind,
+        name=name,
+        qualified_name=f"src.a.{name}",
+        file_path=file_path,
         range=SourceRange(file_path=file_path, start_line=1, start_col=0, end_line=1, end_col=0),
         source_hash="h",
     )
@@ -69,7 +77,9 @@ def test_file_dependency_graph_skips_unresolved():
 
 def test_resolve_finds_symbol():
     imp = _imp("src/main.py", "./auth", ["LoginService"], resolved="src/auth.py")
-    sym = _sym("py:src/auth.py#LoginService(class)", "LoginService", "src/auth.py", SymbolKind.CLASS)
+    sym = _sym(
+        "py:src/auth.py#LoginService(class)", "LoginService", "src/auth.py", SymbolKind.CLASS
+    )
     st = SymbolTable([sym])
     ig = ImportGraph([imp])
     result = ig.resolve("src/main.py", "LoginService", st)
@@ -90,6 +100,7 @@ def test_all_imports():
 
 
 # ── New edge-case tests ───────────────────────────────────────────────────────
+
 
 def test_importers_of_deduplicates_when_same_file_imports_same_target_twice():
     """importers_of() deduplicates when the same file imports the same target multiple times."""

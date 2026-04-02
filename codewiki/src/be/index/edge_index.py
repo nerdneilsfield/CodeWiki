@@ -1,4 +1,5 @@
 """EdgeIndex: queryable index over SymbolEdge relationships."""
+
 from collections import defaultdict
 from typing import Optional
 

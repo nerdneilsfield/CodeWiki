@@ -190,9 +190,7 @@ class GenerationState:
         )
         for raw_task in data.get("tasks", []):
             task_fields = {
-                key: value
-                for key, value in raw_task.items()
-                if key in DocTask.__dataclass_fields__
+                key: value for key, value in raw_task.items() if key in DocTask.__dataclass_fields__
             }
             task = DocTask(**task_fields)
             existing_owner = state._output_file_index.get(task.output_file)

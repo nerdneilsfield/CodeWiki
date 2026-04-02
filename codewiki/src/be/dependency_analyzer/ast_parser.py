@@ -18,11 +18,13 @@ logger.setLevel(logging.DEBUG)
 
 class DependencyParser:
     """Parser for extracting code components from multi-language repositories."""
-    
-    def __init__(self, repo_path: str, include_patterns: List[str] = None, exclude_patterns: List[str] = None):
+
+    def __init__(
+        self, repo_path: str, include_patterns: List[str] = None, exclude_patterns: List[str] = None
+    ):
         """
         Initialize the dependency parser.
-        
+
         Args:
             repo_path: Path to the repository
             include_patterns: File patterns to include (e.g., ["*.cs", "*.py"])
@@ -33,38 +35,37 @@ class DependencyParser:
         self.modules: Set[str] = set()
         self.include_patterns = include_patterns
         self.exclude_patterns = exclude_patterns
-        
+
         self.analysis_service = AnalysisService()
 
     def parse_repository(self, filtered_folders: List[str] = None) -> Dict[str, Node]:
         logger.debug(f"Parsing repository at {self.repo_path}")
-        
+
         # Log custom patterns if set
         if self.include_patterns:
             logger.info(f"Using custom include patterns: {self.include_patterns}")
         if self.exclude_patterns:
             logger.info(f"Using custom exclude patterns: {self.exclude_patterns}")
-        
+
         structure_result = self.analysis_service._analyze_structure(
-            self.repo_path, 
+            self.repo_path,
             include_patterns=self.include_patterns,
-            exclude_patterns=self.exclude_patterns
+            exclude_patterns=self.exclude_patterns,
         )
-        
+
         call_graph_result = self.analysis_service._analyze_call_graph(
-            structure_result["file_tree"], 
-            self.repo_path
+            structure_result["file_tree"], self.repo_path
         )
-        
+
         self._build_components_from_analysis(call_graph_result)
-        
+
         logger.debug(f"Found {len(self.components)} components across {len(self.modules)} modules")
         return self.components
-    
+
     def _build_components_from_analysis(self, call_graph_result: Dict):
         functions = call_graph_result.get("functions", [])
         relationships = call_graph_result.get("relationships", [])
-        
+
         component_id_mapping = {}
         name_to_comp_ids: dict[str, list[str]] = defaultdict(list)
 
@@ -72,11 +73,13 @@ class DependencyParser:
             component_id = func_dict.get("id", "")
             if not component_id:
                 continue
-                
+
             node = Node(
                 id=component_id,
                 name=func_dict.get("name", ""),
-                component_type=func_dict.get("component_type", func_dict.get("node_type", "function")),
+                component_type=func_dict.get(
+                    "component_type", func_dict.get("node_type", "function")
+                ),
                 file_path=func_dict.get("file_path", ""),
                 relative_path=func_dict.get("relative_path", ""),
                 source_code=func_dict.get("source_code", func_dict.get("code_snippet", "")),
@@ -94,9 +97,9 @@ class DependencyParser:
                 is_hls_kernel=func_dict.get("is_hls_kernel", False),
                 hls_pragmas=func_dict.get("hls_pragmas") or None,
             )
-            
+
             self.components[component_id] = node
-            
+
             component_id_mapping[component_id] = component_id
             legacy_id = f"{func_dict.get('file_path', '')}:{func_dict.get('name', '')}"
             if legacy_id and legacy_id != component_id:
@@ -111,11 +114,11 @@ class DependencyParser:
                 name_to_comp_ids[_short_name].append(component_id)
 
             if "." in component_id:
-                module_parts = component_id.split(".")[:-1]  
+                module_parts = component_id.split(".")[:-1]
                 module_path = ".".join(module_parts)
                 if module_path:
                     self.modules.add(module_path)
-        
+
         processed_relationships = 0
         for rel_dict in relationships:
             caller_id = rel_dict.get("caller", "")
@@ -159,40 +162,66 @@ class DependencyParser:
                 if dep_comp_id != caller_comp_id:
                     self.components[caller_comp_id].depends_on.add(dep_comp_id)
                     processed_relationships += 1
-    
+
     def _determine_component_type(self, func_dict: Dict) -> str:
         if func_dict.get("is_method", False):
             return "method"
-        
+
         node_type = func_dict.get("node_type", "")
-        if node_type in ["class", "interface", "struct", "enum", "record", "abstract class", "annotation", "delegate"]:
+        if node_type in [
+            "class",
+            "interface",
+            "struct",
+            "enum",
+            "record",
+            "abstract class",
+            "annotation",
+            "delegate",
+        ]:
             return node_type
-            
+
         return "function"
-    
+
     def _file_to_module_path(self, file_path: str) -> str:
         path = file_path
-        extensions = ['.py', '.js', '.ts', '.java', '.cs', '.cpp', '.hpp', '.h', '.c', '.tsx', '.jsx', '.cc', '.mjs', '.cxx', '.cc', '.cjs']
+        extensions = [
+            ".py",
+            ".js",
+            ".ts",
+            ".java",
+            ".cs",
+            ".cpp",
+            ".hpp",
+            ".h",
+            ".c",
+            ".tsx",
+            ".jsx",
+            ".cc",
+            ".mjs",
+            ".cxx",
+            ".cc",
+            ".cjs",
+        ]
         for ext in extensions:
             if path.endswith(ext):
-                path = path[:-len(ext)]
+                path = path[: -len(ext)]
                 break
         return path.replace(os.path.sep, ".")
-    
+
     def save_dependency_graph(self, output_path: str):
         result = {}
         for component_id, component in self.components.items():
             component_dict = component.model_dump()
-            if 'depends_on' in component_dict and isinstance(component_dict['depends_on'], set):
-                component_dict['depends_on'] = list(component_dict['depends_on'])
+            if "depends_on" in component_dict and isinstance(component_dict["depends_on"], set):
+                component_dict["depends_on"] = list(component_dict["depends_on"])
             result[component_id] = component_dict
-        
+
         dir_name = os.path.dirname(output_path)
         if dir_name:
             os.makedirs(dir_name, exist_ok=True)
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
+
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2, ensure_ascii=False)
-        
+
         logger.debug(f"Saved {len(self.components)} components to {output_path}")
         return result

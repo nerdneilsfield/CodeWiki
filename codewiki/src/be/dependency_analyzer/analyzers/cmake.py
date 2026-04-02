@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 
 from tree_sitter import Parser, Language
+
 try:
     import tree_sitter_cmake
 except ImportError as _exc:
@@ -17,11 +18,18 @@ logger = logging.getLogger(__name__)
 
 # CMake commands that represent meaningful structural relationships
 _STRUCTURAL_COMMANDS = {
-    "add_executable", "add_library", "add_subdirectory",
-    "include", "find_package", "target_link_libraries",
-    "target_include_directories", "target_compile_options",
-    "add_custom_target", "add_custom_command",
-    "install", "configure_file",
+    "add_executable",
+    "add_library",
+    "add_subdirectory",
+    "include",
+    "find_package",
+    "target_link_libraries",
+    "target_include_directories",
+    "target_compile_options",
+    "add_custom_target",
+    "add_custom_command",
+    "install",
+    "configure_file",
 }
 
 
@@ -44,7 +52,7 @@ class TreeSitterCMakeAnalyzer:
             rel_path = str(self.file_path)
         for ext in (".cmake", ".txt"):
             if rel_path.endswith(ext):
-                rel_path = rel_path[:-len(ext)]
+                rel_path = rel_path[: -len(ext)]
                 break
         return rel_path.replace("/", ".").replace("\\", ".")
 
@@ -92,7 +100,9 @@ class TreeSitterCMakeAnalyzer:
                             component_type="function",
                             file_path=str(self.file_path),
                             relative_path=self._get_relative_path(),
-                            source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                            source_code="\n".join(
+                                lines[node.start_point[0] : node.end_point[0] + 1]
+                            ),
                             start_line=node.start_point[0] + 1,
                             end_line=node.end_point[0] + 1,
                             has_docstring=False,
@@ -122,7 +132,9 @@ class TreeSitterCMakeAnalyzer:
                             component_type="macro",
                             file_path=str(self.file_path),
                             relative_path=self._get_relative_path(),
-                            source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                            source_code="\n".join(
+                                lines[node.start_point[0] : node.end_point[0] + 1]
+                            ),
                             start_line=node.start_point[0] + 1,
                             end_line=node.end_point[0] + 1,
                             has_docstring=False,
@@ -150,12 +162,14 @@ class TreeSitterCMakeAnalyzer:
                     caller = self._find_containing_fn(node, top_level_nodes)
                     callee_id = self._get_component_id(cmd_name)
                     if caller:
-                        self.call_relationships.append(CallRelationship(
-                            caller=caller,
-                            callee=callee_id,
-                            call_line=node.start_point[0] + 1,
-                            is_resolved=True,
-                        ))
+                        self.call_relationships.append(
+                            CallRelationship(
+                                caller=caller,
+                                callee=callee_id,
+                                call_line=node.start_point[0] + 1,
+                                is_resolved=True,
+                            )
+                        )
                 # Specific source-file-aware commands
                 elif cmd_name in ("add_executable", "add_library"):
                     args = next((c for c in node.children if c.type == "argument_list"), None)
@@ -170,33 +184,47 @@ class TreeSitterCMakeAnalyzer:
                             # causing the CMakeLists file content to be skipped.
                             if target_id not in self._build_targets:
                                 self._build_targets.add(target_id)
-                                comp_type = "executable" if cmd_name == "add_executable" else "library"
-                                self.nodes.append(Node(
-                                    id=target_id,
-                                    name=target_name,
-                                    component_type=comp_type,
-                                    file_path=str(self.file_path),
-                                    relative_path=self._get_relative_path(),
-                                    source_code="\n".join(
-                                        self._lines[node.start_point[0]:node.end_point[0] + 1]
-                                    ),
-                                    start_line=node.start_point[0] + 1,
-                                    end_line=node.end_point[0] + 1,
-                                    node_type=comp_type,
-                                    display_name=f"{cmd_name}({target_name})",
-                                    component_id=target_id,
-                                ))
-                            skip_keywords = {"STATIC", "SHARED", "MODULE", "OBJECT", "INTERFACE", "IMPORTED", "ALIAS"}
+                                comp_type = (
+                                    "executable" if cmd_name == "add_executable" else "library"
+                                )
+                                self.nodes.append(
+                                    Node(
+                                        id=target_id,
+                                        name=target_name,
+                                        component_type=comp_type,
+                                        file_path=str(self.file_path),
+                                        relative_path=self._get_relative_path(),
+                                        source_code="\n".join(
+                                            self._lines[node.start_point[0] : node.end_point[0] + 1]
+                                        ),
+                                        start_line=node.start_point[0] + 1,
+                                        end_line=node.end_point[0] + 1,
+                                        node_type=comp_type,
+                                        display_name=f"{cmd_name}({target_name})",
+                                        component_id=target_id,
+                                    )
+                                )
+                            skip_keywords = {
+                                "STATIC",
+                                "SHARED",
+                                "MODULE",
+                                "OBJECT",
+                                "INTERFACE",
+                                "IMPORTED",
+                                "ALIAS",
+                            }
                             for arg in arg_nodes[1:]:
                                 val = self._node_text(arg).strip()
                                 if val and val not in skip_keywords and not val.startswith("$"):
-                                    self.call_relationships.append(CallRelationship(
-                                        caller=target_id,
-                                        callee=val,
-                                        call_line=node.start_point[0] + 1,
-                                        is_resolved=False,
-                                        relationship_type="compile_target",
-                                    ))
+                                    self.call_relationships.append(
+                                        CallRelationship(
+                                            caller=target_id,
+                                            callee=val,
+                                            call_line=node.start_point[0] + 1,
+                                            is_resolved=False,
+                                            relationship_type="compile_target",
+                                        )
+                                    )
                 elif cmd_name == "target_link_libraries":
                     args = next((c for c in node.children if c.type == "argument_list"), None)
                     if args:
@@ -208,13 +236,15 @@ class TreeSitterCMakeAnalyzer:
                             for arg in arg_nodes[1:]:
                                 val = self._node_text(arg).strip()
                                 if val and val not in skip_keywords and not val.startswith("$"):
-                                    self.call_relationships.append(CallRelationship(
-                                        caller=target_id,
-                                        callee=val,
-                                        call_line=node.start_point[0] + 1,
-                                        is_resolved=False,
-                                        relationship_type="link_dependency",
-                                    ))
+                                    self.call_relationships.append(
+                                        CallRelationship(
+                                            caller=target_id,
+                                            callee=val,
+                                            call_line=node.start_point[0] + 1,
+                                            is_resolved=False,
+                                            relationship_type="link_dependency",
+                                        )
+                                    )
                 # Generic structural dependency (include, find_package, etc.)
                 elif cmd_name in _STRUCTURAL_COMMANDS:
                     args = next((c for c in node.children if c.type == "argument_list"), None)
@@ -225,12 +255,14 @@ class TreeSitterCMakeAnalyzer:
                             caller = self._find_containing_fn(node, top_level_nodes)
                             callee_ref = f"{cmd_name}:{target_name}"
                             if caller:
-                                self.call_relationships.append(CallRelationship(
-                                    caller=caller,
-                                    callee=callee_ref,
-                                    call_line=node.start_point[0] + 1,
-                                    is_resolved=False,
-                                ))
+                                self.call_relationships.append(
+                                    CallRelationship(
+                                        caller=caller,
+                                        callee=callee_ref,
+                                        call_line=node.start_point[0] + 1,
+                                        is_resolved=False,
+                                    )
+                                )
 
         for child in node.children:
             self._extract_relationships(child, top_level_nodes)

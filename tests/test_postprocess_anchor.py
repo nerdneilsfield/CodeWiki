@@ -2,6 +2,7 @@
 
 Written BEFORE implementation (TDD RED phase).
 """
+
 import pytest
 
 from codewiki.src.be.postprocess.anchor import heading_to_slug, extract_heading_text

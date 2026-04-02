@@ -16,7 +16,12 @@ from pathlib import Path
 from string import Template
 from typing import Dict, Any, Optional
 
-from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc, _normalize_for_match
+from codewiki.src.utils import (
+    file_manager,
+    module_doc_filename,
+    find_module_doc,
+    _normalize_for_match,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -302,6 +307,7 @@ document.addEventListener('DOMContentLoaded',cwRenderMath);
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def _resolve_nav_hrefs(
     module_tree: Dict[str, Any],
     docs_dir: str,
@@ -321,7 +327,9 @@ def _resolve_nav_hrefs(
         doc_filename = data.get("_doc_filename")
         if doc_filename:
             found_path = os.path.join(docs_dir, doc_filename)
-            result[map_key] = doc_filename.replace(".md", ".html") if os.path.exists(found_path) else None
+            result[map_key] = (
+                doc_filename.replace(".md", ".html") if os.path.exists(found_path) else None
+            )
         else:
             found = find_module_doc(docs_dir, module_path)
             if found:
@@ -334,17 +342,46 @@ def _resolve_nav_hrefs(
     return result
 
 
+def _extract_h1_titles(md_files: list) -> Dict[str, str]:
+    """Extract the first Markdown H1 heading from each file.
+
+    Returns ``{filename_stem: h1_text}`` — e.g. ``{"cli": "CLI 传输与事件流"}``.
+    The H1 in generated docs is already in the target language, so this gives
+    us localized nav labels without extra LLM calls.
+    """
+    _H1_RE = re.compile(r"^#\s+(.+)$", re.MULTILINE)
+    titles: Dict[str, str] = {}
+    for md_path in md_files:
+        try:
+            # Only read the first 500 bytes — H1 is always at the top
+            with open(md_path, "r", encoding="utf-8") as f:
+                head = f.read(500)
+            m = _H1_RE.search(head)
+            if m:
+                titles[md_path.stem] = m.group(1).strip()
+        except OSError:
+            pass
+    return titles
+
+
 def _build_nav_html(
     module_tree: Dict[str, Any],
     current_html: str,
     depth: int = 0,
     resolved_hrefs: Optional[Dict[str, Optional[str]]] = None,
     parent_path: Optional[list[str]] = None,
+    h1_titles: Optional[Dict[str, str]] = None,
 ) -> str:
-    """Recursively build sidebar nav HTML from the module tree."""
+    """Recursively build sidebar nav HTML from the module tree.
+
+    When *h1_titles* is provided, nav labels are taken from the generated
+    docs' first heading (already in the target language).  Falls back to
+    the tree key when no H1 was extracted.
+    """
     lines: list[str] = []
     indent = "  " * (depth + 1)
     base_path = parent_path or []
+    titles = h1_titles or {}
 
     for key, data in module_tree.items():
         module_path = base_path + [key]
@@ -352,19 +389,22 @@ def _build_nav_html(
         href = (resolved_hrefs or {}).get(map_key)
         has_page = href is not None
         if not href:
-            href = data.get("_doc_filename", module_doc_filename(module_path)).replace(".md", ".html")
-        active = ' on' if _normalize_for_match(current_html) == _normalize_for_match(href) else ''
+            href = data.get("_doc_filename", module_doc_filename(module_path)).replace(
+                ".md", ".html"
+            )
+        active = " on" if _normalize_for_match(current_html) == _normalize_for_match(href) else ""
         pl = depth * 12
-        nav_key = f"{key}-d{depth}".replace('.', '-').replace('/', '-').replace(' ', '-')
+        nav_key = f"{key}-d{depth}".replace(".", "-").replace("/", "-").replace(" ", "-")
         children = data.get("children") or {}
-        label = key.replace("_", " ").title()
 
-        lines.append(f'{indent}<div>')
+        # Prefer localized H1 title from the generated doc, fall back to tree key
+        doc_stem = href.removesuffix(".html") if href else ""
+        label = titles.get(doc_stem, key.replace("_", " ").title())
+
+        lines.append(f"{indent}<div>")
         lines.append(f'{indent}  <div class="nav-row" style="padding-left:{pl}px;">')
         if has_page:
-            lines.append(
-                f'{indent}    <a href="{href}" class="nv{active}">{label}</a>'
-            )
+            lines.append(f'{indent}    <a href="{href}" class="nv{active}">{label}</a>')
         else:
             lines.append(
                 f'{indent}    <span class="nv-missing" title="Documentation not yet generated">{label}</span>'
@@ -373,14 +413,18 @@ def _build_nav_html(
             lines.append(
                 f'{indent}    <button class="nvcaret" data-nav="{nav_key}" aria-label="Toggle">›</button>'
             )
-        lines.append(f'{indent}  </div>')
+        lines.append(f"{indent}  </div>")
 
         if children:
             lines.append(f'{indent}  <div class="nvsub" data-nav-sub="{nav_key}">')
-            lines.append(_build_nav_html(children, current_html, depth + 1, resolved_hrefs, module_path))
-            lines.append(f'{indent}  </div>')
+            lines.append(
+                _build_nav_html(
+                    children, current_html, depth + 1, resolved_hrefs, module_path, titles
+                )
+            )
+            lines.append(f"{indent}  </div>")
 
-        lines.append(f'{indent}</div>')
+        lines.append(f"{indent}</div>")
 
     return "\n".join(lines)
 
@@ -406,14 +450,13 @@ def _build_meta_html(metadata: Optional[Dict[str, Any]], hide_repo_links: bool =
         repo_url = gi.get("repo_url")
         if repo_url:
             link_parts.append(
-                f'<a href="{repo_url}" target="_blank" rel="noopener">'
-                f'&#128279; Repository</a>'
+                f'<a href="{repo_url}" target="_blank" rel="noopener">&#128279; Repository</a>'
             )
-            if 'github.com' in repo_url:
-                slug = repo_url.split('github.com/')[-1]
+            if "github.com" in repo_url:
+                slug = repo_url.split("github.com/")[-1]
                 link_parts.append(
                     f'<a href="https://deepwiki.com/{slug}" target="_blank" rel="noopener">'
-                    f'&#127760; DeepWiki</a>'
+                    f"&#127760; DeepWiki</a>"
                 )
 
     if not parts and not link_parts:
@@ -431,6 +474,7 @@ def _build_meta_html(metadata: Optional[Dict[str, Any]], hide_repo_links: bool =
 
 def _rewrite_md_to_html_links(html: str) -> str:
     """Replace href="something.md" with href="something.html" in rendered HTML."""
+
     def _replace(m: re.Match) -> str:
         href = m.group(1)
         if href.startswith("http") or href.startswith("#"):
@@ -451,27 +495,30 @@ def _rewrite_md_to_html_links(html: str) -> str:
         else:
             href = href + suffix
         return f'href="{href}"'
+
     return re.sub(r'href="([^"]*)"', _replace, html)
 
 
 def _fix_markdown_links(content: str) -> str:
     """Percent-encode spaces in markdown link URLs so the parser handles them."""
+
     def _fix_url(m: re.Match) -> str:
         text, url = m.group(1), m.group(2)
         if " " in url:
             url = url.replace(" ", "%20")
         return f"[{text}]({url})"
+
     return re.sub(r"\[([^\]]*)\]\(([^)]*)\)", _fix_url, content)
 
 
 # Pre-compiled regex for server-side math delimiter normalisation.
-_CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf]')
-_DISPLAY_MATH_RE = re.compile(r'\$\$([^$]+?)\$\$', re.DOTALL)
-_INLINE_MATH_RE = re.compile(r'\$(?!\s)([^$\n]+?)\$(?!\$)')
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
+_DISPLAY_MATH_RE = re.compile(r"\$\$([^$]+?)\$\$", re.DOTALL)
+_INLINE_MATH_RE = re.compile(r"\$(?!\s)([^$\n]+?)\$(?!\$)")
 # Backslash-delimited math: \[...\] and \(...\) — generated directly by some LLMs.
 # Must be extracted before markdown-it, which otherwise escapes \[ → [ per CommonMark.
-_DISPLAY_MATH_BK_RE = re.compile(r'\\\[(.+?)\\\]', re.DOTALL)
-_INLINE_MATH_BK_RE  = re.compile(r'\\\((.+?)\\\)')
+_DISPLAY_MATH_BK_RE = re.compile(r"\\\[(.+?)\\\]", re.DOTALL)
+_INLINE_MATH_BK_RE = re.compile(r"\\\((.+?)\\\)")
 
 
 def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
@@ -488,6 +535,7 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
     $$...$$ is processed first to avoid partial matches with $...$.
     """
     import html as _html
+
     protected: list[tuple[str, str]] = []
 
     def _display(m: re.Match) -> str:
@@ -495,7 +543,7 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
         if _CJK_RE.search(inner):
             return m.group(0)
         idx = len(protected)
-        ph = f'CWIKIMD{idx:06d}'
+        ph = f"CWIKIMD{idx:06d}"
         # HTML-escape so & < > are safe in the DOM; KaTeX reads textContent
         # which the browser decodes back to the original LaTeX characters.
         escaped = _html.escape(inner, quote=False)
@@ -511,7 +559,7 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
         if (before and _CJK_RE.search(before[-1])) or (after and _CJK_RE.search(after[0])):
             return m.group(0)
         idx = len(protected)
-        ph = f'CWIKIMI{idx:06d}'
+        ph = f"CWIKIMI{idx:06d}"
         escaped = _html.escape(inner, quote=False)
         protected.append((ph, f'<span class="math-inline">\\({escaped}\\)</span>'))
         return ph
@@ -532,7 +580,7 @@ def _restore_math_blocks(html: str, protected: list[tuple[str, str]]) -> str:
     that wrapper when restoring display-math divs.
     """
     for ph, math_html in protected:
-        html = html.replace(f'<p>{ph}</p>', math_html)
+        html = html.replace(f"<p>{ph}</p>", math_html)
         html = html.replace(ph, math_html)
     return html
 
@@ -541,10 +589,12 @@ def _restore_math_blocks(html: str, protected: list[tuple[str, str]]) -> str:
 # which may not be installed in every environment).
 _md_parser = None
 
+
 def _get_md_parser():
     global _md_parser
     if _md_parser is None:
         from markdown_it import MarkdownIt
+
         _md_parser = MarkdownIt().enable("table").enable("strikethrough")
     return _md_parser
 
@@ -562,10 +612,13 @@ def _markdown_to_static_html(content: str) -> str:
 
     # Handle mermaid fences
     import html as html_module
+
     mermaid_re = re.compile(r'<pre><code class="language-mermaid">(.*?)</code></pre>', re.DOTALL)
+
     def _mermaid(m: re.Match) -> str:
         code = html_module.unescape(m.group(1))
         return f'<div class="mermaid">{code}</div>'
+
     html = mermaid_re.sub(_mermaid, html)
 
     # Rewrite .md links to .html
@@ -576,6 +629,7 @@ def _markdown_to_static_html(content: str) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 # Main generator
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class StaticHTMLGenerator:
     """
@@ -621,9 +675,7 @@ class StaticHTMLGenerator:
         meta_html = _build_meta_html(metadata, hide_repo_links=hide_repo_links)
 
         # Collect all .md files
-        md_files = sorted(
-            f for f in docs_dir.glob("*.md") if not f.name.startswith("_")
-        )
+        md_files = sorted(f for f in docs_dir.glob("*.md") if not f.name.startswith("_"))
         if not md_files:
             logger.warning(f"No .md files found in {docs_dir}")
             return []
@@ -633,11 +685,15 @@ class StaticHTMLGenerator:
         # structure changed between runs (different path prefixes).
         resolved_hrefs = _resolve_nav_hrefs(module_tree, str(docs_dir)) if module_tree else {}
 
+        # Build filename → H1 title map for localized nav labels.
+        # Each generated .md file's first heading is already in the target language.
+        h1_titles = _extract_h1_titles(md_files)
+
         written: list[str] = []
 
         for md_path in md_files:
-            stem = md_path.stem          # e.g. "overview", "auth"
-            html_name = f"{stem}.html"   # e.g. "overview.html"
+            stem = md_path.stem  # e.g. "overview", "auth"
+            html_name = f"{stem}.html"  # e.g. "overview.html"
 
             # Render markdown → HTML
             try:
@@ -657,60 +713,73 @@ class StaticHTMLGenerator:
             )
 
             # Build sidebar for this page
-            # 1. Overview (always present)
-            ov_active = ' on' if html_name in ("overview.html", "index.html") else ''
+            # 1. Overview (always present; use H1 from overview.md if available)
+            ov_active = " on" if html_name in ("overview.html", "index.html") else ""
+            ov_label = h1_titles.get("overview", "Overview")
             nav_html = (
                 f'  <div class="nav-row">\n'
-                f'    <a href="index.html" class="nv{ov_active}">Overview</a>\n'
-                f'  </div>\n'
+                f'    <a href="index.html" class="nv{ov_active}">{ov_label}</a>\n'
+                f"  </div>\n"
             )
 
             # 2. Guide pages (fixed order, only if files exist; independent of module_tree)
-            guide_pages = [
-                ("guide-getting-started", "Get Started"),
-                ("guide-beginners-guide", "Beginner's Guide"),
-                ("guide-build-and-organization", "Build & Code Organization"),
-                ("guide-core-algorithms", "Core Algorithms"),
-            ]
-            for slug, label in guide_pages:
+            _GUIDE_FALLBACK_LABELS = {
+                "guide-getting-started": "Get Started",
+                "guide-beginners-guide": "Beginner's Guide",
+                "guide-build-and-organization": "Build & Code Organization",
+                "guide-core-algorithms": "Core Algorithms",
+            }
+            for slug, fallback_label in _GUIDE_FALLBACK_LABELS.items():
                 md_file = docs_dir / f"{slug}.md"
                 if not md_file.exists():
                     continue
                 guide_html = slug + ".html"
-                active = ' on' if html_name == guide_html else ''
+                active = " on" if html_name == guide_html else ""
+                label = h1_titles.get(slug, fallback_label)
                 nav_html += (
                     f'  <div class="nav-row">\n'
                     f'    <a href="{guide_html}" class="nv{active}">{label}</a>\n'
-                    f'  </div>\n'
+                    f"  </div>\n"
                 )
                 # Sub-pages for multi-page guides
                 sub_prefix = slug + "-"
-                sub_pages = sorted([
-                    f for f in os.listdir(str(docs_dir))
-                    if f.startswith(sub_prefix) and f.endswith(".md")
-                ])
+                sub_pages = sorted(
+                    [
+                        f
+                        for f in os.listdir(str(docs_dir))
+                        if f.startswith(sub_prefix) and f.endswith(".md")
+                    ]
+                )
                 if sub_pages:
                     nav_html += f'  <div class="nvsub" style="display:block">\n'
                     for sub_file in sub_pages:
                         sub_html = sub_file.replace(".md", ".html")
-                        raw = sub_file[len(sub_prefix):-3]
-                        # "01-some-title" → "1. Some Title"
-                        m = re.match(r'^(\d+)-(.+)$', raw)
-                        if m:
-                            sub_label = f"{int(m.group(1))}. {m.group(2).replace('-', ' ').title()}"
-                        else:
-                            sub_label = raw.replace("-", " ").title()
-                        sub_active = ' on' if html_name == sub_html else ''
+                        sub_stem = sub_file.removesuffix(".md")
+                        # Prefer localized H1 title from the generated doc
+                        sub_label = h1_titles.get(sub_stem)
+                        if not sub_label:
+                            raw = sub_file[len(sub_prefix) : -3]
+                            # "01-some-title" → "1. Some Title"
+                            m = re.match(r"^(\d+)-(.+)$", raw)
+                            if m:
+                                sub_label = (
+                                    f"{int(m.group(1))}. {m.group(2).replace('-', ' ').title()}"
+                                )
+                            else:
+                                sub_label = raw.replace("-", " ").title()
+                        sub_active = " on" if html_name == sub_html else ""
                         nav_html += (
                             f'    <div class="nav-row" style="padding-left:24px">\n'
                             f'      <a href="{sub_html}" class="nv{sub_active}">{sub_label}</a>\n'
-                            f'    </div>\n'
+                            f"    </div>\n"
                         )
-                    nav_html += '  </div>\n'
+                    nav_html += "  </div>\n"
 
             # 3. Module tree (only when present)
             if module_tree:
-                nav_html += _build_nav_html(module_tree, html_name, resolved_hrefs=resolved_hrefs)
+                nav_html += _build_nav_html(
+                    module_tree, html_name, resolved_hrefs=resolved_hrefs, h1_titles=h1_titles
+                )
 
             page = _PAGE_TEMPLATE.safe_substitute(
                 title=title,

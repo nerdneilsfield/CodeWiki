@@ -68,25 +68,29 @@ def analyze_vitis_cfg(
 
         if top_func:
             component_id = f"{module_path}.{top_func}"
-            nodes.append(Node(
-                id=component_id,
-                name=top_func,
-                component_type="hls_top",
-                file_path=file_path,
-                relative_path=rel_path,
-                node_type="hls_top",
-                display_name=f"HLS top: {top_func}",
-                component_id=component_id,
-                is_hls_kernel=True,
-            ))
+            nodes.append(
+                Node(
+                    id=component_id,
+                    name=top_func,
+                    component_type="hls_top",
+                    file_path=file_path,
+                    relative_path=rel_path,
+                    node_type="hls_top",
+                    display_name=f"HLS top: {top_func}",
+                    component_id=component_id,
+                    is_hls_kernel=True,
+                )
+            )
 
             for src in source_files:
-                relationships.append(CallRelationship(
-                    caller=component_id,
-                    callee=src,
-                    relationship_type="hls_source",
-                    is_resolved=False,
-                ))
+                relationships.append(
+                    CallRelationship(
+                        caller=component_id,
+                        callee=src,
+                        relationship_type="hls_source",
+                        is_resolved=False,
+                    )
+                )
 
     # Parse [connectivity] section
     if "connectivity" in sections:
@@ -105,17 +109,19 @@ def analyze_vitis_cfg(
                     comp_id = f"{module_path}.{instance_name}"
                     if comp_id not in seen_kernel_instances:
                         seen_kernel_instances.add(comp_id)
-                        nodes.append(Node(
-                            id=comp_id,
-                            name=instance_name,
-                            component_type="kernel_instance",
-                            file_path=file_path,
-                            relative_path=rel_path,
-                            node_type="kernel_instance",
-                            display_name=f"kernel {kernel_name} as {instance_name}",
-                            component_id=comp_id,
-                            is_hls_kernel=True,
-                        ))
+                        nodes.append(
+                            Node(
+                                id=comp_id,
+                                name=instance_name,
+                                component_type="kernel_instance",
+                                file_path=file_path,
+                                relative_path=rel_path,
+                                node_type="kernel_instance",
+                                display_name=f"kernel {kernel_name} as {instance_name}",
+                                component_id=comp_id,
+                                is_hls_kernel=True,
+                            )
+                        )
 
             elif key == "stream_connect":
                 # stream_connect=src_inst.port:dst_inst.port
@@ -124,12 +130,14 @@ def analyze_vitis_cfg(
                     src, dst = parts
                     src_inst = src.split(".")[0] if "." in src else src
                     dst_inst = dst.split(".")[0] if "." in dst else dst
-                    relationships.append(CallRelationship(
-                        caller=f"{module_path}.{src_inst}",
-                        callee=f"{module_path}.{dst_inst}",
-                        relationship_type="stream_connect",
-                        is_resolved=True,
-                    ))
+                    relationships.append(
+                        CallRelationship(
+                            caller=f"{module_path}.{src_inst}",
+                            callee=f"{module_path}.{dst_inst}",
+                            relationship_type="stream_connect",
+                            is_resolved=True,
+                        )
+                    )
 
             elif key == "sp":
                 # sp=instance.port:memory_resource
@@ -144,22 +152,26 @@ def analyze_vitis_cfg(
                     comp_id = f"{module_path}.{inst}"
                     if comp_id not in seen_kernel_instances:
                         seen_kernel_instances.add(comp_id)
-                        nodes.append(Node(
-                            id=comp_id,
-                            name=inst,
-                            component_type="kernel_instance",
-                            file_path=file_path,
-                            relative_path=rel_path,
-                            node_type="kernel_instance",
-                            display_name=f"kernel instance: {inst}",
-                            component_id=comp_id,
-                            is_hls_kernel=True,
-                        ))
-                    relationships.append(CallRelationship(
-                        caller=comp_id,
-                        callee=memory,
-                        relationship_type="memory_map",
-                        is_resolved=False,
-                    ))
+                        nodes.append(
+                            Node(
+                                id=comp_id,
+                                name=inst,
+                                component_type="kernel_instance",
+                                file_path=file_path,
+                                relative_path=rel_path,
+                                node_type="kernel_instance",
+                                display_name=f"kernel instance: {inst}",
+                                component_id=comp_id,
+                                is_hls_kernel=True,
+                            )
+                        )
+                    relationships.append(
+                        CallRelationship(
+                            caller=comp_id,
+                            callee=memory,
+                            relationship_type="memory_map",
+                            is_resolved=False,
+                        )
+                    )
 
     return nodes, relationships

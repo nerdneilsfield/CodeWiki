@@ -1,7 +1,8 @@
 """Task 2: C analyzer enhancements — comprehensive tests"""
+
 from codewiki.src.be.dependency_analyzer.analyzers.c import analyze_c_file
 
-SAMPLE_C = '''
+SAMPLE_C = """
 #include <stdio.h>
 #include "myheader.h"
 
@@ -29,10 +30,11 @@ void process(Point* p, int count) {
     helper(count);
     printf("x=%d\\n", p->x);
 }
-'''
+"""
 
 
 # ── include extraction ─────────────────────────────────────────────────────────
+
 
 def test_include_extraction_count():
     nodes, rels = analyze_c_file("/tmp/test.c", SAMPLE_C, "/tmp")
@@ -64,6 +66,7 @@ def test_include_caller_is_file_node():
 
 # ── function call relationships ────────────────────────────────────────────────
 
+
 def test_call_relationship_type():
     nodes, rels = analyze_c_file("/tmp/test.c", SAMPLE_C, "/tmp")
     call_rels = [r for r in rels if r.relationship_type == "call"]
@@ -93,6 +96,7 @@ def test_field_expr_call_detected():
 
 # ── macro extraction ───────────────────────────────────────────────────────────
 
+
 def test_macro_extraction_count():
     nodes, rels = analyze_c_file("/tmp/test.c", SAMPLE_C, "/tmp")
     macros = [n for n in nodes if n.component_type == "macro"]
@@ -115,6 +119,7 @@ def test_macro_has_file_path():
 
 # ── enum extraction ────────────────────────────────────────────────────────────
 
+
 def test_enum_extraction():
     nodes, rels = analyze_c_file("/tmp/test.c", SAMPLE_C, "/tmp")
     enums = [n for n in nodes if n.component_type == "enum"]
@@ -129,6 +134,7 @@ def test_enum_name():
 
 # ── union extraction ───────────────────────────────────────────────────────────
 
+
 def test_union_extraction():
     nodes, rels = analyze_c_file("/tmp/test.c", SAMPLE_C, "/tmp")
     unions = [n for n in nodes if n.component_type == "union"]
@@ -137,6 +143,7 @@ def test_union_extraction():
 
 # ── struct extraction ──────────────────────────────────────────────────────────
 
+
 def test_typedef_struct_extraction():
     nodes, rels = analyze_c_file("/tmp/test.c", SAMPLE_C, "/tmp")
     structs = [n for n in nodes if n.component_type == "struct"]
@@ -144,6 +151,7 @@ def test_typedef_struct_extraction():
 
 
 # ── function nodes ─────────────────────────────────────────────────────────────
+
 
 def test_function_nodes_extracted():
     nodes, rels = analyze_c_file("/tmp/test.c", SAMPLE_C, "/tmp")

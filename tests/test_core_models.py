@@ -1,10 +1,16 @@
 """Task 1: core.py data model extensions — comprehensive tests"""
+
 from codewiki.src.be.dependency_analyzer.models.core import (
-    CallRelationship, DataFlowEdge, ParamInfo, HLSPragma, Node,
+    CallRelationship,
+    DataFlowEdge,
+    ParamInfo,
+    HLSPragma,
+    Node,
 )
 
 
 # ── CallRelationship ──────────────────────────────────────────────────────────
+
 
 def test_call_relationship_has_relationship_type():
     rel = CallRelationship(caller="a", callee="b", relationship_type="include")
@@ -27,16 +33,29 @@ def test_call_relationship_has_data_flow():
 
 def test_call_relationship_accepts_all_expected_types():
     for rtype in (
-        "include", "call", "calls", "inherits", "creates", "uses",
-        "header_impl", "hls_source", "hls_compile", "stream_connect",
-        "memory_map", "target_dep", "compile_dep", "header_dep",
-        "hls_synth", "hls_export",
+        "include",
+        "call",
+        "calls",
+        "inherits",
+        "creates",
+        "uses",
+        "header_impl",
+        "hls_source",
+        "hls_compile",
+        "stream_connect",
+        "memory_map",
+        "target_dep",
+        "compile_dep",
+        "header_dep",
+        "hls_synth",
+        "hls_export",
     ):
         rel = CallRelationship(caller="x", callee="y", relationship_type=rtype)
         assert rel.relationship_type == rtype
 
 
 # ── DataFlowEdge ──────────────────────────────────────────────────────────────
+
 
 def test_data_flow_edge_defaults():
     edge = DataFlowEdge(param_name="x")
@@ -63,6 +82,7 @@ def test_data_flow_edge_all_fields():
 
 # ── ParamInfo ─────────────────────────────────────────────────────────────────
 
+
 def test_param_info_pointer():
     p = ParamInfo(name="data", type_str="const int*", is_pointer=True, is_const=True)
     assert p.name == "data"
@@ -87,6 +107,7 @@ def test_param_info_defaults():
 
 
 # ── HLSPragma ─────────────────────────────────────────────────────────────────
+
 
 def test_hls_pragma_interface():
     pragma = HLSPragma(
@@ -120,10 +141,14 @@ def test_hls_pragma_defaults():
 
 # ── Node HLS fields ───────────────────────────────────────────────────────────
 
+
 def test_node_has_hls_fields():
     node = Node(
-        id="a.mm2s", name="mm2s", component_type="function",
-        file_path="/tmp/mm2s.cpp", relative_path="mm2s.cpp",
+        id="a.mm2s",
+        name="mm2s",
+        component_type="function",
+        file_path="/tmp/mm2s.cpp",
+        relative_path="mm2s.cpp",
         is_hls_kernel=True,
         hls_pragmas=[
             HLSPragma(pragma_type="INTERFACE", line=3, params={"port": "mem"}),
@@ -139,8 +164,11 @@ def test_node_has_hls_fields():
 
 def test_node_hls_fields_default():
     node = Node(
-        id="a.f", name="f", component_type="function",
-        file_path="/tmp/f.c", relative_path="f.c",
+        id="a.f",
+        name="f",
+        component_type="function",
+        file_path="/tmp/f.c",
+        relative_path="f.c",
     )
     assert node.is_hls_kernel is False
     assert node.hls_pragmas is None

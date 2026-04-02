@@ -6,6 +6,7 @@ from codewiki.src.config import Config
 if TYPE_CHECKING:
     from codewiki.src.be.module_tree_manager import ModuleTreeManager
 
+
 @dataclass
 class CodeWikiDeps:
     absolute_docs_path: str
@@ -19,11 +20,11 @@ class CodeWikiDeps:
     current_depth: int
     config: Config  # LLM configuration
     custom_instructions: str = None
-    module_tree_manager: Optional['ModuleTreeManager'] = None
-    fallback_models: Any = None        # pre-built FallbackModel from AgentOrchestrator
-    long_context_model: Any = None     # pre-built OpenAIModel (long context) or None
+    module_tree_manager: Optional["ModuleTreeManager"] = None
+    fallback_models: Any = None  # pre-built FallbackModel from AgentOrchestrator
+    long_context_model: Any = None  # pre-built OpenAIModel (long context) or None
     # v2: Index products and global assets for evidence-driven generation
-    index_products: Any = None         # IndexProducts or None
+    index_products: Any = None  # IndexProducts or None
     global_assets: Optional[dict] = None  # {"glossary": dict, "link_map": dict}
     assigned_doc_filename: str = ""
     gen_state: Any = None

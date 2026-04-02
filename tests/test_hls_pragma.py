@@ -1,7 +1,8 @@
 """Task 9: HLS pragma extraction — comprehensive tests"""
+
 from codewiki.src.be.dependency_analyzer.analyzers.cpp import analyze_cpp_file
 
-HLS_KERNEL = '''
+HLS_KERNEL = """
 extern "C" {
 void mm2s(int* mem, int size) {
 #pragma HLS INTERFACE m_axi port=mem offset=slave bundle=gmem
@@ -12,9 +13,9 @@ void mm2s(int* mem, int size) {
     }
 }
 }
-'''
+"""
 
-COMPLEX_KERNEL = '''
+COMPLEX_KERNEL = """
 extern "C" {
 void kernel(int* a, int* b, hls::stream<int>& fifo) {
 #pragma HLS INTERFACE m_axi port=a bundle=gmem0
@@ -30,17 +31,18 @@ void kernel(int* a, int* b, hls::stream<int>& fifo) {
     }
 }
 }
-'''
+"""
 
-NO_EXTERN_KERNEL = '''
+NO_EXTERN_KERNEL = """
 void regular_func(int* mem, int size) {
 #pragma HLS INTERFACE m_axi port=mem bundle=gmem
 #pragma HLS PIPELINE
 }
-'''
+"""
 
 
 # ── basic pragma extraction ────────────────────────────────────────────────────
+
 
 def test_pragma_count():
     nodes, rels = analyze_cpp_file("/tmp/kernel.cpp", HLS_KERNEL, "/tmp")
@@ -65,6 +67,7 @@ def test_pipeline_pragma_extracted():
 
 # ── pragma parameters ─────────────────────────────────────────────────────────
 
+
 def test_m_axi_port_param():
     nodes, rels = analyze_cpp_file("/tmp/kernel.cpp", HLS_KERNEL, "/tmp")
     func = next(n for n in nodes if n.name == "mm2s")
@@ -76,8 +79,7 @@ def test_m_axi_port_param():
 def test_s_axilite_params():
     nodes, rels = analyze_cpp_file("/tmp/kernel.cpp", HLS_KERNEL, "/tmp")
     func = next(n for n in nodes if n.name == "mm2s")
-    s_axilite = [p for p in func.hls_pragmas
-                 if p.params.get("subtype") == "s_axilite"]
+    s_axilite = [p for p in func.hls_pragmas if p.params.get("subtype") == "s_axilite"]
     assert len(s_axilite) >= 1
     assert any(p.params.get("bundle") == "control" for p in s_axilite)
 
@@ -91,6 +93,7 @@ def test_pipeline_ii_param():
 
 # ── hardware semantics ─────────────────────────────────────────────────────────
 
+
 def test_m_axi_hardware_semantic():
     nodes, rels = analyze_cpp_file("/tmp/kernel.cpp", HLS_KERNEL, "/tmp")
     func = next(n for n in nodes if n.name == "mm2s")
@@ -102,7 +105,10 @@ def test_s_axilite_hardware_semantic():
     nodes, rels = analyze_cpp_file("/tmp/kernel.cpp", HLS_KERNEL, "/tmp")
     func = next(n for n in nodes if n.name == "mm2s")
     s_axilite = next(p for p in func.hls_pragmas if p.params.get("subtype") == "s_axilite")
-    assert "AXI-Lite" in s_axilite.hardware_semantic or "control" in s_axilite.hardware_semantic.lower()
+    assert (
+        "AXI-Lite" in s_axilite.hardware_semantic
+        or "control" in s_axilite.hardware_semantic.lower()
+    )
 
 
 def test_pipeline_hardware_semantic():
@@ -113,6 +119,7 @@ def test_pipeline_hardware_semantic():
 
 
 # ── extern C kernel detection ──────────────────────────────────────────────────
+
 
 def test_extern_c_is_hls_kernel():
     nodes, rels = analyze_cpp_file("/tmp/kernel.cpp", HLS_KERNEL, "/tmp")
@@ -128,6 +135,7 @@ def test_non_extern_c_not_hls_kernel():
 
 
 # ── complex pragma types ───────────────────────────────────────────────────────
+
 
 def test_dataflow_pragma_extracted():
     nodes, rels = analyze_cpp_file("/tmp/kernel.cpp", COMPLEX_KERNEL, "/tmp")
@@ -162,6 +170,9 @@ def test_array_partition_pragma_extracted():
 def test_axis_interface_extracted():
     nodes, rels = analyze_cpp_file("/tmp/kernel.cpp", COMPLEX_KERNEL, "/tmp")
     func = next(n for n in nodes if n.name == "kernel")
-    axis_pragmas = [p for p in func.hls_pragmas
-                    if p.pragma_type == "INTERFACE" and p.params.get("subtype") == "axis"]
+    axis_pragmas = [
+        p
+        for p in func.hls_pragmas
+        if p.pragma_type == "INTERFACE" and p.params.get("subtype") == "axis"
+    ]
     assert len(axis_pragmas) >= 1

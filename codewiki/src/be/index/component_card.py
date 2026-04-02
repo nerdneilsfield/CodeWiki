@@ -1,5 +1,6 @@
 # codewiki/src/be/index/component_card.py
 """ComponentCard builder: creates LLM-facing symbol summaries."""
+
 import re
 
 from codewiki.src.be.index.models import Symbol, SymbolEdge, ComponentCard
@@ -33,8 +34,8 @@ class CardBuilder:
         if not doc:
             return ""
         # Split on sentence boundaries (period + space or end)
-        sentences = re.split(r'(?<=[.!?])\s+', doc.strip())
+        sentences = re.split(r"(?<=[.!?])\s+", doc.strip())
         summary = " ".join(sentences[:max_sentences]).strip()
         if len(summary) > CardBuilder._MAX_SUMMARY_CHARS:
-            summary = summary[:CardBuilder._MAX_SUMMARY_CHARS].rstrip() + "…"
+            summary = summary[: CardBuilder._MAX_SUMMARY_CHARS].rstrip() + "…"
         return summary

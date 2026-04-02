@@ -1,17 +1,32 @@
 # tests/test_index_symbol_table.py
 """Tests for SymbolTable lookups and invariants."""
+
 import pytest
 from codewiki.src.be.index.models import (
-    Symbol, SymbolKind, Visibility, ExportStatus, SourceRange,
+    Symbol,
+    SymbolKind,
+    Visibility,
+    ExportStatus,
+    SourceRange,
 )
 from codewiki.src.be.index.symbol_table import SymbolTable
 
 
-def _make_symbol(sid, name, kind=SymbolKind.FUNCTION, file_path="src/a.py",
-                 parent=None, visibility=Visibility.PUBLIC,
-                 export_status=ExportStatus.UNKNOWN, qname=None):
+def _make_symbol(
+    sid,
+    name,
+    kind=SymbolKind.FUNCTION,
+    file_path="src/a.py",
+    parent=None,
+    visibility=Visibility.PUBLIC,
+    export_status=ExportStatus.UNKNOWN,
+    qname=None,
+):
     return Symbol(
-        symbol_id=sid, lang="python", kind=kind, name=name,
+        symbol_id=sid,
+        lang="python",
+        kind=kind,
+        name=name,
         qualified_name=qname or f"src.a.{name}",
         file_path=file_path,
         range=SourceRange(file_path=file_path, start_line=1, start_col=0, end_line=10, end_col=0),
@@ -111,6 +126,7 @@ def test_all_files():
 
 # ── New edge-case tests ───────────────────────────────────────────────────────
 
+
 def test_search_is_case_insensitive():
     """search('foo') should find symbols with 'FooService', 'foobar', etc."""
     s1 = _make_symbol("s1", "FooService")
@@ -136,7 +152,9 @@ def test_search_returns_empty_list_when_no_match():
 def test_public_api_excludes_unknown_export_status():
     """Symbols with ExportStatus.UNKNOWN are NOT in public_api (only EXPORTED are)."""
     s_exported = _make_symbol("s1", "pub", export_status=ExportStatus.EXPORTED)
-    s_unknown = _make_symbol("s2", "unk", export_status=ExportStatus.UNKNOWN, visibility=Visibility.PUBLIC)
+    s_unknown = _make_symbol(
+        "s2", "unk", export_status=ExportStatus.UNKNOWN, visibility=Visibility.PUBLIC
+    )
     s_not_exported = _make_symbol("s3", "priv", export_status=ExportStatus.NOT_EXPORTED)
     st = SymbolTable([s_exported, s_unknown, s_not_exported])
     api = st.public_api()

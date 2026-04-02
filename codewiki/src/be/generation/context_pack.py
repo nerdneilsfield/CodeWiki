@@ -3,6 +3,7 @@
 Aligned with v3.md section 6.4 RETRIEVE_CONTEXT pseudocode.
 All filtering is component-level precise (not file-level).
 """
+
 import logging
 from typing import Any
 
@@ -76,16 +77,17 @@ def _build_module_symbol_ids(module_components, components, index_products) -> s
     Falls back to file-level matching if symbol_table is unavailable,
     or to card-based matching if neither is available.
     """
-    symbol_table = getattr(index_products, 'symbol_table', None)
+    symbol_table = getattr(index_products, "symbol_table", None)
 
     if symbol_table:
         from codewiki.src.be.clustering.graph_builder import extract_component_name
+
         symbol_ids: set[str] = set()
         for cid in module_components:
             node = components.get(cid)
             if not node:
                 continue
-            file_path = getattr(node, 'relative_path', '').replace('\\', '/')
+            file_path = getattr(node, "relative_path", "").replace("\\", "/")
             comp_name = extract_component_name(cid)
             for sym in symbol_table.by_file(file_path):
                 if sym.name == comp_name:
@@ -99,7 +101,9 @@ def _build_module_symbol_ids(module_components, components, index_products) -> s
                         logger.warning(
                             "Skipping ambiguous symbol %s: comp_name is empty "
                             "but file %s has %d symbols",
-                            sym.symbol_id, file_path, len(file_syms),
+                            sym.symbol_id,
+                            file_path,
+                            len(file_syms),
                         )
         return symbol_ids
 
@@ -108,16 +112,16 @@ def _build_module_symbol_ids(module_components, components, index_products) -> s
     for cid in module_components:
         node = components.get(cid)
         if node:
-            module_files.add(getattr(node, 'relative_path', '').replace('\\', '/'))
+            module_files.add(getattr(node, "relative_path", "").replace("\\", "/"))
 
     symbol_ids = set()
-    for card in getattr(index_products, 'cards', []):
+    for card in getattr(index_products, "cards", []):
         file_path = _extract_file(card.symbol_id)
         if file_path in module_files:
             symbol_ids.add(card.symbol_id)
 
     # Also include edge endpoints in module files
-    for edge in getattr(index_products, 'edges', []):
+    for edge in getattr(index_products, "edges", []):
         from_file = _extract_file(edge.from_symbol)
         if from_file in module_files:
             symbol_ids.add(edge.from_symbol)
@@ -255,13 +259,9 @@ def format_context_pack_section(context_pack: dict | None) -> str:
         )
 
     if context_pack.get("glossary_context"):
-        sections.append(
-            "<GLOSSARY>\n" + context_pack["glossary_context"] + "\n</GLOSSARY>"
-        )
+        sections.append("<GLOSSARY>\n" + context_pack["glossary_context"] + "\n</GLOSSARY>")
 
     if context_pack.get("link_map_context"):
-        sections.append(
-            "<LINK_MAP>\n" + context_pack["link_map_context"] + "\n</LINK_MAP>"
-        )
+        sections.append("<LINK_MAP>\n" + context_pack["link_map_context"] + "\n</LINK_MAP>")
 
     return "\n\n".join(sections)

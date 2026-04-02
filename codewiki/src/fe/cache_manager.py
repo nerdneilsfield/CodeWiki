@@ -15,14 +15,14 @@ from codewiki.src.utils import file_manager
 
 class CacheManager:
     """Manages documentation cache."""
-    
+
     def __init__(self, cache_dir: str = None, cache_expiry_days: int = None):
         self.cache_dir = Path(cache_dir or WebAppConfig.CACHE_DIR)
         self.cache_expiry_days = cache_expiry_days or WebAppConfig.CACHE_EXPIRY_DAYS
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_index: Dict[str, CacheEntry] = {}
         self.load_cache_index()
-    
+
     def load_cache_index(self):
         """Load cache index from disk."""
         index_file = self.cache_dir / "cache_index.json"
@@ -31,15 +31,15 @@ class CacheManager:
                 data = file_manager.load_json(index_file)
                 for key, value in data.items():
                     self.cache_index[key] = CacheEntry(
-                        repo_url=value['repo_url'],
-                        repo_url_hash=value['repo_url_hash'],
-                        docs_path=value['docs_path'],
-                        created_at=datetime.fromisoformat(value['created_at']),
-                        last_accessed=datetime.fromisoformat(value['last_accessed'])
+                        repo_url=value["repo_url"],
+                        repo_url_hash=value["repo_url_hash"],
+                        docs_path=value["docs_path"],
+                        created_at=datetime.fromisoformat(value["created_at"]),
+                        last_accessed=datetime.fromisoformat(value["last_accessed"]),
                     )
             except Exception as e:
                 print(f"Error loading cache index: {e}")
-    
+
     def save_cache_index(self):
         """Save cache index to disk."""
         index_file = self.cache_dir / "cache_index.json"
@@ -47,17 +47,17 @@ class CacheManager:
             data = {}
             for key, entry in self.cache_index.items():
                 data[key] = {
-                    'repo_url': entry.repo_url,
-                    'repo_url_hash': entry.repo_url_hash,
-                    'docs_path': entry.docs_path,
-                    'created_at': entry.created_at.isoformat(),
-                    'last_accessed': entry.last_accessed.isoformat()
+                    "repo_url": entry.repo_url,
+                    "repo_url_hash": entry.repo_url_hash,
+                    "docs_path": entry.docs_path,
+                    "created_at": entry.created_at.isoformat(),
+                    "last_accessed": entry.last_accessed.isoformat(),
                 }
-            
+
             file_manager.save_json(data, index_file)
         except Exception as e:
             print(f"Error saving cache index: {e}")
-    
+
     def get_repo_hash(self, repo_url: str, commit_id: Optional[str] = None) -> str:
         """Generate hash for repository URL and optional commit ID.
 
@@ -97,7 +97,7 @@ class CacheManager:
             repo_url_hash=repo_hash,
             docs_path=docs_path,
             created_at=now,
-            last_accessed=now
+            last_accessed=now,
         )
 
         self.save_cache_index()
@@ -108,18 +108,18 @@ class CacheManager:
         if repo_hash in self.cache_index:
             del self.cache_index[repo_hash]
             self.save_cache_index()
-    
+
     def cleanup_expired_cache(self):
         """Remove expired cache entries."""
         expired_entries = []
         cutoff = datetime.now() - timedelta(days=self.cache_expiry_days)
-        
+
         for repo_hash, entry in self.cache_index.items():
             if entry.created_at < cutoff:
                 expired_entries.append(repo_hash)
-        
+
         for repo_hash in expired_entries:
             del self.cache_index[repo_hash]
-        
+
         if expired_entries:
             self.save_cache_index()

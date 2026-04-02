@@ -21,6 +21,7 @@ import pytest
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _make_minimal_tree():
     return {"mod_a": {"components": [], "children": {}}}
 
@@ -73,6 +74,7 @@ def _make_tree_manager(tree):
 
 # ── tests ─────────────────────────────────────────────────────────────────────
 
+
 def test_progress_bar_closed_after_queue_completes(tmp_path):
     """progress.close() must be called after the queue drains."""
     gen = _make_generator(tmp_path)
@@ -94,10 +96,16 @@ def test_progress_bar_closed_after_queue_completes(tmp_path):
             closed_calls.append(True)
 
     with patch("codewiki.src.be.documentation_generator.tqdm", TrackingTqdm):
-        asyncio.run(gen._run_module_queue(
-            tree, {}, str(tmp_path), tm,
-            desc="test", include_root=False,
-        ))
+        asyncio.run(
+            gen._run_module_queue(
+                tree,
+                {},
+                str(tmp_path),
+                tm,
+                desc="test",
+                include_root=False,
+            )
+        )
 
     assert closed_calls, "progress.close() was never called"
 
@@ -130,10 +138,16 @@ def test_worker_closures_release_progress_before_close(tmp_path):
             self._closed = True
 
     with patch("codewiki.src.be.documentation_generator.tqdm", CaptureTqdm):
-        asyncio.run(gen._run_module_queue(
-            tree, {}, str(tmp_path), tm,
-            desc="test", include_root=False,
-        ))
+        asyncio.run(
+            gen._run_module_queue(
+                tree,
+                {},
+                str(tmp_path),
+                tm,
+                desc="test",
+                include_root=False,
+            )
+        )
 
     assert progress_ref, "tqdm was never instantiated"
 
@@ -179,9 +193,15 @@ def test_progress_closed_on_cancellation(tmp_path):
     with patch("codewiki.src.be.documentation_generator.tqdm", CountingTqdm):
         with patch("asyncio.Queue.join", _cancel_join):
             with pytest.raises((asyncio.CancelledError, Exception)):
-                asyncio.run(gen._run_module_queue(
-                    tree, {}, str(tmp_path), tm,
-                    desc="test", include_root=False,
-                ))
+                asyncio.run(
+                    gen._run_module_queue(
+                        tree,
+                        {},
+                        str(tmp_path),
+                        tm,
+                        desc="test",
+                        include_root=False,
+                    )
+                )
 
     assert close_called, "progress.close() not called after CancelledError"

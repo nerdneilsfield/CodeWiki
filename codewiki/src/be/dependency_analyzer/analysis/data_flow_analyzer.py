@@ -9,7 +9,9 @@ import re
 import logging
 from typing import Dict, List, Any
 from codewiki.src.be.dependency_analyzer.models.core import (
-    Node, CallRelationship, DataFlowEdge,
+    Node,
+    CallRelationship,
+    DataFlowEdge,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,21 +53,23 @@ class DataFlowAnalyzer:
                     param_name=param_name,
                     direction="in",
                 )
-                edges.append({
-                    "caller": rel.caller,
-                    "callee": rel.callee,
-                    "line": rel.call_line,
-                    "edge": edge.model_dump(),
-                })
+                edges.append(
+                    {
+                        "caller": rel.caller,
+                        "callee": rel.callee,
+                        "line": rel.call_line,
+                        "edge": edge.model_dump(),
+                    }
+                )
         return edges
 
     def _detect_ownership_patterns(self) -> List[Dict]:
         """Detect allocation/deallocation and ownership patterns in source code."""
         patterns = []
-        alloc_re = re.compile(r'\b(malloc|calloc|realloc|new)\b')
-        dealloc_re = re.compile(r'\b(free|delete)\b')
-        smart_re = re.compile(r'\b(unique_ptr|shared_ptr|make_unique|make_shared)\b')
-        move_re = re.compile(r'\bstd::move\b')
+        alloc_re = re.compile(r"\b(malloc|calloc|realloc|new)\b")
+        dealloc_re = re.compile(r"\b(free|delete)\b")
+        smart_re = re.compile(r"\b(unique_ptr|shared_ptr|make_unique|make_shared)\b")
+        move_re = re.compile(r"\bstd::move\b")
 
         for func_id, func in self.functions.items():
             if not func.source_code:

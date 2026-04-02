@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 _LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
 _AMBIGUOUS = object()
 
+
 def _normalize_stem(name: str) -> str:
     """Normalize a filename stem for suffix matching."""
     stem = os.path.splitext(name)[0]

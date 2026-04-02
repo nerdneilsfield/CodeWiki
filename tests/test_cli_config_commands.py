@@ -6,6 +6,7 @@ Tests for the config subcommands:
   - config set   (deprecated — shows warning)
   - config agent (deprecated — shows warning)
 """
+
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -42,6 +43,7 @@ def _write_toml(tmp_path: Path) -> Path:
 
 
 # ── config init ───────────────────────────────────────────────────────────────
+
 
 def test_config_init_creates_file(tmp_path):
     dest = tmp_path / "codewiki.toml"
@@ -97,6 +99,7 @@ def test_config_init_shows_next_steps(tmp_path):
 
 # ── config validate ───────────────────────────────────────────────────────────
 
+
 def test_config_validate_toml_succeeds_without_env_secrets(tmp_path):
     """validate must not require env: secrets to be present."""
     config_file = tmp_path / "config.toml"
@@ -110,6 +113,7 @@ def test_config_validate_toml_succeeds_without_env_secrets(tmp_path):
 
     # Ensure the env var is definitely absent
     import os
+
     os.environ.pop("OPENAI_API_KEY_THAT_IS_NOT_SET", None)
 
     result = _runner().invoke(config_group, ["validate", "--config", str(config_file)])
@@ -130,6 +134,7 @@ def test_config_show_toml_succeeds_without_env_secrets(tmp_path):
     )
 
     import os
+
     os.environ.pop("OPENAI_API_KEY_THAT_IS_NOT_SET", None)
 
     result = _runner().invoke(config_group, ["show", "--config", str(config_file)])
@@ -150,6 +155,7 @@ def test_config_validate_check_secrets_fails_when_env_missing(tmp_path):
     )
 
     import os
+
     os.environ.pop("OPENAI_KEY_DEFINITELY_NOT_SET", None)
 
     result = _runner().invoke(
@@ -191,9 +197,7 @@ def test_config_validate_toml_success(tmp_path):
     sentinel.providers = []
 
     with patch("codewiki.src.config_loader.load_app_config", return_value=sentinel):
-        result = _runner().invoke(
-            config_group, ["validate", "--config", str(config_file)]
-        )
+        result = _runner().invoke(config_group, ["validate", "--config", str(config_file)])
 
     assert result.exit_code == 0
     assert "valid" in result.output.lower()
@@ -224,9 +228,7 @@ def test_config_validate_toml_load_failure(tmp_path):
     config_file = _write_toml(tmp_path)
 
     with patch("codewiki.src.config_loader.load_app_config", side_effect=ValueError("bad ref")):
-        result = _runner().invoke(
-            config_group, ["validate", "--config", str(config_file)]
-        )
+        result = _runner().invoke(config_group, ["validate", "--config", str(config_file)])
 
     assert result.exit_code != 0
 
@@ -235,8 +237,10 @@ def test_config_validate_legacy_path_invoked_when_no_config():
     """Without --config, the legacy validation path is taken."""
     from codewiki.cli.commands import config as mod
 
-    with patch.object(mod, "_validate_legacy") as mock_legacy, \
-         patch.object(mod, "_validate_toml") as mock_toml:
+    with (
+        patch.object(mod, "_validate_legacy") as mock_legacy,
+        patch.object(mod, "_validate_toml") as mock_toml,
+    ):
         _runner().invoke(config_group, ["validate"])
 
     mock_legacy.assert_called_once()
@@ -244,6 +248,7 @@ def test_config_validate_legacy_path_invoked_when_no_config():
 
 
 # ── config show ───────────────────────────────────────────────────────────────
+
 
 def _make_show_sentinel():
     sentinel = MagicMock()
@@ -270,9 +275,7 @@ def test_config_show_toml_reads_config_file(tmp_path):
     config_file = _write_toml(tmp_path)
 
     with patch("codewiki.src.config_loader.load_app_config", return_value=_make_show_sentinel()):
-        result = _runner().invoke(
-            config_group, ["show", "--config", str(config_file)]
-        )
+        result = _runner().invoke(config_group, ["show", "--config", str(config_file)])
 
     assert result.exit_code == 0
     assert "openai/gpt-4o-mini" in result.output
@@ -280,12 +283,11 @@ def test_config_show_toml_reads_config_file(tmp_path):
 
 def test_config_show_toml_json_output(tmp_path):
     import json
+
     config_file = _write_toml(tmp_path)
 
     with patch("codewiki.src.config_loader.load_app_config", return_value=_make_show_sentinel()):
-        result = _runner().invoke(
-            config_group, ["show", "--config", str(config_file), "--json"]
-        )
+        result = _runner().invoke(config_group, ["show", "--config", str(config_file), "--json"])
 
     assert result.exit_code == 0
     parsed = json.loads(result.output)
@@ -296,8 +298,10 @@ def test_config_show_falls_back_to_legacy_without_config():
     """Without --config, _show_legacy is called, not _show_toml."""
     from codewiki.cli.commands import config as mod
 
-    with patch.object(mod, "_show_legacy") as mock_legacy, \
-         patch.object(mod, "_show_toml") as mock_toml:
+    with (
+        patch.object(mod, "_show_legacy") as mock_legacy,
+        patch.object(mod, "_show_toml") as mock_toml,
+    ):
         _runner().invoke(config_group, ["show"])
 
     mock_legacy.assert_called_once()
@@ -305,6 +309,7 @@ def test_config_show_falls_back_to_legacy_without_config():
 
 
 # ── config set (deprecated) ───────────────────────────────────────────────────
+
 
 def test_config_set_shows_deprecation_warning():
     result = _runner().invoke(config_group, ["set", "--help"])
@@ -324,6 +329,7 @@ def test_config_set_warning_contains_config_init_hint():
 
 
 # ── config agent (deprecated) ─────────────────────────────────────────────────
+
 
 def test_config_agent_shows_deprecation_warning():
     result = _runner().invoke(config_group, ["agent", "--help"])

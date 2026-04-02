@@ -10,14 +10,15 @@ from typing import Any, Optional, Dict, List
 # ---------------------- File Manager ---------------------
 # ------------------------------------------------------------
 
+
 class FileManager:
     """Handles file I/O operations."""
-    
+
     @staticmethod
     def ensure_directory(path: str) -> None:
         """Create directory if it doesn't exist."""
         os.makedirs(path, exist_ok=True)
-    
+
     @staticmethod
     def save_json(data: Any, filepath: str) -> None:
         """Save data as JSON to file."""
@@ -25,7 +26,7 @@ class FileManager:
         os.makedirs(parent_dir, exist_ok=True)
         tmp_fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", dir=parent_dir)
         try:
-            with os.fdopen(tmp_fd, 'w') as f:
+            with os.fdopen(tmp_fd, "w") as f:
                 json.dump(data, f, indent=4)
                 f.flush()
                 os.fsync(f.fileno())
@@ -36,29 +37,30 @@ class FileManager:
                     os.remove(tmp_path)
                 except Exception:
                     pass
-    
+
     @staticmethod
     def load_json(filepath: str) -> Optional[Dict[str, Any]]:
         """Load JSON from file, return None if file doesn't exist."""
         if not os.path.exists(filepath):
             return None
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, "r") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             return None
-    
+
     @staticmethod
     def save_text(content: str, filepath: str) -> None:
         """Save text content to file."""
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             f.write(content)
-    
+
     @staticmethod
     def load_text(filepath: str) -> str:
         """Load text content from file."""
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             return f.read()
+
 
 file_manager = FileManager()
 
@@ -71,6 +73,7 @@ def module_doc_filename(module_path: List[str]) -> str:
     unambiguous and stable across LLM clustering runs that may use hyphens
     or spaces interchangeably.
     """
+
     def _normalize_part(part: str) -> str:
         value = part.strip().lower()
         value = value.replace("&", " and ")
@@ -153,9 +156,7 @@ def find_module_doc(working_dir: str, module_path: List[str]) -> Optional[str]:
 
     # The leaf name for suffix matching (e.g. "session_runtime.md")
     leaf = module_path[-1] if module_path else ""
-    target_suffix = _normalize_for_match(
-        module_doc_filename([leaf]) if leaf else ""
-    )
+    target_suffix = _normalize_for_match(module_doc_filename([leaf]) if leaf else "")
 
     suffix_candidate: Optional[str] = None
     try:

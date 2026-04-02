@@ -7,4 +7,3 @@ def test_normalize_for_match_treats_ampersand_like_and_word():
 
 def test_normalize_for_match_strips_punctuation_and_ignores_case():
     assert _normalize_for_match("Query, Context.MD") == _normalize_for_match("query_context.md")
-

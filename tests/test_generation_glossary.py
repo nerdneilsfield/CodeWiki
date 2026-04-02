@@ -4,6 +4,7 @@ Follows TDD workflow: tests written before implementation.
 All external dependencies (IndexProducts, SymbolTable) are constructed
 from real models — no mocking needed because they are pure data structures.
 """
+
 import pytest
 
 from codewiki.src.be.index.models import (
@@ -19,6 +20,7 @@ from codewiki.src.be.index.symbol_table import SymbolTable
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_range() -> SourceRange:
     return SourceRange(
@@ -62,8 +64,8 @@ class _FakeIndexProducts:
 # build_glossary — unit tests
 # ---------------------------------------------------------------------------
 
-class TestBuildGlossary:
 
+class TestBuildGlossary:
     def test_build_glossary_from_public_api(self):
         """Two EXPORTED symbols with docstrings produce two glossary entries."""
         from codewiki.src.be.generation.glossary import build_glossary
@@ -103,7 +105,9 @@ class TestBuildGlossary:
         """Symbols with NOT_EXPORTED export_status are excluded from glossary."""
         from codewiki.src.be.generation.glossary import build_glossary
 
-        sym = _make_symbol("Internal", export_status=ExportStatus.NOT_EXPORTED, docstring="Private.")
+        sym = _make_symbol(
+            "Internal", export_status=ExportStatus.NOT_EXPORTED, docstring="Private."
+        )
         index_products = _FakeIndexProducts([sym])
 
         result = build_glossary(index_products)
@@ -190,8 +194,8 @@ class TestBuildGlossary:
 # build_link_map — unit tests
 # ---------------------------------------------------------------------------
 
-class TestBuildLinkMap:
 
+class TestBuildLinkMap:
     def test_build_link_map_simple(self):
         """module_tree with two top-level modules produces two entries."""
         from codewiki.src.be.generation.glossary import build_link_map
@@ -273,9 +277,24 @@ class TestBuildLinkMap:
         from codewiki.src.be.generation.glossary import build_link_map
 
         tree = {
-            "Z Module": {"path": "src/z", "_doc_filename": "src_z.md", "components": [], "children": {}},
-            "A Module": {"path": "src/a", "_doc_filename": "src_a.md", "components": [], "children": {}},
-            "M Module": {"path": "src/m", "_doc_filename": "src_m.md", "components": [], "children": {}},
+            "Z Module": {
+                "path": "src/z",
+                "_doc_filename": "src_z.md",
+                "components": [],
+                "children": {},
+            },
+            "A Module": {
+                "path": "src/a",
+                "_doc_filename": "src_a.md",
+                "components": [],
+                "children": {},
+            },
+            "M Module": {
+                "path": "src/m",
+                "_doc_filename": "src_m.md",
+                "components": [],
+                "children": {},
+            },
         }
 
         result = build_link_map(tree)

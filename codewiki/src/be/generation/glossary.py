@@ -2,6 +2,7 @@
 
 Aligned with v3.md section 3.4 L193-195.
 """
+
 import re
 from typing import Any
 
@@ -39,7 +40,7 @@ def build_glossary(
         # First sentence of docstring — use regex to avoid splitting on "e.g." or "i.e."
         doc_summary = ""
         if sym.docstring:
-            first_sentence = re.split(r'(?<=[.!?])\s+', sym.docstring.strip())[0]
+            first_sentence = re.split(r"(?<=[.!?])\s+", sym.docstring.strip())[0]
             doc_summary = first_sentence.strip()
             if not doc_summary.endswith((".", "!", "?")):
                 doc_summary += "."

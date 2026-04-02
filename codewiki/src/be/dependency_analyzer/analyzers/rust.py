@@ -80,7 +80,7 @@ class TreeSitterRustAnalyzer:
                     component_type=node_type,
                     file_path=str(self.file_path),
                     relative_path=self._get_relative_path(),
-                    source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                    source_code="\n".join(lines[node.start_point[0] : node.end_point[0] + 1]),
                     start_line=node.start_point[0] + 1,
                     end_line=node.end_point[0] + 1,
                     has_docstring=False,
@@ -108,7 +108,7 @@ class TreeSitterRustAnalyzer:
                     component_type="struct",
                     file_path=str(self.file_path),
                     relative_path=self._get_relative_path(),
-                    source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                    source_code="\n".join(lines[node.start_point[0] : node.end_point[0] + 1]),
                     start_line=node.start_point[0] + 1,
                     end_line=node.end_point[0] + 1,
                     has_docstring=False,
@@ -134,7 +134,7 @@ class TreeSitterRustAnalyzer:
                     component_type="enum",
                     file_path=str(self.file_path),
                     relative_path=self._get_relative_path(),
-                    source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                    source_code="\n".join(lines[node.start_point[0] : node.end_point[0] + 1]),
                     start_line=node.start_point[0] + 1,
                     end_line=node.end_point[0] + 1,
                     has_docstring=False,
@@ -160,7 +160,7 @@ class TreeSitterRustAnalyzer:
                     component_type="trait",
                     file_path=str(self.file_path),
                     relative_path=self._get_relative_path(),
-                    source_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                    source_code="\n".join(lines[node.start_point[0] : node.end_point[0] + 1]),
                     start_line=node.start_point[0] + 1,
                     end_line=node.end_point[0] + 1,
                     has_docstring=False,
@@ -178,8 +178,12 @@ class TreeSitterRustAnalyzer:
             for child in node.children:
                 if child.type == "declaration_list":
                     for trait_child in child.children:
-                        self._extract_nodes(trait_child, top_level_nodes, lines,
-                                            impl_type=self._node_text(name_node) if name_node else None)
+                        self._extract_nodes(
+                            trait_child,
+                            top_level_nodes,
+                            lines,
+                            impl_type=self._node_text(name_node) if name_node else None,
+                        )
             return
 
         elif node.type == "impl_item":
@@ -200,7 +204,9 @@ class TreeSitterRustAnalyzer:
             for child in node.children:
                 if child.type == "declaration_list":
                     for impl_child in child.children:
-                        self._extract_nodes(impl_child, top_level_nodes, lines, impl_type=impl_type_name)
+                        self._extract_nodes(
+                            impl_child, top_level_nodes, lines, impl_type=impl_type_name
+                        )
             return
 
         for child in node.children:
@@ -213,7 +219,9 @@ class TreeSitterRustAnalyzer:
         params = []
         for child in params_node.children:
             if child.type == "parameter":
-                pat_node = next((c for c in child.children if c.type in ["identifier", "pattern"]), None)
+                pat_node = next(
+                    (c for c in child.children if c.type in ["identifier", "pattern"]), None
+                )
                 if pat_node:
                     params.append(self._node_text(pat_node))
             elif child.type == "self_parameter":
@@ -228,12 +236,14 @@ class TreeSitterRustAnalyzer:
                 if caller_id:
                     callee_name = self._resolve_call_target(fn_node)
                     if callee_name and not self._is_builtin(callee_name):
-                        self.call_relationships.append(CallRelationship(
-                            caller=caller_id,
-                            callee=callee_name,
-                            call_line=node.start_point[0] + 1,
-                            is_resolved=False,
-                        ))
+                        self.call_relationships.append(
+                            CallRelationship(
+                                caller=caller_id,
+                                callee=callee_name,
+                                call_line=node.start_point[0] + 1,
+                                is_resolved=False,
+                            )
+                        )
 
         elif node.type == "impl_item":
             # impl Trait for Type → Type depends on Trait
@@ -243,12 +253,14 @@ class TreeSitterRustAnalyzer:
                 trait_name = self._node_text(type_nodes[0])
                 if not self._is_builtin(trait_name):
                     module_path = self._get_module_path()
-                    self.call_relationships.append(CallRelationship(
-                        caller=f"{module_path}.{impl_type}",
-                        callee=trait_name,
-                        call_line=node.start_point[0] + 1,
-                        is_resolved=False,
-                    ))
+                    self.call_relationships.append(
+                        CallRelationship(
+                            caller=f"{module_path}.{impl_type}",
+                            callee=trait_name,
+                            call_line=node.start_point[0] + 1,
+                            is_resolved=False,
+                        )
+                    )
 
         for child in node.children:
             self._extract_relationships(child, top_level_nodes)
@@ -291,12 +303,45 @@ class TreeSitterRustAnalyzer:
 
     def _is_builtin(self, name: str) -> bool:
         builtins = {
-            "println", "print", "eprintln", "eprint", "format", "vec", "panic",
-            "assert", "assert_eq", "assert_ne", "unwrap", "expect", "clone",
-            "to_string", "into", "from", "new", "default", "len", "push",
-            "pop", "iter", "map", "filter", "collect", "some", "none", "ok", "err",
-            "Box", "Vec", "String", "Option", "Result", "HashMap", "HashSet",
-            "drop", "clone", "copy",
+            "println",
+            "print",
+            "eprintln",
+            "eprint",
+            "format",
+            "vec",
+            "panic",
+            "assert",
+            "assert_eq",
+            "assert_ne",
+            "unwrap",
+            "expect",
+            "clone",
+            "to_string",
+            "into",
+            "from",
+            "new",
+            "default",
+            "len",
+            "push",
+            "pop",
+            "iter",
+            "map",
+            "filter",
+            "collect",
+            "some",
+            "none",
+            "ok",
+            "err",
+            "Box",
+            "Vec",
+            "String",
+            "Option",
+            "Result",
+            "HashMap",
+            "HashSet",
+            "drop",
+            "clone",
+            "copy",
         }
         return name in builtins
 
