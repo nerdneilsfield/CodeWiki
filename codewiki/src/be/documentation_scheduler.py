@@ -126,13 +126,13 @@ async def run_module_queue(
         for name in top_level_keys:
             child_to_parent[name] = ROOT_KEY
 
-    lock = asyncio.Lock()
-    queue: asyncio.Queue[str] = asyncio.Queue()
+    work_queue: asyncio.Queue[str] = asyncio.Queue()
+    done_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
 
     leaf_count = 0
     for key, (_, _, _, is_leaf) in all_tasks.items():
         if is_leaf:
-            await queue.put(key)
+            await work_queue.put(key)
             leaf_count += 1
 
     total_tasks = len(all_tasks) + (1 if include_root else 0)
@@ -190,13 +190,34 @@ async def run_module_queue(
             return 0
         return retry_delays[attempt - 1]
 
+    async def _coordinator() -> None:
+        active_tasks = leaf_count
+        while active_tasks > 0:
+            key, success = await done_queue.get()
+            active_tasks -= 1
+            progress.update(1)
+            if success:
+                parent_key = child_to_parent.get(key)
+                if parent_key is not None:
+                    pending_count[parent_key] -= 1
+                    if pending_count[parent_key] == 0:
+                        del pending_count[parent_key]
+                        if parent_key == ROOT_KEY:
+                            logger.info("🔓 All top-level modules done — enqueueing root overview")
+                        else:
+                            logger.info("🔓 Parent unblocked: %s", all_tasks[parent_key][1])
+                        await work_queue.put(parent_key)
+                        active_tasks += 1
+            done_queue.task_done()
+
     async def _worker(_worker_id: int):
         while True:
             try:
-                key = await queue.get()
+                key = await work_queue.get()
             except asyncio.CancelledError:
                 return
             label = "overview" if key == ROOT_KEY else all_tasks[key][1]
+            success = False
             try:
                 progress.set_postfix_str(label, refresh=False)
                 task_t0 = asyncio.get_event_loop().time()
@@ -242,6 +263,7 @@ async def run_module_queue(
                                 state_mgr=state_mgr,
                             )
                         last_exc = None
+                        success = True
                         break
                     except Exception as exc:
                         last_exc = exc
@@ -256,24 +278,10 @@ async def run_module_queue(
                     raise last_exc
 
                 task_elapsed = asyncio.get_event_loop().time() - task_t0
-                progress.update(1)
                 model_suffix = f" (model: {task_models_used})" if task_models_used else ""
                 logger.info("✓ Task '%s' completed in %.1fs%s", label, task_elapsed, model_suffix)
 
-                parent_key = child_to_parent.get(key)
-                if parent_key is not None:
-                    async with lock:
-                        pending_count[parent_key] -= 1
-                        remaining = pending_count[parent_key]
-                    if remaining == 0:
-                        if parent_key == ROOT_KEY:
-                            logger.info("🔓 All top-level modules done — enqueueing root overview")
-                        else:
-                            logger.info("🔓 Parent unblocked: %s", all_tasks[parent_key][1])
-                        await queue.put(parent_key)
-
             except Exception as e:
-                progress.update(1)
                 logger.error("✗ Failed to process '%s' after all retries: %s", label, e)
                 logger.error(traceback.format_exc())
                 if state_mgr:
@@ -282,15 +290,21 @@ async def run_module_queue(
                         failed_doc_id = doc_id_for_path(graph_tree, all_tasks[key][0])
                     await state_mgr.mark_failed(failed_doc_id, str(e))
             finally:
-                queue.task_done()
+                await done_queue.put((key, success))
+                work_queue.task_done()
 
     workers = [asyncio.create_task(_worker(i)) for i in range(max_concurrent)]
+    coordinator = asyncio.create_task(_coordinator())
     try:
-        await queue.join()
+        await coordinator
+        await work_queue.join()
     finally:
         for w in workers:
             w.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
+        if not coordinator.done():
+            coordinator.cancel()
+        await asyncio.gather(coordinator, return_exceptions=True)
         progress.close()
 
 
