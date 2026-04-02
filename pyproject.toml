@@ -28,9 +28,16 @@ dependencies = [
     "keyring>=24.0.0",
     "GitPython>=3.1.40",
     "Jinja2>=3.1.6",
+    "mdformat>=0.7.21",
     "tree-sitter>=0.23.2",
+    "tree-sitter-bash>=0.25.1",
+    "tree-sitter-cmake>=0.7.2",
+    "tree-sitter-go>=0.25.0",
     "tree-sitter-language-pack>=0.8.0",
+    "tree-sitter-make>=1.1.0",
     "tree-sitter-python>=0.23.6",
+    "tree-sitter-rust>=0.24.0",
+    "tree-sitter-toml>=0.7.0",
     "tree-sitter-java>=0.23.5",
     "tree-sitter-javascript>=0.21.4",
     "tree-sitter-typescript>=0.21.2",
@@ -67,16 +74,6 @@ build-requires = [
 ]
 
 [project.optional-dependencies]
-cmake = [
-    "tree-sitter-cmake>=0.7.2",
-]
-make = [
-    "tree-sitter-make>=1.1.0",
-]
-build-analyzers = [
-    "tree-sitter-cmake>=0.7.2",
-    "tree-sitter-make>=1.1.0",
-]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
@@ -85,8 +82,6 @@ dev = [
     "ruff>=0.13.1",
     "ty>=0.0.27",
     "ipython>=8.0.0",
-    "tree-sitter-cmake>=0.7.2",
-    "tree-sitter-make>=1.1.0",
 ]
 
 [project.scripts]
