@@ -199,11 +199,13 @@ class TestBuildLinkMap:
         tree = {
             "Auth Module": {
                 "path": "src/auth",
+                "_doc_filename": "src_auth.md",
                 "components": ["AuthService"],
                 "children": {},
             },
             "User Module": {
                 "path": "src/user",
+                "_doc_filename": "src_user.md",
                 "components": ["UserService"],
                 "children": {},
             },
@@ -212,8 +214,8 @@ class TestBuildLinkMap:
         result = build_link_map(tree)
 
         assert len(result) == 2
-        assert "src/auth" in result
-        assert "src/user" in result
+        assert "Auth Module" in result
+        assert "User Module" in result
 
     def test_build_link_map_nested(self):
         """Nested children are included in the link map."""
@@ -222,10 +224,12 @@ class TestBuildLinkMap:
         tree = {
             "Auth Module": {
                 "path": "src/auth",
+                "_doc_filename": "src_auth.md",
                 "components": ["AuthService"],
                 "children": {
                     "Sub Module": {
                         "path": "src/auth/sub",
+                        "_doc_filename": "src_auth-sub_module.md",
                         "components": ["SubService"],
                         "children": {},
                     }
@@ -235,8 +239,8 @@ class TestBuildLinkMap:
 
         result = build_link_map(tree)
 
-        assert "src/auth" in result
-        assert "src/auth/sub" in result
+        assert "Auth Module" in result
+        assert "Auth Module/Sub Module" in result
 
     def test_build_link_map_empty_tree(self):
         """Empty module tree returns empty dict."""
@@ -246,13 +250,14 @@ class TestBuildLinkMap:
 
         assert result == {}
 
-    def test_build_link_map_uses_path_as_key(self):
-        """Keys in link_map come from the 'path' field, not the title."""
+    def test_build_link_map_uses_title_path_as_key(self):
+        """Keys in link_map come from title path, values from frozen doc filename."""
         from codewiki.src.be.generation.glossary import build_link_map
 
         tree = {
             "Some Long Human Title": {
                 "path": "mod/stable_path",
+                "_doc_filename": "mod_stable_path.md",
                 "components": [],
                 "children": {},
             }
@@ -260,17 +265,17 @@ class TestBuildLinkMap:
 
         result = build_link_map(tree)
 
-        assert "mod/stable_path" in result
-        assert "Some Long Human Title" not in result
+        assert "Some Long Human Title" in result
+        assert result["Some Long Human Title"] == "mod_stable_path.md"
 
     def test_build_link_map_sorted(self):
-        """Link map entries are sorted by key (module path)."""
+        """Link map entries are sorted by key (title path)."""
         from codewiki.src.be.generation.glossary import build_link_map
 
         tree = {
-            "Z Module": {"path": "src/z", "components": [], "children": {}},
-            "A Module": {"path": "src/a", "components": [], "children": {}},
-            "M Module": {"path": "src/m", "components": [], "children": {}},
+            "Z Module": {"path": "src/z", "_doc_filename": "src_z.md", "components": [], "children": {}},
+            "A Module": {"path": "src/a", "_doc_filename": "src_a.md", "components": [], "children": {}},
+            "M Module": {"path": "src/m", "_doc_filename": "src_m.md", "components": [], "children": {}},
         }
 
         result = build_link_map(tree)
@@ -285,6 +290,7 @@ class TestBuildLinkMap:
         tree = {
             "Auth Module": {
                 "path": "src/auth",
+                "_doc_filename": "src_auth.md",
                 "components": [],
                 "children": {},
             }
@@ -292,43 +298,37 @@ class TestBuildLinkMap:
 
         result = build_link_map(tree)
 
-        filename = result["src/auth"]
+        filename = result["Auth Module"]
         assert filename.endswith(".md")
 
-    def test_build_link_map_skips_entries_without_path(self):
-        """Tree entries without a 'path' field are not added to link_map."""
-        from codewiki.src.be.generation.glossary import build_link_map
-
-        tree = {
-            "Pathless": {
-                "components": ["X"],
-                "children": {},
-                # no "path" key
-            },
-            "HasPath": {
-                "path": "src/valid",
-                "components": [],
-                "children": {},
-            },
-        }
-
-        result = build_link_map(tree)
-
-        assert "src/valid" in result
-        assert len(result) == 1
-
-    def test_build_link_map_uses_module_doc_filename(self):
-        """Values match what module_doc_filename would produce for the module path."""
+    def test_build_link_map_falls_back_without_doc_filename(self):
+        """Nodes without _doc_filename fall back to module_doc_filename()."""
         from codewiki.src.be.generation.glossary import build_link_map
         from codewiki.src.utils import module_doc_filename
 
         tree = {
+            "Pathless": {"components": ["X"], "children": {}},
+            "HasPath": {"path": "src/valid", "components": [], "children": {}},
+        }
+
+        result = build_link_map(tree)
+
+        assert result["Pathless"] == module_doc_filename(["Pathless"])
+        assert result["HasPath"] == module_doc_filename(["src/valid"])
+
+    def test_build_link_map_reads_frozen_doc_filename(self):
+        """Frozen _doc_filename wins over recomputation."""
+        from codewiki.src.be.generation.glossary import build_link_map
+
+        tree = {
             "Auth Module": {
                 "path": "src/auth",
+                "_doc_filename": "cli.md",
                 "components": [],
                 "children": {
                     "Sub Module": {
                         "path": "src/auth/sub",
+                        "_doc_filename": "cli-sub_module.md",
                         "components": [],
                         "children": {},
                     }
@@ -338,13 +338,8 @@ class TestBuildLinkMap:
 
         result = build_link_map(tree)
 
-        # Top-level: uses stable path "src/auth" → "src_auth" as segment
-        expected_top = module_doc_filename(["src_auth"])
-        assert result["src/auth"] == expected_top
-
-        # Nested: parent segment "src_auth" + child "src_auth_sub"
-        expected_nested = module_doc_filename(["src_auth", "src_auth_sub"])
-        assert result["src/auth/sub"] == expected_nested
+        assert result["Auth Module"] == "cli.md"
+        assert result["Auth Module/Sub Module"] == "cli-sub_module.md"
 
     def test_build_link_map_non_dict_values_skipped(self):
         """Non-dict values in module_tree are skipped without error."""
@@ -362,4 +357,27 @@ class TestBuildLinkMap:
 
         result = build_link_map(tree)
 
-        assert list(result.keys()) == ["src/valid"]
+        assert list(result.keys()) == ["ValidModule"]
+
+    def test_build_link_map_nested_keys_use_full_title_path(self):
+        from codewiki.src.be.generation.glossary import build_link_map
+
+        tree = {
+            "Parent": {
+                "path": "src/parent",
+                "_doc_filename": "parent.md",
+                "components": [],
+                "children": {
+                    "Child": {
+                        "path": "",
+                        "_doc_filename": "parent-child.md",
+                        "components": [],
+                        "children": {},
+                    }
+                },
+            }
+        }
+
+        result = build_link_map(tree)
+
+        assert set(result) == {"Parent", "Parent/Child"}

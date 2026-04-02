@@ -37,6 +37,17 @@ def test_should_regenerate_when_no_cache():
         assert gen._should_regenerate("getting_started", []) is True
 
 
+def test_guide_cache_path_uses_internal_subdir():
+    with tempfile.TemporaryDirectory() as wd:
+        gen = GuideGenerator(
+            config=_minimal_config(),
+            components={},
+            module_tree={},
+            working_dir=wd,
+        )
+        assert gen._cache_path().endswith(".codewiki/_guide_cache.json")
+
+
 def test_should_not_regenerate_when_hash_matches():
     with tempfile.TemporaryDirectory() as wd:
         # Create a fake input file
