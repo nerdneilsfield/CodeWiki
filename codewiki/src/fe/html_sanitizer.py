@@ -57,6 +57,7 @@ _ALLOWED_ATTRIBUTES = {
     "pre": {"class"},
     "td": {"align", "colspan", "rowspan"},
     "th": {"align", "colspan", "rowspan"},
+    "*": {"id", "class"},
 }
 
 _SAFE_URL_SCHEMES = {"http", "https", "mailto"}
