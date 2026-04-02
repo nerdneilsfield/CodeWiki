@@ -83,6 +83,29 @@ def _get_provider_api_key(provider_config) -> str:
     return str(first)
 
 
+def validate_llm_credentials(config) -> None:
+    """Fail fast if the configured main model cannot resolve to usable credentials."""
+    model = config.main_model
+    if not model:
+        raise RuntimeError("No main_model configured. Set it in config.toml.")
+    try:
+        if _has_provider_registry(config):
+            provider_config, _ = _get_provider_config(config, model)
+            api_key = _get_provider_api_key(provider_config)
+            if not api_key:
+                raise RuntimeError(
+                    f"No API key for model {model!r} (provider={provider_config.name!r}). "
+                    f"Set it in config.toml under [[providers]] api_keys."
+                )
+        elif not config.llm_api_key:
+            raise RuntimeError(
+                f"No API key configured for model {model!r}. "
+                f"Set it in config.toml under [[providers]] api_keys."
+            )
+    except (ValueError, AttributeError) as exc:
+        raise RuntimeError(f"Cannot resolve provider for model {model!r}: {exc}") from exc
+
+
 def _make_provider(config: Config) -> OpenAIProvider:
     return _get_cached_async_provider(config.llm_base_url, config.llm_api_key)
 
@@ -356,7 +379,16 @@ def call_llm(
                         temperature=temperature,
                         max_tokens=config.max_tokens,
                     )
+                    if not response.choices:
+                        raise ValueError(
+                            f"LLM returned empty choices (model={resolved_model_name})"
+                        )
                     content = response.choices[0].message.content
+                    if content is None:
+                        raise ValueError(
+                            f"LLM returned null content (model={resolved_model_name}, "
+                            f"finish_reason={response.choices[0].finish_reason!r})"
+                        )
             elif provider_type == "claude":
                 content = _call_claude(client, resolved_model_name, prompt, temperature, config)
             else:
@@ -368,6 +400,8 @@ def call_llm(
             )
             return content
         except Exception as exc:
+            if isinstance(exc, ValueError) and str(exc).startswith("LLM returned "):
+                raise
             last_exc = exc
             if provider_type in {"openai_compatible", "azure_openai"} and _is_cf_timeout(exc):
                 use_streaming = True

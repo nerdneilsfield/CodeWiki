@@ -2,10 +2,6 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 import argparse
 import os
-import sys
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Constants
 OUTPUT_BASE_DIR = "output"
@@ -25,9 +21,6 @@ DEFAULT_MAX_TOKEN_PER_LEAF_MODULE = 16_000
 DEFAULT_MAX_CONCURRENT = 3
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_LONG_CONTEXT_THRESHOLD = 200_000
-# Legacy constants (for backward compatibility)
-MAX_TOKEN_PER_MODULE = DEFAULT_MAX_TOKEN_PER_MODULE
-MAX_TOKEN_PER_LEAF_MODULE = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE
 
 # CLI context detection
 _CLI_CONTEXT = False
@@ -44,16 +37,6 @@ def is_cli_context() -> bool:
     return _CLI_CONTEXT
 
 
-# LLM services
-# In CLI mode, these will be loaded from ~/.codewiki/config.json + keyring
-# In web app mode, use environment variables
-MAIN_MODEL = os.getenv("MAIN_MODEL", "claude-sonnet-4")
-FALLBACK_MODEL_1 = os.getenv("FALLBACK_MODEL_1", "glm-4p5")
-CLUSTER_MODEL = os.getenv("CLUSTER_MODEL", MAIN_MODEL)
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://0.0.0.0:4000/")
-LLM_API_KEY = os.getenv("LLM_API_KEY", "sk-1234")
-
-
 @dataclass
 class Config:
     """Configuration class for CodeWiki."""
@@ -68,7 +51,7 @@ class Config:
     llm_api_key: str = ""
     main_model: str = ""
     cluster_model: str = ""
-    fallback_model: str = FALLBACK_MODEL_1
+    fallback_model: str = "glm-4p5"
     long_context_model: Optional[str] = None
     long_context_threshold: int = DEFAULT_LONG_CONTEXT_THRESHOLD
     # Max token settings
@@ -165,11 +148,11 @@ class Config:
             dependency_graph_dir=os.path.join(OUTPUT_BASE_DIR, DEPENDENCY_GRAPHS_DIR),
             docs_dir=os.path.join(OUTPUT_BASE_DIR, DOCS_DIR, f"{sanitized_repo_name}-docs"),
             max_depth=MAX_DEPTH,
-            llm_base_url=LLM_BASE_URL,
-            llm_api_key=LLM_API_KEY,
-            main_model=MAIN_MODEL,
-            cluster_model=CLUSTER_MODEL,
-            fallback_model=FALLBACK_MODEL_1,
+            llm_base_url="",
+            llm_api_key="",
+            main_model="",
+            cluster_model="",
+            fallback_model="glm-4p5",
         )
 
     @classmethod
@@ -181,7 +164,7 @@ class Config:
         llm_api_key: str,
         main_model: str,
         cluster_model: str,
-        fallback_model: str = FALLBACK_MODEL_1,
+        fallback_model: str = "glm-4p5",
         long_context_model: Optional[str] = None,
         long_context_threshold: int = DEFAULT_LONG_CONTEXT_THRESHOLD,
         max_tokens: int = DEFAULT_MAX_TOKENS,

@@ -30,6 +30,7 @@ from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
 from codewiki.cli.utils.instructions import display_post_generation_instructions
 from codewiki.cli.utils.errors import EXIT_CONFIG_ERROR
 from codewiki.cli.models.config import AgentInstructions
+from codewiki.src.be.llm_services import validate_llm_credentials
 from codewiki.src.config_loader import (
     AppConfig,
     AgentSection,
@@ -545,6 +546,7 @@ def generate_command(
             long_context_threshold=long_context_threshold,
         )
         effective_config = app_config.to_runtime_config(str(repo_path), runtime_overrides)
+        validate_llm_credentials(effective_config)
 
         # Log max token settings if verbose
         if verbose:
