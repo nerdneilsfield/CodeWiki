@@ -33,9 +33,8 @@ class ModuleTreeManager:
         ``children`` dict should be updated.  For a top-level module named
         ``"API Server"``, ``path`` would be ``["API Server"]``.
 
-        Existing entries are preserved (their ``_completed`` flag and
-        ``children`` dict are kept intact); only genuinely new entries are
-        inserted.
+        Existing entries are preserved (their existing children are kept
+        intact); only genuinely new entries are inserted.
         """
         async with self._lock:
             node = self._tree
@@ -45,20 +44,10 @@ class ModuleTreeManager:
                 if name not in node:
                     node[name] = info
                 else:
-                    # Only refresh the components list; keep _completed / children
+                    # Only refresh the components list; keep existing children
                     node[name]["components"] = info.get(
                         "components", node[name].get("components", [])
                     )
-            file_manager.save_json(self._tree, self._persist_path)
-
-    async def mark_completed(self, module_path: List[str]):
-        """Set ``_completed`` flag on the tree node at *module_path* and persist."""
-        async with self._lock:
-            node = self._tree
-            for key in module_path[:-1]:
-                node = node[key]["children"]
-            if module_path[-1] in node:
-                node[module_path[-1]]["_completed"] = True
             file_manager.save_json(self._tree, self._persist_path)
 
     async def save(self):

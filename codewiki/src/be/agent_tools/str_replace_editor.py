@@ -789,6 +789,21 @@ async def str_replace_editor(
     resolved = Path(absolute_path).resolve()
     if not resolved.is_relative_to(base_path):
         raise ValueError(f"Path {absolute_path} is outside the allowed directory")
+
+    if working_dir == "docs" and command == "create":
+        assigned = getattr(ctx.deps, "assigned_doc_filename", "")
+        if assigned and resolved.name != assigned:
+            logger.info(
+                "Agent wrote %r, correcting to assigned filename %r",
+                resolved.name,
+                assigned,
+            )
+            corrected = (resolved.parent / assigned).resolve()
+            if not corrected.is_relative_to(base_path):
+                raise ValueError(f"Corrected path {corrected} is outside the allowed directory")
+            resolved = corrected
+            absolute_path = str(corrected)
+
     tool = EditTool(ctx.deps.registry, ctx.deps.absolute_docs_path, allowed_base_path=base_path)
 
     # validate command

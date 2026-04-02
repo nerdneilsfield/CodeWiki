@@ -1,6 +1,8 @@
 import os
 import json
 import tempfile
+import re
+import hashlib
 from typing import Any, Optional, Dict, List
 
 
@@ -69,13 +71,21 @@ def module_doc_filename(module_path: List[str]) -> str:
     unambiguous and stable across LLM clustering runs that may use hyphens
     or spaces interchangeably.
     """
+    def _normalize_part(part: str) -> str:
+        value = part.strip().lower()
+        value = value.replace("&", " and ")
+        value = value.replace("/", "_").replace("-", "_")
+        value = re.sub(r"[^\w\s]", " ", value)
+        value = re.sub(r"\s+", "_", value)
+        value = re.sub(r"_+", "_", value)
+        return value.strip("_")
+
     parts = [p for p in module_path if p]
     if not parts:
         return "overview.md"
-    safe_parts = [
-        p.strip().replace(" ", "_").replace("/", "_").replace("-", "_")
-        for p in parts
-    ]
+    safe_parts = [normalized for p in parts if (normalized := _normalize_part(p))]
+    if not safe_parts:
+        return "overview.md"
     return f"{'-'.join(safe_parts)}.md"
 
 
@@ -85,10 +95,42 @@ def _normalize_for_match(filename: str) -> str:
     Treats ``-``, ``_``, and `` `` as equivalent, collapses runs of
     underscores, and lower-cases the result.
     """
-    import re
-    name = filename.lower().replace("-", "_").replace(" ", "_")
+    name = filename.lower().replace("&", " and ")
+    name = re.sub(r"[^\w.\s-]", "_", name)
+    name = name.replace("-", "_").replace(" ", "_")
     name = re.sub(r"_+", "_", name)
     return name
+
+
+def content_hash(path: str) -> str:
+    """Return a stable hash for file contents, or empty string if missing."""
+    try:
+        with open(path, "rb") as f:
+            digest = hashlib.md5()
+            while chunk := f.read(8192):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return ""
+
+
+def doc_id_for_path(tree: Dict[str, Any], module_path: List[str]) -> str:
+    """Derive a stable doc/task id from a tree node when possible."""
+    if not module_path:
+        return "overview:root"
+    try:
+        node: Dict[str, Any] = tree
+        for idx, part in enumerate(module_path):
+            if idx == 0:
+                node = node[part]
+            else:
+                node = node["children"][part]
+        module_id = node.get("module_id", "")
+        if module_id:
+            return f"module:{module_id}"
+        return f"module:{node.get('_doc_filename', module_doc_filename(module_path)).removesuffix('.md')}"
+    except (KeyError, TypeError):
+        return f"module:{module_doc_filename(module_path).removesuffix('.md')}"
 
 
 def find_module_doc(working_dir: str, module_path: List[str]) -> Optional[str]:

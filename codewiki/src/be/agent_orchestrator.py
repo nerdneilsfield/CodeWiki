@@ -36,6 +36,7 @@ from typing import Dict, List, Any
 
 logger = logging.getLogger(__name__)
 
+
 # try:
 #     # Configure logfire with environment variables for Docker compatibility
 #     logfire_token = os.getenv('LOGFIRE_TOKEN')
@@ -80,7 +81,13 @@ from codewiki.src.config import (
     Config,
     MODULE_TREE_FILENAME,
 )
-from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
+from codewiki.src.utils import (
+    content_hash,
+    doc_id_for_path,
+    file_manager,
+    module_doc_filename,
+    find_module_doc,
+)
 from codewiki.src.be.dependency_analyzer.models.core import Node
 
 
@@ -106,7 +113,23 @@ class AgentOrchestrator:
         """
         self.index_products = index_products
         self.global_assets = global_assets
-    
+
+    @staticmethod
+    def _assigned_doc_filename(module_tree: dict, module_path: list[str]) -> str:
+        """Return the frozen filename for a module path when available."""
+        if not module_path:
+            return module_doc_filename([])
+        try:
+            node = module_tree
+            for idx, part in enumerate(module_path):
+                if idx == 0:
+                    node = node[part]
+                else:
+                    node = node["children"][part]
+            return node.get("_doc_filename", module_doc_filename(module_path))
+        except (KeyError, TypeError):
+            return module_doc_filename(module_path)
+
     def create_agent(self, module_name: str, components: Dict[str, Any],
                     core_component_ids: List[str],
                     estimated_tokens: int = 0) -> Agent:
@@ -142,7 +165,8 @@ class AgentOrchestrator:
     
     async def process_module(self, module_name: str, components: Dict[str, Node],
                            core_component_ids: List[str], module_path: List[str],
-                           working_dir: str, tree_manager=None) -> tuple[Dict[str, Any], str]:
+                           working_dir: str, tree_manager=None,
+                           gen_state=None, state_mgr=None) -> tuple[Dict[str, Any], str]:
         """Process a single module and generate its documentation.
 
         Args:
@@ -157,14 +181,21 @@ class AgentOrchestrator:
 
         # ── Cache check ──────────────────────────────────────────────────
         doc_path_parts = module_path if module_path else [module_name]
-        docs_path = find_module_doc(working_dir, doc_path_parts)
+        docs_path = None if gen_state else find_module_doc(working_dir, doc_path_parts)
+        task = None
+        if gen_state and (module_tree := (await tree_manager.get_snapshot() if tree_manager else None)):
+            doc_id = doc_id_for_path(module_tree, doc_path_parts)
+            task = gen_state.get_task(doc_id)
+            if task and task.status == "completed":
+                candidate = os.path.join(working_dir, task.output_file)
+                if os.path.exists(candidate) and os.path.getsize(candidate) > 100:
+                    docs_path = candidate
+
         if docs_path and os.path.getsize(docs_path) > 100:
+            if task and task.status == "completed":
+                logger.debug(f"✓ Module docs already exists at {docs_path}")
+                return {}, "cached"
             if is_complex_module(components, core_component_ids) and module_path:
-                # Complex modules need _completed or auto-infer, but only if
-                # they actually have children in the tree.  A module whose
-                # components span multiple files but that the agent documented
-                # directly (no sub-modules) should be treated as done.
-                completed = False
                 children = {}
                 if tree_manager:
                     snapshot = await tree_manager.get_snapshot()
@@ -172,36 +203,48 @@ class AgentOrchestrator:
                         node = snapshot
                         for key in module_path[:-1]:
                             node = node[key]["children"]
-                        completed = node.get(module_path[-1], {}).get("_completed", False)
                         children = node.get(module_path[-1], {}).get("children", {})
                     except (KeyError, TypeError):
                         pass
 
-                if completed:
-                    logger.debug(f"✓ Module docs already exists at {docs_path}")
-                    return {}, "cached"
-
                 if not children:
-                    # No sub-modules in tree → agent wrote docs directly → done
                     logger.debug(
-                        f"✓ Module {module_name} has docs and no children — marking complete"
+                        f"✓ Module {module_name} has docs and no children — treating as complete"
                     )
-                    if tree_manager:
-                        await tree_manager.mark_completed(module_path)
+                    if state_mgr and module_tree:
+                        await state_mgr.mark_completed(
+                            doc_id_for_path(module_tree, doc_path_parts),
+                            content_hash=content_hash(docs_path),
+                            model=self.config.main_model,
+                        )
                     return {}, "cached"
 
-                # Auto-infer: if all child modules also have docs, mark
-                # completed and skip.
-                if tree_manager and all(
-                    (lambda p: p is not None and os.path.getsize(p) > 100)(
-                        find_module_doc(working_dir, module_path + [cn])
+                child_done = False
+                if gen_state and module_tree:
+                    child_done = all(
+                        (child_task := gen_state.get_task(doc_id_for_path(module_tree, module_path + [cn])))
+                        and child_task.status == "completed"
+                        for cn in children
                     )
-                    for cn in children
-                ):
+                if not child_done:
+                    if not gen_state:
+                        child_done = all(
+                            (lambda p: p is not None and os.path.getsize(p) > 100)(
+                                find_module_doc(working_dir, module_path + [cn])
+                            )
+                            for cn in children
+                        )
+
+                if child_done:
                     logger.debug(
-                        f"✓ Module {module_name} and all children have docs — auto-marking complete"
+                        f"✓ Module {module_name} and all children have docs — treating as complete"
                     )
-                    await tree_manager.mark_completed(module_path)
+                    if state_mgr and module_tree:
+                        await state_mgr.mark_completed(
+                            doc_id_for_path(module_tree, doc_path_parts),
+                            content_hash=content_hash(docs_path),
+                            model=self.config.main_model,
+                        )
                     return {}, "cached"
 
                 logger.debug(
@@ -246,6 +289,9 @@ class AgentOrchestrator:
         if context_section:
             user_prompt += "\n\n" + context_section
 
+        assigned_filename = self._assigned_doc_filename(module_tree, module_path)
+        user_prompt += f"\n\nWrite your documentation to the file: {assigned_filename}"
+
         estimated_tokens = count_tokens(user_prompt) + _TOKEN_OVERHEAD
 
         # Create agent
@@ -269,6 +315,9 @@ class AgentOrchestrator:
             long_context_model=self.long_context_model,
             index_products=self.index_products,
             global_assets=self.global_assets,
+            assigned_doc_filename=assigned_filename,
+            gen_state=gen_state,
+            state_mgr=state_mgr,
         )
 
         # Run agent
@@ -307,8 +356,14 @@ class AgentOrchestrator:
                 file_manager.save_json(deps.module_tree, module_tree_path)
 
             # Mark the module as fully completed so future runs can skip it
-            if tree_manager and module_path:
-                await tree_manager.mark_completed(module_path)
+            if state_mgr:
+                doc_id = doc_id_for_path(module_tree, doc_path_parts)
+                output_path = os.path.join(working_dir, assigned_filename)
+                await state_mgr.mark_completed(
+                    doc_id,
+                    content_hash=content_hash(output_path),
+                    model=models_used,
+                )
 
             return deps.module_tree, models_used
 

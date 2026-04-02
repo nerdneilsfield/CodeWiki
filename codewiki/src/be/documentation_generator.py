@@ -29,15 +29,20 @@ from codewiki.src.config import (
     FIRST_MODULE_TREE_FILENAME,
     MODULE_TREE_FILENAME,
     OVERVIEW_FILENAME,
-    TREE_CACHE_META_FILENAME,
+    GENERATION_STATE_FILENAME,
+    internal_file_path,
 )
-from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
+from codewiki.src.utils import (
+    _normalize_for_match,
+    doc_id_for_path,
+    file_manager,
+    find_module_doc,
+    module_doc_filename,
+)
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
 from codewiki.src.be.module_tree_manager import ModuleTreeManager
 from codewiki.src.be.guide_generator import GuideGenerator
-
-PARENT_DOC_HASHES_FILENAME = '_parent_doc_hashes.json'
-
+from codewiki.src.be.generation_state import GenerationState, GenerationStateManager, DocTask
 
 def _file_hash(path: str) -> str:
     """Return hex MD5 of file contents, or empty string if missing."""
@@ -51,6 +56,120 @@ def _file_hash(path: str) -> str:
         return ""
 
 
+def _iter_tree_nodes(tree: Dict[str, Any], parent_path: Optional[List[str]] = None):
+    """Yield (module_path, key, info) for every node in the tree."""
+    base = parent_path or []
+    for key, info in tree.items():
+        path = base + [key]
+        yield path, key, info
+        children = info.get("children") or {}
+        if isinstance(children, dict) and children:
+            yield from _iter_tree_nodes(children, path)
+
+
+def _collect_path_counts(tree: Dict[str, Any]) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for _module_path, _key, info in _iter_tree_nodes(tree):
+        path = info.get("path", "")
+        counts[path] += 1
+    return counts
+
+
+def _stable_hash(parts: list[str]) -> str:
+    digest = hashlib.md5()
+    for part in parts:
+        digest.update(part.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _hash_mapping(mapping: Dict[str, str], extra: list[str] | None = None) -> str:
+    items = [f"{key}:{mapping[key]}" for key in sorted(mapping)]
+    if extra:
+        items.extend(extra)
+    return _stable_hash(items)
+
+
+def _content_similarity(text_a: str, text_b: str) -> float:
+    lines_a = set(text_a.strip().splitlines())
+    lines_b = set(text_b.strip().splitlines())
+    if not lines_a and not lines_b:
+        return 1.0
+    union = lines_a | lines_b
+    if not union:
+        return 1.0
+    return len(lines_a & lines_b) / len(union)
+
+
+def dedup_docs_directory(working_dir: str) -> dict[str, list]:
+    """Resolve duplicate markdown files that normalize to the same name."""
+    groups: dict[str, list[str]] = {}
+    for fname in os.listdir(working_dir):
+        if not fname.endswith(".md") or fname.startswith("_"):
+            continue
+        groups.setdefault(_normalize_for_match(fname), []).append(fname)
+
+    removed: list[str] = []
+    skipped_conflicts: list[list[str]] = []
+    for files in groups.values():
+        if len(files) <= 1:
+            continue
+        contents: dict[str, str] = {}
+        for fname in files:
+            try:
+                with open(os.path.join(working_dir, fname), "r", encoding="utf-8") as f:
+                    contents[fname] = f.read()
+            except OSError:
+                contents[fname] = ""
+        files.sort(key=lambda name: len(contents.get(name, "")), reverse=True)
+        winner = files[0]
+        all_similar = all(
+            _content_similarity(contents[winner], contents[other]) > 0.8
+            for other in files[1:]
+        )
+        if not all_similar:
+            logger.warning(
+                "Dedup conflict: %s normalize to the same name but diverge in content",
+                files,
+            )
+            skipped_conflicts.append(files)
+            continue
+        for loser in files[1:]:
+            os.remove(os.path.join(working_dir, loser))
+            removed.append(loser)
+    return {"removed": removed, "skipped_conflicts": skipped_conflicts}
+
+
+def cleanup_legacy_internal_files(working_dir: str) -> list[str]:
+    """Remove legacy cache files that used to live in the docs root."""
+    removed: list[str] = []
+    for filename in ("_parent_doc_hashes.json", "_tree_cache_meta.json", "_guide_cache.json"):
+        path = os.path.join(working_dir, filename)
+        if not os.path.exists(path):
+            continue
+        try:
+            os.remove(path)
+            removed.append(filename)
+        except OSError:
+            logger.warning("Failed to remove legacy internal file %s", path)
+    return removed
+
+
+def _config_fingerprint(config: Config) -> str:
+    return _stable_hash(
+        [
+            config.main_model,
+            config.cluster_model,
+            config.fallback_model or "",
+            config.long_context_model or "",
+            config.output_language,
+            str(config.max_depth),
+            str(config.max_concurrent),
+            "naming-v7",
+        ]
+    )
+
+
 class DocumentationGenerator:
     """Main documentation generation orchestrator."""
 
@@ -59,6 +178,8 @@ class DocumentationGenerator:
         self.commit_id = commit_id
         self.graph_builder = DependencyGraphBuilder(config)
         self.agent_orchestrator = AgentOrchestrator(config)
+        self._gen_state: Optional[GenerationState] = None
+        self._state_mgr: Optional[GenerationStateManager] = None
 
     @staticmethod
     def _detect_repo_url(repo_path: str) -> Optional[str]:
@@ -221,7 +342,17 @@ class DocumentationGenerator:
                 children = info.get("children")
                 if isinstance(children, dict) and children:
                     entry["children"] = {cn: {} for cn in children}
-                child_path = find_module_doc(working_dir, [name])
+                child_path = None
+                gen_state = getattr(self, "_gen_state", None)
+                if gen_state:
+                    child_doc_id = doc_id_for_path(module_tree, [name])
+                    child_file = gen_state.get_output_file(child_doc_id)
+                    if child_file:
+                        candidate = os.path.join(working_dir, child_file)
+                        if os.path.exists(candidate):
+                            child_path = candidate
+                if child_path is None:
+                    child_path = find_module_doc(working_dir, [name])
                 if child_path:
                     entry["docs"] = file_manager.load_text(child_path)
                 else:
@@ -252,7 +383,17 @@ class DocumentationGenerator:
         for child_name in children:
             if child_name not in target_children:
                 target_children[child_name] = {}
-            child_path = find_module_doc(working_dir, module_path + [child_name])
+            child_path = None
+            gen_state = getattr(self, "_gen_state", None)
+            if gen_state:
+                child_doc_id = doc_id_for_path(module_tree, module_path + [child_name])
+                child_file = gen_state.get_output_file(child_doc_id)
+                if child_file:
+                    candidate = os.path.join(working_dir, child_file)
+                    if os.path.exists(candidate):
+                        child_path = candidate
+            if child_path is None:
+                child_path = find_module_doc(working_dir, module_path + [child_name])
             if child_path:
                 target_children[child_name]["docs"] = file_manager.load_text(child_path)
             else:
@@ -264,11 +405,91 @@ class DocumentationGenerator:
     # ── Main entry point ─────────────────────────────────────────────────
 
     @staticmethod
-    def _module_doc_exists(working_dir: str, module_path: List[str]) -> bool:
+    def _freeze_doc_filenames(tree: Dict[str, Any]) -> None:
+        """Populate ``_doc_filename`` on each tree node using collision-aware rules."""
+        path_counts = _collect_path_counts(tree)
+
+        def _walk(children: Dict[str, Any], parent_stem: str = ""):
+            for key, info in children.items():
+                # Once frozen, never recompute — preserves stability across runs
+                if "_doc_filename" not in info:
+                    path = info.get("path", "")
+                    if path and path_counts.get(path, 0) == 1:
+                        filename = module_doc_filename([path])
+                    elif parent_stem:
+                        filename = module_doc_filename([parent_stem, key])
+                    elif path:
+                        filename = module_doc_filename([path, key])
+                    else:
+                        filename = module_doc_filename([key])
+                    info["_doc_filename"] = filename
+                child_stem = os.path.splitext(info["_doc_filename"])[0]
+                nested = info.get("children") or {}
+                if isinstance(nested, dict) and nested:
+                    _walk(nested, child_stem)
+
+        _walk(tree)
+
+    def _build_generation_tasks(self, tree: Dict[str, Any]) -> list[DocTask]:
+        """Build ledger tasks from the frozen tree."""
+        tasks: list[DocTask] = []
+
+        def _walk(children: Dict[str, Any], parent_path: List[str]) -> list[str]:
+            child_doc_ids: list[str] = []
+            for key, info in children.items():
+                current_path = parent_path + [key]
+                nested = info.get("children") or {}
+                nested_child_ids = _walk(nested, current_path) if isinstance(nested, dict) and nested else []
+                doc_id = doc_id_for_path(tree, current_path)
+                tasks.append(
+                    DocTask(
+                        doc_id=doc_id,
+                        kind="module" if not nested_child_ids else "overview",
+                        module_path=current_path,
+                        output_file=info.get("_doc_filename", module_doc_filename(current_path)),
+                        depends_on=nested_child_ids,
+                        input_hash=_stable_hash(
+                            [*sorted(info.get("components", [])), *nested_child_ids, self.config.output_language, "v7"]
+                        ),
+                        language=self.config.output_language,
+                        prompt_version="v7",
+                    )
+                )
+                child_doc_ids.append(doc_id)
+            return child_doc_ids
+
+        top_level_ids = _walk(tree, [])
+        tasks.append(
+            DocTask(
+                doc_id="overview:root",
+                kind="overview",
+                module_path=[],
+                output_file=OVERVIEW_FILENAME,
+                depends_on=top_level_ids,
+                input_hash=_stable_hash([*top_level_ids, self.config.output_language, "v7"]),
+                language=self.config.output_language,
+                prompt_version="v7",
+            )
+        )
+        return tasks
+
+    def _module_doc_exists(
+        self,
+        working_dir: str,
+        module_path: List[str],
+        module_tree: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Return True if a non-trivial .md file already exists for *module_path*.
 
         Tolerates ``-`` vs ``_`` filename differences from older runs.
         """
+        gen_state = getattr(self, "_gen_state", None)
+        if gen_state is not None and module_tree is not None:
+            doc_id = doc_id_for_path(module_tree, module_path)
+            task = gen_state.get_task(doc_id)
+            if task and task.status == "completed":
+                fpath = os.path.join(working_dir, task.output_file)
+                return os.path.exists(fpath) and os.path.getsize(fpath) > 100
         found = find_module_doc(working_dir, module_path)
         return found is not None and os.path.getsize(found) > 100
 
@@ -277,9 +498,11 @@ class DocumentationGenerator:
         # Prepare output directory
         working_dir = os.path.abspath(self.config.docs_dir)
         file_manager.ensure_directory(working_dir)
+        cleanup_legacy_internal_files(working_dir)
 
         module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
         first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
+        state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
         module_tree = file_manager.load_json(module_tree_path) or {}
         first_module_tree = file_manager.load_json(first_module_tree_path) or {}
 
@@ -298,6 +521,51 @@ class DocumentationGenerator:
                 os.rename(repo_overview_path, os.path.join(working_dir, OVERVIEW_FILENAME))
 
             return working_dir
+
+        dedup_docs_directory(working_dir)
+
+        self._freeze_doc_filenames(module_tree)
+        self._freeze_doc_filenames(first_module_tree)
+        file_manager.save_json(module_tree, module_tree_path)
+        file_manager.save_json(first_module_tree, first_module_tree_path)
+
+        self._gen_state = self._gen_state or GenerationState.load(state_path)
+        self._state_mgr = self._state_mgr or GenerationStateManager(self._gen_state, state_path)
+        await self._state_mgr.update_metadata(self.commit_id or "", _config_fingerprint(self.config))
+        planned_tasks = self._build_generation_tasks(module_tree)
+        if not self._gen_state.tasks:
+            try:
+                await self._state_mgr.bulk_add_tasks(planned_tasks)
+            except ValueError as exc:
+                logger.warning("Skipping colliding planned tasks during initial ledger load: %s", exc)
+                for task in planned_tasks:
+                    try:
+                        await self._state_mgr.add_task(task)
+                    except ValueError as item_exc:
+                        logger.warning(
+                            "Skipped task %s due to output_file collision: %s",
+                            task.doc_id,
+                            item_exc,
+                        )
+        else:
+            existing_ids = set(self._gen_state.tasks)
+            missing_tasks = [task for task in planned_tasks if task.doc_id not in existing_ids]
+            if missing_tasks:
+                try:
+                    await self._state_mgr.bulk_add_tasks(missing_tasks)
+                except ValueError as exc:
+                    logger.warning("Skipping colliding missing tasks: %s", exc)
+                    for task in missing_tasks:
+                        try:
+                            await self._state_mgr.add_task(task)
+                        except ValueError as item_exc:
+                            logger.warning(
+                                "Skipped task %s due to output_file collision: %s",
+                                task.doc_id,
+                                item_exc,
+                            )
+            await self._state_mgr.mark_stale({task.doc_id: task.input_hash for task in planned_tasks})
+        await self._state_mgr.promote_ready()
 
         # ── Dynamic task-queue concurrent path ────────────────────────────
         tree_manager = ModuleTreeManager(module_tree, module_tree_path)
@@ -481,15 +749,26 @@ class DocumentationGenerator:
                                 await asyncio.sleep(actual_delay)
                         try:
                             if key == ROOT_KEY:
+                                state_mgr = getattr(self, "_state_mgr", None)
+                                if state_mgr:
+                                    await state_mgr.mark_running("overview:root")
                                 logger.info("📚 Generating repository overview")
                                 await self.generate_parent_module_docs([], working_dir, tree_manager)
                                 task_models_used = self.config.main_model
                             else:
                                 path, name, info, _ = all_tasks[key]
+                                state_mgr = getattr(self, "_state_mgr", None)
+                                gen_state = getattr(self, "_gen_state", None)
+                                if state_mgr and gen_state:
+                                    await state_mgr.mark_running(
+                                        doc_id_for_path(graph_tree, path)
+                                    )
                                 _, task_models_used = await self.agent_orchestrator.process_module(
                                     name, components,
                                     info.get("components", []),
                                     path, working_dir, tree_manager,
+                                    gen_state=getattr(self, "_gen_state", None),
+                                    state_mgr=getattr(self, "_state_mgr", None),
                                 )
                             last_exc = None
                             break  # success
@@ -527,6 +806,12 @@ class DocumentationGenerator:
                     progress.update(1)
                     logger.error(f"✗ Failed to process '{label}' after all retries: {e}")
                     logger.error(traceback.format_exc())
+                    state_mgr = getattr(self, "_state_mgr", None)
+                    if state_mgr:
+                        failed_doc_id = "overview:root"
+                        if key != ROOT_KEY:
+                            failed_doc_id = doc_id_for_path(graph_tree, all_tasks[key][0])
+                        await state_mgr.mark_failed(failed_doc_id, str(e))
                     # Don't unblock parent — fill pass will handle gaps
                 finally:
                     queue.task_done()
@@ -563,7 +848,7 @@ class DocumentationGenerator:
             count = 0
             for name, info in tree.items():
                 module_path = path + [name]
-                if not self._module_doc_exists(working_dir, module_path):
+                if not self._module_doc_exists(working_dir, module_path, tree):
                     count += 1
                 children = info.get("children") or {}
                 if children:
@@ -574,7 +859,7 @@ class DocumentationGenerator:
             names: List[str] = []
             for name, info in tree.items():
                 module_path = path + [name]
-                if not self._module_doc_exists(working_dir, module_path):
+                if not self._module_doc_exists(working_dir, module_path, tree):
                     names.append("-".join(module_path))
                 children = info.get("children") or {}
                 if children:
@@ -601,8 +886,8 @@ class DocumentationGenerator:
 
     # ── Parent / overview generation ─────────────────────────────────────
 
-    @staticmethod
     def _collect_child_doc_hashes(
+        self,
         module_tree: Dict[str, Any],
         module_path: List[str],
         working_dir: str,
@@ -618,8 +903,16 @@ class DocumentationGenerator:
             children_dict = target.get("children") or {}
         hashes: Dict[str, str] = {}
         for child_name in children_dict:
-            child_path = find_module_doc(working_dir, module_path + [child_name])
-            hashes[child_name] = _file_hash(child_path) if child_path else ""
+            child_doc_id = doc_id_for_path(module_tree, module_path + [child_name])
+            gen_state = getattr(self, "_gen_state", None)
+            task = gen_state.get_task(child_doc_id) if gen_state else None
+            if task and task.content_hash:
+                hashes[child_name] = task.content_hash
+            elif gen_state is None:
+                child_path = find_module_doc(working_dir, module_path + [child_name])
+                hashes[child_name] = _file_hash(child_path) if child_path else ""
+            else:
+                hashes[child_name] = ""
         return hashes
 
     async def generate_parent_module_docs(self, module_path: List[str],
@@ -641,20 +934,28 @@ class DocumentationGenerator:
         if len(module_path) == 0:
             output_path = os.path.join(working_dir, OVERVIEW_FILENAME)
         else:
-            output_path = os.path.join(working_dir, module_doc_filename(module_path))
+            doc_id = doc_id_for_path(module_tree, module_path)
+            gen_state = getattr(self, "_gen_state", None)
+            output_file = gen_state.get_output_file(doc_id) if gen_state else None
+            output_path = os.path.join(
+                working_dir,
+                output_file or doc_id_for_path(module_tree, module_path).split("module:", 1)[-1] + ".md",
+            )
 
         # Collect hashes of direct child docs to detect staleness
         child_hashes = self._collect_child_doc_hashes(module_tree, module_path, working_dir)
-        hash_key = "/".join(module_path) if module_path else "__root__"
-        hashes_path = os.path.join(working_dir, PARENT_DOC_HASHES_FILENAME)
-        saved_hashes = file_manager.load_json(hashes_path) or {}
+        current_input_hash = _hash_mapping(
+            child_hashes,
+            extra=[self.config.output_language, "overview-v7", "/".join(module_path)],
+        )
+        parent_doc_id = "overview:root" if len(module_path) == 0 else doc_id_for_path(module_tree, module_path)
 
         # Skip only when doc exists AND child docs haven't changed
-        existing = find_module_doc(working_dir, module_path) if module_path else (
-            output_path if os.path.exists(output_path) else None
-        )
+        existing = output_path if os.path.exists(output_path) else None
         if existing and os.path.getsize(existing) > 100:
-            if saved_hashes.get(hash_key) == child_hashes:
+            gen_state = getattr(self, "_gen_state", None)
+            parent_task = gen_state.get_task(parent_doc_id) if gen_state else None
+            if parent_task and parent_task.status == "completed" and parent_task.input_hash == current_input_hash:
                 logger.debug(f"✓ Docs already exists at {existing} (children unchanged)")
                 return module_tree
             logger.info(f"↻ Child docs changed for '{module_name}', regenerating")
@@ -681,9 +982,14 @@ class DocumentationGenerator:
                 parent_content = parent_docs.strip()
             file_manager.save_text(parent_content, output_path)
 
-            # Persist child doc hashes for future skip checks
-            saved_hashes[hash_key] = child_hashes
-            file_manager.save_json(saved_hashes, hashes_path)
+            state_mgr = getattr(self, "_state_mgr", None)
+            if state_mgr:
+                await state_mgr.mark_completed(
+                    parent_doc_id,
+                    content_hash=_file_hash(output_path),
+                    model=self.config.main_model,
+                    input_hash=current_input_hash,
+                )
 
             logger.debug(f"Successfully generated parent documentation for: {module_name}")
             return module_tree
@@ -720,47 +1026,26 @@ class DocumentationGenerator:
             file_manager.ensure_directory(working_dir)
             first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-
-            # ── Module tree cache with commit-aware invalidation ──────────
-            # Meta file tracks the commit and a hash of component IDs so we
-            # can detect whether source files actually changed between runs.
-            cache_meta_path = os.path.join(working_dir, TREE_CACHE_META_FILENAME)
-            components_hash = hashlib.md5(
-                ",".join(sorted(components.keys())).encode()
-            ).hexdigest()
+            state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
+            existing_state = GenerationState.load(state_path)
+            current_config_fp = _config_fingerprint(self.config)
 
             cached_tree = file_manager.load_json(first_module_tree_path) if os.path.exists(first_module_tree_path) else None
-            cache_meta = file_manager.load_json(cache_meta_path) if os.path.exists(cache_meta_path) else {}
-
-            def _save_cache_meta():
-                file_manager.save_json(
-                    {"commit_id": self.commit_id, "components_hash": components_hash},
-                    cache_meta_path,
-                )
 
             need_recluster = True
             if cached_tree:
-                if cache_meta.get("commit_id") == self.commit_id:
-                    # Same commit — definitely no file changes
+                if (
+                    existing_state.repo_commit == (self.commit_id or "")
+                    and existing_state.config_fingerprint == current_config_fp
+                ):
                     need_recluster = False
                     logger.debug("Module tree cache hit (same commit)")
-                elif cache_meta.get("components_hash") == components_hash:
-                    # Different commit but source files unchanged — reuse tree,
-                    # update meta so next run takes the fast path
-                    need_recluster = False
-                    _save_cache_meta()
-                    logger.info(
-                        f"Module tree cache reused (commit changed but files unchanged,"
-                        f" {cache_meta.get('commit_id', '?')!r} → {self.commit_id!r})"
-                    )
                 else:
-                    logger.info(
-                        f"Module tree cache invalidated (files changed,"
-                        f" commit {cache_meta.get('commit_id', '?')!r} → {self.commit_id!r})"
-                    )
+                    logger.info("Module tree cache invalidated (commit/config changed)")
 
             if not need_recluster:
                 module_tree = heal_module_tree_components(cached_tree, components)
+                self._freeze_doc_filenames(module_tree)
                 file_manager.save_json(module_tree, first_module_tree_path)
                 if not os.path.exists(module_tree_path):
                     file_manager.save_json(module_tree, module_tree_path)
@@ -771,9 +1056,9 @@ class DocumentationGenerator:
                     index_products=self.index_products,
                 )
                 if module_tree:
+                    self._freeze_doc_filenames(module_tree)
                     file_manager.save_json(module_tree, first_module_tree_path)
                     file_manager.save_json(module_tree, module_tree_path)
-                    _save_cache_meta()
 
             logger.debug(f"Grouped components into {len(module_tree)} modules")
 
@@ -789,6 +1074,10 @@ class DocumentationGenerator:
                 logger.info(f"Generation v2 context set: {len(glossary)} glossary terms, {len(link_map)} link map entries")
             except Exception:
                 logger.warning("Failed to set generation v2 context; continuing without", exc_info=True)
+
+            existing_state.repo_commit = self.commit_id or ""
+            existing_state.config_fingerprint = current_config_fp
+            self._gen_state = existing_state
 
             # Generate module documentation using dynamic programming approach
             # This processes leaf modules first, then parent modules

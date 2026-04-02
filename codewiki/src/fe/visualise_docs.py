@@ -76,13 +76,19 @@ def _attach_doc_filenames(tree: Optional[Dict], docs_dir: str, path: Optional[li
     base = path or []
     for name, info in tree.items():
         module_path = base + [name]
-        found = find_module_doc(docs_dir, module_path)
-        if found:
-            info["doc_filename"] = os.path.basename(found)
-            info["doc_exists"] = True
+        doc_filename = info.get("_doc_filename")
+        if doc_filename:
+            found_path = Path(docs_dir) / doc_filename
+            info["doc_filename"] = doc_filename
+            info["doc_exists"] = found_path.exists()
         else:
-            info["doc_filename"] = module_doc_filename(module_path)
-            info["doc_exists"] = False
+            found = find_module_doc(docs_dir, module_path)
+            if found:
+                info["doc_filename"] = os.path.basename(found)
+                info["doc_exists"] = True
+            else:
+                info["doc_filename"] = module_doc_filename(module_path)
+                info["doc_exists"] = False
         children = info.get("children")
         if isinstance(children, dict) and children:
             _attach_doc_filenames(children, docs_dir, module_path)

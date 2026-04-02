@@ -15,12 +15,17 @@ from codewiki.src.be.prompt_template import format_system_prompt, format_leaf_sy
 from codewiki.src.be.utils import is_complex_module, count_tokens, agent_progress_handler
 from codewiki.src.be.cluster_modules import format_potential_core_components
 from codewiki.src.config import MODULE_TREE_FILENAME
-from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
+from codewiki.src.utils import (
+    content_hash,
+    doc_id_for_path,
+    file_manager,
+    module_doc_filename,
+    find_module_doc,
+)
+from codewiki.src.be.generation_state import DocTask
 
 import logging
 logger = logging.getLogger(__name__)
-
-
 
 async def generate_sub_module_documentation(
     ctx: RunContext[CodeWikiDeps],
@@ -131,6 +136,37 @@ async def generate_sub_module_documentation(
         else:
             module_tree_path = os.path.join(deps.absolute_docs_path, MODULE_TREE_FILENAME)
             file_manager.save_json(deps.module_tree, module_tree_path)
+
+        if deps.state_mgr and deps.gen_state:
+            discovered_parent_id = doc_id_for_path(deps.module_tree, deps.path_to_current_module)
+            for sub_module_name in sub_module_specs:
+                sub_path = deps.path_to_current_module + [sub_module_name]
+                sub_doc_id = doc_id_for_path(deps.module_tree, sub_path)
+                if deps.gen_state.get_task(sub_doc_id):
+                    continue
+                try:
+                    nav = deps.module_tree
+                    for key in deps.path_to_current_module:
+                        nav = nav[key]["children"]
+                    sub_node = nav.get(sub_module_name, {})
+                    output_file = sub_node.get(
+                        "_doc_filename",
+                        module_doc_filename(sub_path),
+                    )
+                except (KeyError, TypeError):
+                    output_file = module_doc_filename(sub_path)
+                await deps.state_mgr.register_discovered_task(
+                    DocTask(
+                        doc_id=sub_doc_id,
+                        kind="module",
+                        module_path=sub_path,
+                        output_file=output_file,
+                        source="discovered",
+                        parent_doc_id=discovered_parent_id,
+                        language=deps.config.output_language,
+                        prompt_version="v7",
+                    )
+                )
     
     for sub_module_name, core_component_ids in sub_module_specs.items():
 
@@ -145,15 +181,37 @@ async def generate_sub_module_documentation(
         deps._dispatched_sub_modules.add(sub_module_name)
 
         # ── Skip sub-modules whose docs already exist ─────────────────
-        docs_path = find_module_doc(
-            deps.absolute_docs_path,
-            deps.path_to_current_module + [sub_module_name],
-        )
+        sub_module_path = deps.path_to_current_module + [sub_module_name]
+        sub_doc_id = doc_id_for_path(deps.module_tree, sub_module_path)
+        docs_path = None
+        if deps.gen_state:
+            task = deps.gen_state.get_task(sub_doc_id)
+            if task and task.status == "completed":
+                candidate = os.path.join(deps.absolute_docs_path, task.output_file)
+                if os.path.exists(candidate) and os.path.getsize(candidate) > 100:
+                    docs_path = candidate
+        if docs_path is None and not deps.gen_state:
+            docs_path = find_module_doc(deps.absolute_docs_path, sub_module_path)
         if docs_path and os.path.getsize(docs_path) > 100:
             logger.debug(f"{indent}{arrow} ✓ Sub-module {sub_module_name} already has docs, skipping")
             continue
 
         logger.info(f"{indent}{arrow} Generating documentation for sub-module: {sub_module_name}")
+
+        # Look up the assigned filename before mutating the current path.
+        try:
+            nav = deps.module_tree
+            for key in deps.path_to_current_module:
+                nav = nav[key]["children"]
+            sub_node = nav.get(sub_module_name, {})
+            assigned_filename = sub_node.get(
+                "_doc_filename",
+                module_doc_filename(deps.path_to_current_module + [sub_module_name]),
+            )
+        except (KeyError, TypeError):
+            assigned_filename = module_doc_filename(
+                deps.path_to_current_module + [sub_module_name]
+            )
 
         num_tokens = count_tokens(format_potential_core_components(core_component_ids, ctx.deps.components)[-1])
         if (
@@ -184,6 +242,7 @@ async def generate_sub_module_documentation(
         deps.current_module_name = sub_module_name
         deps.path_to_current_module.append(sub_module_name)
         deps.current_depth += 1
+        deps.assigned_doc_filename = assigned_filename
 
         _sub_retry_delays = [5, 15]
         _sub_last_exc = None
@@ -204,7 +263,7 @@ async def generate_sub_module_documentation(
                         core_component_ids=core_component_ids,
                         components=ctx.deps.components,
                         module_tree=ctx.deps.module_tree,
-                    ),
+                    ) + f"\n\nWrite your documentation to the file: {assigned_filename}",
                     deps=ctx.deps,
                     usage_limits=UsageLimits(request_limit=None),
                     event_stream_handler=agent_progress_handler,
@@ -241,12 +300,17 @@ async def generate_sub_module_documentation(
             continue
 
         # Mark this sub-module as completed so re-runs can skip it
-        if deps.module_tree_manager:
-            await deps.module_tree_manager.mark_completed(list(deps.path_to_current_module))
+        if deps.state_mgr and deps.gen_state:
+            await deps.state_mgr.mark_completed(
+                sub_doc_id,
+                content_hash=content_hash(os.path.join(deps.absolute_docs_path, assigned_filename)),
+                model=_sub_models_str,
+            )
 
         # remove the sub-module name from the path to current module and the module tree
         deps.path_to_current_module.pop()
         deps.current_depth -= 1
+        deps.assigned_doc_filename = ""
 
     # restore the previous module name
     deps.current_module_name = previous_module_name

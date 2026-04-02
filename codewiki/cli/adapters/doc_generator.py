@@ -209,19 +209,10 @@ class CLIDocumentationGenerator:
             self.job.fail(str(e))
             raise
     
-    @staticmethod
-    def _clear_completed_flags(tree: dict) -> None:
-        """Recursively remove _completed flags from a module tree so all modules are re-processed."""
-        for info in tree.values():
-            info.pop('_completed', None)
-            children = info.get('children') or {}
-            if children:
-                CLIDocumentationGenerator._clear_completed_flags(children)
-
     async def _run_backend_generation(self, backend_config: BackendConfig):
         """Run the backend documentation generation with progress tracking."""
 
-        # --no-cache: wipe existing markdown files and _completed flags so every
+        # --no-cache: wipe generated markdown files and internal state so every
         # module is regenerated from scratch (e.g. to switch main_model mid-run).
         if self.no_cache:
             working_dir = str(self.output_dir.absolute())
@@ -234,14 +225,13 @@ class CLIDocumentationGenerator:
                 logging.getLogger(__name__).info(
                     f"--no-cache: removed {removed} existing .md file(s) from {working_dir}"
                 )
-            # Clear _completed flags so complex modules are not skipped
-            from codewiki.src.utils import file_manager as _fm
-            from codewiki.src.config import MODULE_TREE_FILENAME
-            module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-            if os.path.exists(module_tree_path):
-                tree = _fm.load_json(module_tree_path) or {}
-                self._clear_completed_flags(tree)
-                _fm.save_json(tree, module_tree_path)
+            internal_dir = os.path.join(working_dir, ".codewiki")
+            if os.path.isdir(internal_dir):
+                for fname in os.listdir(internal_dir):
+                    try:
+                        os.remove(os.path.join(internal_dir, fname))
+                    except OSError:
+                        pass
 
         # Stage 1: Dependency Analysis
         self.progress_tracker.start_stage(1, "Dependency Analysis")
@@ -415,4 +405,3 @@ class CLIDocumentationGenerator:
             # Create our own if backend didn't
             with open(metadata_path, 'w') as f:
                 f.write(self.job.to_json())
-

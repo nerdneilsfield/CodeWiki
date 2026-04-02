@@ -13,7 +13,9 @@ DOCS_DIR = 'docs'
 FIRST_MODULE_TREE_FILENAME = 'first_module_tree.json'
 MODULE_TREE_FILENAME = 'module_tree.json'
 OVERVIEW_FILENAME = 'overview.md'
-TREE_CACHE_META_FILENAME = '_tree_cache_meta.json'
+GENERATION_STATE_FILENAME = 'generation_state.json'
+INTERNAL_SUBDIR = '.codewiki'
+postprocess_fix_links = True
 MAX_DEPTH = 2
 # Default max token settings
 DEFAULT_MAX_TOKENS = 32_768
@@ -74,6 +76,8 @@ class Config:
     output_language: str = "en"
     # When True, lint failures (mermaid/math/link) block the build
     postprocess_strict: bool = False
+    # When True, postprocess tries to fix broken internal links before validation
+    postprocess_fix_links: bool = True
     # Agent instructions for customization
     agent_instructions: Optional[Dict[str, Any]] = None
     # Multi-provider registry for the TOML-based config system
@@ -208,3 +212,10 @@ class Config:
             output_language=output_language,
             agent_instructions=agent_instructions
         )
+
+
+def internal_file_path(working_dir: str, filename: str) -> str:
+    """Return a path for CodeWiki internal files under .codewiki/."""
+    internal_dir = os.path.join(working_dir, INTERNAL_SUBDIR)
+    os.makedirs(internal_dir, exist_ok=True)
+    return os.path.join(internal_dir, filename)
