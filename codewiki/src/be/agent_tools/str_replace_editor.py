@@ -794,10 +794,8 @@ class EditTool:
         try:
             path.write_text(file, encoding=self._encoding or "utf-8")
         except Exception as e:
-            self.logs.append(
-                f"Ran into {e} while trying to write to {self._get_display_path(path)}"
-            )
-            return
+            self.logs.append(f"Write failed for {self._get_display_path(path)}: {e}")
+            raise PermissionError(f"Could not write {self._get_display_path(path)}: {e}") from e
 
     def _make_output(
         self,
