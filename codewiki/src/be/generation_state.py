@@ -182,17 +182,27 @@ class GenerationState:
     def load(cls, path: str) -> "GenerationState":
         if not os.path.exists(path):
             return cls()
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Corrupt generation state at %s (%s) — starting fresh", path, exc)
+            return cls()
         state = cls(
             repo_commit=data.get("repo_commit", ""),
             config_fingerprint=data.get("config_fingerprint", ""),
         )
         for raw_task in data.get("tasks", []):
-            task_fields = {
-                key: value for key, value in raw_task.items() if key in DocTask.__dataclass_fields__
-            }
-            task = DocTask(**task_fields)
+            try:
+                task_fields = {
+                    key: value
+                    for key, value in raw_task.items()
+                    if key in DocTask.__dataclass_fields__
+                }
+                task = DocTask(**task_fields)
+            except (TypeError, KeyError) as exc:
+                logger.warning("Skipping malformed task record: %s", exc)
+                continue
             existing_owner = state._output_file_index.get(task.output_file)
             if existing_owner and existing_owner != task.doc_id:
                 logger.warning(
