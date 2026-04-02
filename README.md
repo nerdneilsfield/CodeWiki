@@ -370,14 +370,23 @@ Python and TypeScript/JavaScript have enhanced adapters with import resolution a
 # Clone and install in development mode
 git clone https://github.com/nerdneilsfield/CodeWiki.git
 cd CodeWiki
-pip install -e ".[dev]"
+uv sync --extra dev
+pre-commit install
 
-# Run tests (536 tests)
+# Run local quality checks
+uv run ruff check .
+uv run ruff format --check .
+uv run ty check
+
+# Run tests
 python -m pytest tests/ -q
 
 # Run index/clustering/generation/postprocess tests
 python -m pytest tests/test_index_*.py tests/test_clustering_*.py \
     tests/test_generation_*.py tests/test_postprocess_*.py -q
+
+# Run all local hooks
+pre-commit run --all-files
 ```
 
 ---

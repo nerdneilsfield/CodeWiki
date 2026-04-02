@@ -221,6 +221,18 @@ pytest tests/test_dependency_analyzer.py
 pytest --cov=codewiki tests/
 ```
 
+## Local Tooling
+
+```bash
+uv sync --extra dev
+pre-commit install
+
+uv run ruff check .
+uv run ruff format --check .
+uv run ty check
+pre-commit run --all-files
+```
+
 ## Code Style
 
 - Follow PEP 8 for Python code
@@ -294,4 +306,3 @@ export CODEWIKI_LOG_LEVEL=DEBUG
 For development questions:
 - GitHub Issues: https://github.com/FSoft-AI4Code/CodeWiki/issues
 - Main Documentation: [README.md](README.md)
-

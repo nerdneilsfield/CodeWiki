@@ -81,9 +81,9 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
-    "mypy>=1.5.0",
-    "ruff>=0.1.0",
+    "pre-commit>=4.3.0",
+    "ruff>=0.13.1",
+    "ty>=0.0.27",
     "ipython>=8.0.0",
     "tree-sitter-cmake>=0.7.2",
     "tree-sitter-make>=1.1.0",
@@ -105,20 +105,46 @@ include = ["codewiki*"]
 [tool.setuptools.package-data]
 codewiki = ["templates/**/*", "py.typed"]
 
-[tool.black]
-line-length = 100
-target-version = ['py312']
-
-[tool.mypy]
-python_version = "3.12"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = [
+    ".codewiki",
+    "codewiki-docs",
+    "output",
+]
+
+[tool.ruff.lint]
+select = ["E9", "F811", "F821", "F822", "F823"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F811"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+all = "warn"
+
+[tool.ty.src]
+include = ["codewiki"]
+exclude = [
+    "codewiki/templates",
+]
+
+[[tool.ty.overrides]]
+include = ["tests/**"]
+
+[tool.ty.overrides.rules]
+all = "warn"
+
+[tool.ty.terminal]
+output-format = "concise"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
