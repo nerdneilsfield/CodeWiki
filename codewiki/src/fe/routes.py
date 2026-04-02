@@ -5,6 +5,7 @@ FastAPI route handlers for the CodeWiki web application.
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import asdict
@@ -22,6 +23,8 @@ from .config import WebAppConfig
 from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
 
 logger = logging.getLogger(__name__)
+
+_COMMIT_RE = re.compile(r"^[a-f0-9]{4,40}$")
 
 
 class WebRoutes:
@@ -69,6 +72,11 @@ class WebRoutes:
         elif not GitHubRepoProcessor.is_valid_github_url(repo_url):
             message = "Please enter a valid GitHub repository URL"
             message_type = "error"
+        elif commit_id and not _COMMIT_RE.match(commit_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid commit ID format (expected 4-40 lowercase hex characters)",
+            )
         else:
             # Normalize the repo URL for comparison
             normalized_repo_url = self._normalize_github_url(repo_url)
