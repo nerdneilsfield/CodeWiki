@@ -1,4 +1,5 @@
 import time
+from typing import Any, Dict, List, cast
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse
@@ -22,7 +23,7 @@ try:
         for key, value in incr_usage.details.items():
             slf.details[key] = slf.details.get(key, 0) + value
 
-    _pai_usage._incr_usage_tokens = _safe_incr_usage_tokens
+    cast(Any, _pai_usage)._incr_usage_tokens = _safe_incr_usage_tokens
 except Exception:
     pass  # silently skip if pydantic_ai changes its internals
 # ─────────────────────────────────────────────────────────────────────────────
@@ -30,7 +31,6 @@ except Exception:
 import logging
 import os
 import traceback
-from typing import Dict, List, Any
 
 # Configure logging and monitoring
 
@@ -138,12 +138,13 @@ class AgentOrchestrator:
         components: Dict[str, Any],
         core_component_ids: List[str],
         estimated_tokens: int = 0,
-    ) -> Agent:
+    ) -> Agent[CodeWikiDeps, str]:
         """Create an appropriate agent based on module complexity."""
         if self.long_context_model and estimated_tokens > self.config.long_context_threshold:
             model = self.long_context_model
         else:
             model = self.fallback_models
+        custom_instructions = self.custom_instructions or ""
 
         if is_complex_module(components, core_component_ids):
             return Agent(
@@ -156,7 +157,7 @@ class AgentOrchestrator:
                     generate_sub_module_documentation_tool,
                 ],
                 system_prompt=format_system_prompt(
-                    module_name, self.custom_instructions, self.output_language
+                    module_name, custom_instructions, self.output_language
                 ),
             )
         else:
@@ -166,7 +167,7 @@ class AgentOrchestrator:
                 deps_type=CodeWikiDeps,
                 tools=[read_code_components_tool, str_replace_editor_tool],
                 system_prompt=format_leaf_system_prompt(
-                    module_name, self.custom_instructions, self.output_language
+                    module_name, custom_instructions, self.output_language
                 ),
             )
 
@@ -192,15 +193,16 @@ class AgentOrchestrator:
             comma-separated string of model names that actually responded.
         """
         logger.info(f"Processing module: {module_name}")
+        module_tree_for_state: dict[str, Any] | None = None
 
         # ── Cache check ──────────────────────────────────────────────────
         doc_path_parts = module_path if module_path else [module_name]
         docs_path = None if gen_state else find_module_doc(working_dir, doc_path_parts)
         task = None
-        if gen_state and (
-            module_tree := (await tree_manager.get_snapshot() if tree_manager else None)
-        ):
-            doc_id = doc_id_for_path(module_tree, doc_path_parts)
+        if gen_state:
+            module_tree_for_state = await tree_manager.get_snapshot() if tree_manager else None
+        if gen_state and module_tree_for_state:
+            doc_id = doc_id_for_path(module_tree_for_state, doc_path_parts)
             task = gen_state.get_task(doc_id)
             if task and task.status == "completed":
                 candidate = os.path.join(working_dir, task.output_file)
@@ -227,20 +229,20 @@ class AgentOrchestrator:
                     logger.debug(
                         f"✓ Module {module_name} has docs and no children — treating as complete"
                     )
-                    if state_mgr and module_tree:
+                    if state_mgr and module_tree_for_state:
                         await state_mgr.mark_completed(
-                            doc_id_for_path(module_tree, doc_path_parts),
+                            doc_id_for_path(module_tree_for_state, doc_path_parts),
                             content_hash=content_hash(docs_path),
                             model=self.config.main_model,
                         )
                     return {}, "cached"
 
                 child_done = False
-                if gen_state and module_tree:
+                if gen_state and module_tree_for_state:
                     child_done = all(
                         (
                             child_task := gen_state.get_task(
-                                doc_id_for_path(module_tree, module_path + [cn])
+                                doc_id_for_path(module_tree_for_state, module_path + [cn])
                             )
                         )
                         and child_task.status == "completed"
@@ -259,9 +261,9 @@ class AgentOrchestrator:
                     logger.debug(
                         f"✓ Module {module_name} and all children have docs — treating as complete"
                     )
-                    if state_mgr and module_tree:
+                    if state_mgr and module_tree_for_state:
                         await state_mgr.mark_completed(
-                            doc_id_for_path(module_tree, doc_path_parts),
+                            doc_id_for_path(module_tree_for_state, doc_path_parts),
                             content_hash=content_hash(docs_path),
                             model=self.config.main_model,
                         )
@@ -280,7 +282,7 @@ class AgentOrchestrator:
             module_tree = await tree_manager.get_snapshot()
         else:
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-            module_tree = file_manager.load_json(module_tree_path)
+            module_tree = file_manager.load_json(module_tree_path) or {}
 
         # Estimate prompt tokens to pre-select long-context model if needed.
         # The model receives system_prompt + tool_definitions + user_prompt, so we

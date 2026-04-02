@@ -236,6 +236,8 @@ async def generate_sub_module_documentation(
         else:
             model = ctx.deps.fallback_models or select_agent_model(ctx.deps.config, num_tokens)
 
+        custom_instructions = ctx.deps.custom_instructions or ""
+
         if (
             is_complex_module(ctx.deps.components, core_component_ids)
             and ctx.deps.current_depth < ctx.deps.max_depth
@@ -246,7 +248,7 @@ async def generate_sub_module_documentation(
                 name=sub_module_name,
                 deps_type=CodeWikiDeps,
                 system_prompt=format_system_prompt(
-                    sub_module_name, ctx.deps.custom_instructions, ctx.deps.config.output_language
+                    sub_module_name, custom_instructions, ctx.deps.config.output_language
                 ),
                 tools=[
                     read_code_components_tool,
@@ -260,7 +262,7 @@ async def generate_sub_module_documentation(
                 name=sub_module_name,
                 deps_type=CodeWikiDeps,
                 system_prompt=format_leaf_system_prompt(
-                    sub_module_name, ctx.deps.custom_instructions, ctx.deps.config.output_language
+                    sub_module_name, custom_instructions, ctx.deps.config.output_language
                 ),
                 tools=[read_code_components_tool, str_replace_editor_tool],
             )
@@ -272,6 +274,7 @@ async def generate_sub_module_documentation(
 
         _sub_retry_delays = [5, 15]
         _sub_last_exc = None
+        _sub_models_str = "unknown"
         for _sub_attempt in range(len(_sub_retry_delays) + 1):
             if _sub_attempt > 0:
                 _delay = _sub_retry_delays[_sub_attempt - 1]

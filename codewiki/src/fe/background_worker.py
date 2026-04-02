@@ -14,7 +14,7 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from queue import Queue
-from typing import Dict
+from typing import Dict, Optional
 from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,10 @@ class BackgroundWorker:
     """Background worker for processing documentation generation jobs."""
 
     def __init__(
-        self, cache_manager: CacheManager, temp_dir: str = None, config_path: str | None = None
+        self,
+        cache_manager: CacheManager,
+        temp_dir: str | None = None,
+        config_path: str | None = None,
     ):
         self.cache_manager = cache_manager
         self.temp_dir = temp_dir or WebAppConfig.TEMP_DIR
@@ -67,7 +70,7 @@ class BackgroundWorker:
             job.error_message = "Server is at capacity, please try again later"
             return False
 
-    def get_job_status(self, job_id: str) -> JobStatus:
+    def get_job_status(self, job_id: str) -> Optional[JobStatus]:
         """Get job status by ID."""
         return self.job_status.get(job_id)
 
@@ -83,7 +86,7 @@ class BackgroundWorker:
             return
 
         try:
-            data = file_manager.load_json(self.jobs_file)
+            data = file_manager.load_json(str(self.jobs_file)) or {}
 
             for job_id, job_data in data.items():
                 # Only load completed jobs to avoid inconsistent state
@@ -166,7 +169,7 @@ class BackgroundWorker:
                     "docs_path": job.docs_path,
                 }
 
-            file_manager.save_json(data, self.jobs_file)
+            file_manager.save_json(data, str(self.jobs_file))
         except Exception as e:
             logger.error("Error saving job statuses: %s", e)
 
@@ -206,6 +209,7 @@ class BackgroundWorker:
             return
 
         job = self.job_status[job_id]
+        temp_repo_dir: str | None = None
 
         try:
             # Update job status
@@ -291,7 +295,7 @@ class BackgroundWorker:
 
         finally:
             # Cleanup temporary repository
-            if "temp_repo_dir" in locals() and temp_repo_dir and os.path.exists(temp_repo_dir):
+            if temp_repo_dir and os.path.exists(temp_repo_dir):
                 try:
                     shutil.rmtree(temp_repo_dir)
                     logger.info("Cleaned up temp directory: %s", temp_repo_dir)

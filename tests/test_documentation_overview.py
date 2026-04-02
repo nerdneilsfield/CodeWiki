@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import warnings
 
 import pytest
 
@@ -174,8 +175,12 @@ async def test_generate_parent_module_docs_marks_completed_after_write(tmp_path)
         call_llm=_call_llm,
     )
 
-    result = await generate_parent_module_docs(ctx, [])
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        result = await generate_parent_module_docs(ctx, [])
 
     assert result == tree
     assert (docs_dir / "overview.md").read_text(encoding="utf-8") == "Generated content"
     assert state.get_task("overview:root").status == "completed"
+    deprecations = [w for w in captured if issubclass(w.category, DeprecationWarning)]
+    assert deprecations == []

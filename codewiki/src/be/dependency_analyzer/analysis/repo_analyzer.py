@@ -9,7 +9,7 @@ import os
 import fnmatch
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from codewiki.src.be.dependency_analyzer.utils.patterns import (
     DEFAULT_IGNORE_PATTERNS,
     DEFAULT_INCLUDE_PATTERNS,
@@ -33,8 +33,13 @@ class RepoAnalyzer:
             else list(DEFAULT_IGNORE_PATTERNS)
         )
 
-    def analyze_repository_structure(self, repo_dir: str) -> Dict:
-        file_tree = self._build_file_tree(repo_dir)
+    def analyze_repository_structure(self, repo_dir: str) -> Dict[str, Any]:
+        file_tree = self._build_file_tree(repo_dir) or {
+            "type": "directory",
+            "name": Path(repo_dir).name,
+            "path": ".",
+            "children": [],
+        }
         return {
             "file_tree": file_tree,
             "summary": {
@@ -43,8 +48,8 @@ class RepoAnalyzer:
             },
         }
 
-    def _build_file_tree(self, repo_dir: str) -> Dict:
-        def build_tree(path: Path, base_path: Path) -> Optional[Dict]:
+    def _build_file_tree(self, repo_dir: str) -> Optional[Dict[str, Any]]:
+        def build_tree(path: Path, base_path: Path) -> Optional[Dict[str, Any]]:
             relative_path = path.relative_to(base_path)
             relative_path_str = str(relative_path)
 

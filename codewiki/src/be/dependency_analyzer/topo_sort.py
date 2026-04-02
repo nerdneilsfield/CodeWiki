@@ -294,8 +294,8 @@ def get_leaf_nodes(graph: Dict[str, Set[str]], components: Dict[str, Node]) -> L
     # Find leaf nodes (nodes that no other nodes depend on)
     leaf_nodes = set(acyclic_graph.keys())
 
-    def concise_node(leaf_nodes: Set[str]) -> Set[str]:
-        concise_leaf_nodes = set()
+    def concise_node(leaf_nodes: Set[str]) -> List[str]:
+        concise_leaf_nodes: Set[str] = set()
         for node in leaf_nodes:
             if node.endswith("__init__"):
                 # replace by class name
@@ -355,7 +355,7 @@ def get_leaf_nodes(graph: Dict[str, Set[str]], components: Dict[str, Node]) -> L
 
         concise_leaf_nodes = concise_node(leaf_nodes)
 
-    if not leaf_nodes:
+    if not concise_leaf_nodes:
         logger.warning("No leaf nodes found in the graph")
         return []
 

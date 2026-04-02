@@ -1,8 +1,10 @@
 from pathlib import Path
 from unittest.mock import patch
+import warnings
 
 import pytest
 
+from codewiki.src.config import Config
 from codewiki.src.config_loader import ProviderConfig, load_app_config
 
 
@@ -14,7 +16,7 @@ def runtime_config(monkeypatch):
     return app_config.to_runtime_config(repo_path="/tmp/fake-repo")
 
 
-def test_create_model_from_ref_uses_openai_model_for_openai_provider(runtime_config):
+def test_create_model_from_ref_uses_openai_chat_model_for_openai_provider(runtime_config):
     from codewiki.src.be import llm_services
 
     sentinel_provider = object()
@@ -23,7 +25,7 @@ def test_create_model_from_ref_uses_openai_model_for_openai_provider(runtime_con
         patch.object(
             llm_services, "_make_provider_for_model", return_value=sentinel_provider
         ) as mock_provider,
-        patch.object(llm_services, "OpenAIModel", return_value=sentinel_model) as mock_model,
+        patch.object(llm_services, "OpenAIChatModel", return_value=sentinel_model) as mock_model,
     ):
         result = llm_services.create_model_from_ref(runtime_config, "openai/gpt-4o-mini")
 
@@ -90,3 +92,30 @@ def test_create_fallback_models_supports_cross_provider_chain(runtime_config):
     assert mock_create.call_args_list[1].args[1] == "claude/claude-sonnet-4-5-20250929"
     assert mock_create.call_args_list[2].args[1] == "openai/gpt-4.1"
     mock_fallback.assert_called_once()
+
+
+def test_model_factories_do_not_emit_openai_model_deprecation_warnings():
+    from codewiki.src.be import llm_services
+
+    config = Config(
+        repo_path="/tmp/fake-repo",
+        output_dir="/tmp/output",
+        dependency_graph_dir="/tmp/graphs",
+        docs_dir="/tmp/docs",
+        max_depth=2,
+        llm_base_url="http://localhost:4000/",
+        llm_api_key="sk-test",
+        main_model="test-main",
+        cluster_model="test-cluster",
+        fallback_model="test-fallback",
+        long_context_model="test-long",
+    )
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        llm_services.create_main_model(config)
+        llm_services.create_fallback_models(config)
+        llm_services.create_long_context_model(config)
+
+    deprecations = [w for w in captured if issubclass(w.category, DeprecationWarning)]
+    assert deprecations == []

@@ -55,7 +55,7 @@ from codewiki.src.be.documentation_scheduler import (
 class DocumentationGenerator:
     """Main documentation generation orchestrator."""
 
-    def __init__(self, config: Config, commit_id: str = None):
+    def __init__(self, config: Config, commit_id: str | None = None):
         self.config = config
         self.commit_id = commit_id
         self.graph_builder = DependencyGraphBuilder(config)

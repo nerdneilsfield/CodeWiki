@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -227,7 +228,7 @@ async def generate_parent_module_docs(
         if llm_callable is None:
             from codewiki.src.be.llm_services import call_llm as llm_callable
 
-        if asyncio.iscoroutinefunction(llm_callable):
+        if inspect.iscoroutinefunction(llm_callable):
             parent_docs = await llm_callable(prompt, config)
         else:
             parent_docs = await asyncio.to_thread(llm_callable, prompt, config)

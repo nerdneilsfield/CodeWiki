@@ -52,7 +52,7 @@ class GitHubRepoProcessor:
         }
 
     @staticmethod
-    def clone_repository(clone_url: str, target_dir: str, commit_id: str = None) -> bool:
+    def clone_repository(clone_url: str, target_dir: str, commit_id: str | None = None) -> bool:
         """Clone a GitHub repository to the target directory, optionally checking out a specific commit."""
         try:
             # Ensure target directory exists

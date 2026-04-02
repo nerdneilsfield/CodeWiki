@@ -237,7 +237,7 @@ class GuideGenerator:
         if self.config.long_context_model and self.config.long_context_model not in models:
             models.append(self.config.long_context_model)
 
-        last_exc = None
+        last_exc: Exception | None = None
         for model_name in models:
             try:
                 async with self._semaphore:
@@ -245,7 +245,9 @@ class GuideGenerator:
             except Exception as e:
                 logger.warning(f"Guide LLM call failed with model {model_name}: {e}")
                 last_exc = e
-        raise last_exc
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Guide LLM fallback chain exhausted without attempting any model")
 
     # ── File helpers ──────────────────────────────────────────────────
 

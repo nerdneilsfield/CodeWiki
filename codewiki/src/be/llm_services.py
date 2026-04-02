@@ -13,7 +13,7 @@ from anthropic import Anthropic
 from openai import OpenAI, AsyncOpenAI
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.fallback import FallbackModel
-from pydantic_ai.models.openai import OpenAIModel, OpenAIModelSettings
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -111,7 +111,7 @@ def create_model_from_ref(config: Config, model_ref: str):
     settings = _model_settings(config)
 
     if provider_config.type in {"openai_compatible", "azure_openai"}:
-        return OpenAIModel(model_name=model_name, provider=provider, settings=settings)
+        return OpenAIChatModel(model_name=model_name, provider=provider, settings=settings)
 
     if provider_config.type == "claude":
         return AnthropicModel(model_name=model_name, provider=provider, settings=settings)
@@ -122,7 +122,7 @@ def create_model_from_ref(config: Config, model_ref: str):
 def create_main_model(config: Config):
     if _has_provider_registry(config):
         return create_model_from_ref(config, config.main_model)
-    return OpenAIModel(
+    return OpenAIChatModel(
         model_name=config.main_model,
         provider=_make_provider(config),
         settings=_model_settings(config),
@@ -139,7 +139,7 @@ def create_fallback_models(config: Config) -> FallbackModel:
             fallbacks.append(create_model_from_ref(config, name))
         else:
             fallbacks.append(
-                OpenAIModel(
+                OpenAIChatModel(
                     model_name=name,
                     provider=_make_provider(config),
                     settings=_model_settings(config),
@@ -151,7 +151,7 @@ def create_fallback_models(config: Config) -> FallbackModel:
             fallbacks.append(create_model_from_ref(config, config.long_context_model))
         else:
             fallbacks.append(
-                OpenAIModel(
+                OpenAIChatModel(
                     model_name=config.long_context_model,
                     provider=_make_provider(config),
                     settings=_model_settings(config),
@@ -164,7 +164,7 @@ def create_fallback_models(config: Config) -> FallbackModel:
 def create_long_context_model(config: Config):
     if _has_provider_registry(config):
         return create_model_from_ref(config, config.long_context_model)
-    return OpenAIModel(
+    return OpenAIChatModel(
         model_name=config.long_context_model,
         provider=_make_provider(config),
         settings=_model_settings(config),

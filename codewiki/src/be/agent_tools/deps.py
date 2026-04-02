@@ -19,7 +19,7 @@ class CodeWikiDeps:
     max_depth: int
     current_depth: int
     config: Config  # LLM configuration
-    custom_instructions: str = None
+    custom_instructions: Optional[str] = None
     module_tree_manager: Optional["ModuleTreeManager"] = None
     fallback_models: Any = None  # pre-built FallbackModel from AgentOrchestrator
     long_context_model: Any = None  # pre-built OpenAIModel (long context) or None
