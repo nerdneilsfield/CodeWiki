@@ -1,6 +1,9 @@
 from codewiki.src.be.documentation_generator import DocumentationGenerator, cleanup_legacy_internal_files
 from codewiki.src.config import Config
 from codewiki.src.be.generation_state import GenerationState, DocTask
+from unittest.mock import MagicMock
+
+import asyncio
 
 
 def _make_generator(tmp_path):
@@ -121,3 +124,78 @@ def test_cleanup_legacy_internal_files_removes_root_cache_files(tmp_path):
     assert set(removed) == {"_parent_doc_hashes.json", "_tree_cache_meta.json", "_guide_cache.json"}
     for name in removed:
         assert not (tmp_path / name).exists()
+
+
+def test_get_processing_levels_returns_leaf_first_levels(tmp_path):
+    gen = _make_generator(tmp_path)
+    tree = {
+        "Parent": {
+            "children": {
+                "ChildA": {"children": {}},
+                "ChildB": {"children": {}},
+            }
+        }
+    }
+
+    levels = gen.get_processing_levels(tree)
+
+    assert len(levels) == 2
+    assert {name for _, name, _ in levels[0]} == {"ChildA", "ChildB"}
+    assert [name for _, name, _ in levels[1]] == ["Parent"]
+
+
+def test_run_orchestrates_generation_pipeline_in_order(tmp_path, monkeypatch):
+    gen = _make_generator(tmp_path)
+    events = []
+    components = {"comp": {"file_path": "a.py"}}
+    leaf_nodes = ["comp"]
+    module_tree = {"Root": {"path": "root", "children": {}, "components": ["comp"]}}
+    working_dir = str(tmp_path / "docs")
+
+    class _DummyGuideGenerator:
+        def __init__(self, **kwargs):
+            events.append("guide_init")
+
+        async def run(self):
+            events.append("guide_run")
+
+    async def _fake_generate_module_documentation(_components, _leaf_nodes):
+        assert _components == components
+        assert _leaf_nodes == leaf_nodes
+        events.append("generate_module_documentation")
+        return working_dir
+
+    def _fake_create_metadata(_working_dir, _components, _num_leaf_nodes):
+        assert _working_dir == working_dir
+        assert _components == components
+        assert _num_leaf_nodes == len(leaf_nodes)
+        events.append("create_metadata")
+
+    def _fake_fix_docs(_working_dir, _config):
+        assert _working_dir == working_dir
+        events.append("fix_docs")
+
+    gen.graph_builder = MagicMock()
+    gen.graph_builder.build_dependency_graph.return_value = (components, leaf_nodes)
+    gen.generate_module_documentation = _fake_generate_module_documentation
+    gen.create_documentation_metadata = _fake_create_metadata
+
+    monkeypatch.setattr("codewiki.src.be.documentation_generator.cluster_modules", lambda *args, **kwargs: module_tree)
+    monkeypatch.setattr("codewiki.src.be.documentation_generator.GuideGenerator", _DummyGuideGenerator)
+    monkeypatch.setattr("codewiki.src.be.docs_fixer.fix_docs", _fake_fix_docs)
+
+    # Bypass index build and context wiring details; the orchestration order is the contract here.
+    monkeypatch.setattr(
+        "codewiki.src.be.index.index_builder.IndexBuilder",
+        MagicMock(side_effect=RuntimeError("skip index")),
+    )
+
+    asyncio.run(gen.run())
+
+    assert events == [
+        "generate_module_documentation",
+        "create_metadata",
+        "guide_init",
+        "guide_run",
+        "fix_docs",
+    ]
