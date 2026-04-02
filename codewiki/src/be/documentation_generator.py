@@ -1,16 +1,9 @@
-import asyncio
-import hashlib
 import logging
 import os
-import json
-import random
 from collections import defaultdict
 from typing import Dict, List, Any, Optional
-from copy import deepcopy
 import traceback
-
-import openai
-from pydantic_ai.exceptions import UnexpectedModelBehavior
+from types import SimpleNamespace
 
 from tqdm import tqdm
 
@@ -19,10 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Local imports
 from codewiki.src.be.dependency_analyzer import DependencyGraphBuilder
-from codewiki.src.be.llm_services import call_llm, _MAX_RETRY_AFTER
-from codewiki.src.be.prompt_template import (
-    format_overview_prompt,
-)
+from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.cluster_modules import cluster_modules, heal_module_tree_components
 from codewiki.src.config import (
     Config,
@@ -33,142 +23,32 @@ from codewiki.src.config import (
     internal_file_path,
 )
 from codewiki.src.utils import (
-    _normalize_for_match,
-    doc_id_for_path,
     file_manager,
-    find_module_doc,
     module_doc_filename,
 )
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
 from codewiki.src.be.module_tree_manager import ModuleTreeManager
 from codewiki.src.be.guide_generator import GuideGenerator
 from codewiki.src.be.generation_state import GenerationState, GenerationStateManager, DocTask
-
-def _file_hash(path: str) -> str:
-    """Return hex MD5 of file contents, or empty string if missing."""
-    try:
-        with open(path, 'rb') as f:
-            h = hashlib.md5()
-            while chunk := f.read(8192):
-                h.update(chunk)
-            return h.hexdigest()
-    except OSError:
-        return ""
-
-
-def _iter_tree_nodes(tree: Dict[str, Any], parent_path: Optional[List[str]] = None):
-    """Yield (module_path, key, info) for every node in the tree."""
-    base = parent_path or []
-    for key, info in tree.items():
-        path = base + [key]
-        yield path, key, info
-        children = info.get("children") or {}
-        if isinstance(children, dict) and children:
-            yield from _iter_tree_nodes(children, path)
-
-
-def _collect_path_counts(tree: Dict[str, Any]) -> dict[str, int]:
-    counts: dict[str, int] = defaultdict(int)
-    for _module_path, _key, info in _iter_tree_nodes(tree):
-        path = info.get("path", "")
-        counts[path] += 1
-    return counts
-
-
-def _stable_hash(parts: list[str]) -> str:
-    digest = hashlib.md5()
-    for part in parts:
-        digest.update(part.encode("utf-8"))
-        digest.update(b"\0")
-    return digest.hexdigest()
-
-
-def _hash_mapping(mapping: Dict[str, str], extra: list[str] | None = None) -> str:
-    items = [f"{key}:{mapping[key]}" for key in sorted(mapping)]
-    if extra:
-        items.extend(extra)
-    return _stable_hash(items)
-
-
-def _content_similarity(text_a: str, text_b: str) -> float:
-    lines_a = set(text_a.strip().splitlines())
-    lines_b = set(text_b.strip().splitlines())
-    if not lines_a and not lines_b:
-        return 1.0
-    union = lines_a | lines_b
-    if not union:
-        return 1.0
-    return len(lines_a & lines_b) / len(union)
-
-
-def dedup_docs_directory(working_dir: str) -> dict[str, list]:
-    """Resolve duplicate markdown files that normalize to the same name."""
-    groups: dict[str, list[str]] = {}
-    for fname in os.listdir(working_dir):
-        if not fname.endswith(".md") or fname.startswith("_"):
-            continue
-        groups.setdefault(_normalize_for_match(fname), []).append(fname)
-
-    removed: list[str] = []
-    skipped_conflicts: list[list[str]] = []
-    for files in groups.values():
-        if len(files) <= 1:
-            continue
-        contents: dict[str, str] = {}
-        for fname in files:
-            try:
-                with open(os.path.join(working_dir, fname), "r", encoding="utf-8") as f:
-                    contents[fname] = f.read()
-            except OSError:
-                contents[fname] = ""
-        files.sort(key=lambda name: len(contents.get(name, "")), reverse=True)
-        winner = files[0]
-        all_similar = all(
-            _content_similarity(contents[winner], contents[other]) > 0.8
-            for other in files[1:]
-        )
-        if not all_similar:
-            logger.warning(
-                "Dedup conflict: %s normalize to the same name but diverge in content",
-                files,
-            )
-            skipped_conflicts.append(files)
-            continue
-        for loser in files[1:]:
-            os.remove(os.path.join(working_dir, loser))
-            removed.append(loser)
-    return {"removed": removed, "skipped_conflicts": skipped_conflicts}
-
-
-def cleanup_legacy_internal_files(working_dir: str) -> list[str]:
-    """Remove legacy cache files that used to live in the docs root."""
-    removed: list[str] = []
-    for filename in ("_parent_doc_hashes.json", "_tree_cache_meta.json", "_guide_cache.json"):
-        path = os.path.join(working_dir, filename)
-        if not os.path.exists(path):
-            continue
-        try:
-            os.remove(path)
-            removed.append(filename)
-        except OSError:
-            logger.warning("Failed to remove legacy internal file %s", path)
-    return removed
-
-
-def _config_fingerprint(config: Config) -> str:
-    return _stable_hash(
-        [
-            config.main_model,
-            config.cluster_model,
-            config.fallback_model or "",
-            config.long_context_model or "",
-            config.output_language,
-            str(config.max_depth),
-            str(config.max_concurrent),
-            "naming-v7",
-        ]
-    )
-
+from codewiki.src.be.documentation_tree_utils import (
+    build_generation_tasks,
+    cleanup_legacy_internal_files,
+    config_fingerprint,
+    dedup_docs_directory,
+    freeze_doc_filenames,
+    hash_mapping,
+    module_doc_exists,
+)
+from codewiki.src.be.documentation_overview import (
+    OverviewContext,
+    build_overview_structure as build_overview_structure_impl,
+    collect_child_doc_hashes as collect_child_doc_hashes_impl,
+    generate_parent_module_docs as generate_parent_module_docs_impl,
+)
+from codewiki.src.be.documentation_scheduler import (
+    fill_missing_module_docs as fill_missing_module_docs_impl,
+    run_module_queue as run_module_queue_impl,
+)
 
 class DocumentationGenerator:
     """Main documentation generation orchestrator."""
@@ -180,6 +60,21 @@ class DocumentationGenerator:
         self.agent_orchestrator = AgentOrchestrator(config)
         self._gen_state: Optional[GenerationState] = None
         self._state_mgr: Optional[GenerationStateManager] = None
+
+    @staticmethod
+    def _freeze_doc_filenames(tree: Dict[str, Any]) -> None:
+        freeze_doc_filenames(tree)
+
+    def _build_generation_tasks(self, tree: Dict[str, Any]) -> list[DocTask]:
+        return build_generation_tasks(tree, self.config)
+
+    def _module_doc_exists(
+        self,
+        working_dir: str,
+        module_path: List[str],
+        module_tree: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        return module_doc_exists(working_dir, module_path, module_tree, self._gen_state)
 
     @staticmethod
     def _detect_repo_url(repo_path: str) -> Optional[str]:
@@ -326,172 +221,17 @@ class DocumentationGenerator:
 
     def build_overview_structure(self, module_tree: Dict[str, Any], module_path: List[str],
                                  working_dir: str) -> Dict[str, Any]:
-        """Build a lightweight structure for overview generation.
-
-        Instead of deep-copying the entire module tree (which can be tens of
-        thousands of tokens), this builds a minimal structure containing only
-        the target module's direct children with their docs and a slim outline
-        of the rest of the tree.
-        """
-
-        if len(module_path) == 0:
-            # Repo-level overview — include top-level modules with their docs
-            result: Dict[str, Any] = {}
-            for name, info in module_tree.items():
-                entry: Dict[str, Any] = {"is_target_for_overview_generation": True}
-                children = info.get("children")
-                if isinstance(children, dict) and children:
-                    entry["children"] = {cn: {} for cn in children}
-                child_path = None
-                gen_state = getattr(self, "_gen_state", None)
-                if gen_state:
-                    child_doc_id = doc_id_for_path(module_tree, [name])
-                    child_file = gen_state.get_output_file(child_doc_id)
-                    if child_file:
-                        candidate = os.path.join(working_dir, child_file)
-                        if os.path.exists(candidate):
-                            child_path = candidate
-                if child_path is None:
-                    child_path = find_module_doc(working_dir, [name])
-                if child_path:
-                    entry["docs"] = file_manager.load_text(child_path)
-                else:
-                    logger.warning(f"Module docs not found for [{name}]")
-                    entry["docs"] = ""
-                result[name] = entry
-            return result
-
-        # Sub-module overview — navigate to target, include children docs
-        result = self._strip_tree_for_overview(module_tree)
-        # Navigate to the target node in the lightweight copy
-        node = result
-        for i, path_part in enumerate(module_path):
-            if path_part not in node:
-                node[path_part] = {}
-            if i < len(module_path) - 1:
-                node = node[path_part].setdefault("children", {})
-            else:
-                node[path_part]["is_target_for_overview_generation"] = True
-
-        # Load children docs for the target module from the original tree
-        target_original = module_tree
-        for p in module_path:
-            target_original = target_original[p]
-        children = target_original.get("children") or {}
-        target_node = node[module_path[-1]]
-        target_children = target_node.setdefault("children", {})
-        for child_name in children:
-            if child_name not in target_children:
-                target_children[child_name] = {}
-            child_path = None
-            gen_state = getattr(self, "_gen_state", None)
-            if gen_state:
-                child_doc_id = doc_id_for_path(module_tree, module_path + [child_name])
-                child_file = gen_state.get_output_file(child_doc_id)
-                if child_file:
-                    candidate = os.path.join(working_dir, child_file)
-                    if os.path.exists(candidate):
-                        child_path = candidate
-            if child_path is None:
-                child_path = find_module_doc(working_dir, module_path + [child_name])
-            if child_path:
-                target_children[child_name]["docs"] = file_manager.load_text(child_path)
-            else:
-                logger.warning(f"Module docs not found for {module_path + [child_name]}")
-                target_children[child_name]["docs"] = ""
-
-        return result
+        return build_overview_structure_impl(
+            OverviewContext(
+                config=self.config,
+                module_tree=module_tree,
+                working_dir=working_dir,
+                gen_state=self._gen_state,
+            ),
+            module_path,
+        )
 
     # ── Main entry point ─────────────────────────────────────────────────
-
-    @staticmethod
-    def _freeze_doc_filenames(tree: Dict[str, Any]) -> None:
-        """Populate ``_doc_filename`` on each tree node using collision-aware rules."""
-        path_counts = _collect_path_counts(tree)
-
-        def _walk(children: Dict[str, Any], parent_stem: str = ""):
-            for key, info in children.items():
-                # Once frozen, never recompute — preserves stability across runs
-                if "_doc_filename" not in info:
-                    path = info.get("path", "")
-                    if path and path_counts.get(path, 0) == 1:
-                        filename = module_doc_filename([path])
-                    elif parent_stem:
-                        filename = module_doc_filename([parent_stem, key])
-                    elif path:
-                        filename = module_doc_filename([path, key])
-                    else:
-                        filename = module_doc_filename([key])
-                    info["_doc_filename"] = filename
-                child_stem = os.path.splitext(info["_doc_filename"])[0]
-                nested = info.get("children") or {}
-                if isinstance(nested, dict) and nested:
-                    _walk(nested, child_stem)
-
-        _walk(tree)
-
-    def _build_generation_tasks(self, tree: Dict[str, Any]) -> list[DocTask]:
-        """Build ledger tasks from the frozen tree."""
-        tasks: list[DocTask] = []
-
-        def _walk(children: Dict[str, Any], parent_path: List[str]) -> list[str]:
-            child_doc_ids: list[str] = []
-            for key, info in children.items():
-                current_path = parent_path + [key]
-                nested = info.get("children") or {}
-                nested_child_ids = _walk(nested, current_path) if isinstance(nested, dict) and nested else []
-                doc_id = doc_id_for_path(tree, current_path)
-                tasks.append(
-                    DocTask(
-                        doc_id=doc_id,
-                        kind="module" if not nested_child_ids else "overview",
-                        module_path=current_path,
-                        output_file=info.get("_doc_filename", module_doc_filename(current_path)),
-                        depends_on=nested_child_ids,
-                        input_hash=_stable_hash(
-                            [*sorted(info.get("components", [])), *nested_child_ids, self.config.output_language, "v7"]
-                        ),
-                        language=self.config.output_language,
-                        prompt_version="v7",
-                    )
-                )
-                child_doc_ids.append(doc_id)
-            return child_doc_ids
-
-        top_level_ids = _walk(tree, [])
-        tasks.append(
-            DocTask(
-                doc_id="overview:root",
-                kind="overview",
-                module_path=[],
-                output_file=OVERVIEW_FILENAME,
-                depends_on=top_level_ids,
-                input_hash=_stable_hash([*top_level_ids, self.config.output_language, "v7"]),
-                language=self.config.output_language,
-                prompt_version="v7",
-            )
-        )
-        return tasks
-
-    def _module_doc_exists(
-        self,
-        working_dir: str,
-        module_path: List[str],
-        module_tree: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """Return True if a non-trivial .md file already exists for *module_path*.
-
-        Tolerates ``-`` vs ``_`` filename differences from older runs.
-        """
-        gen_state = getattr(self, "_gen_state", None)
-        if gen_state is not None and module_tree is not None:
-            doc_id = doc_id_for_path(module_tree, module_path)
-            task = gen_state.get_task(doc_id)
-            if task and task.status == "completed":
-                fpath = os.path.join(working_dir, task.output_file)
-                return os.path.exists(fpath) and os.path.getsize(fpath) > 100
-        found = find_module_doc(working_dir, module_path)
-        return found is not None and os.path.getsize(found) > 100
 
     async def generate_module_documentation(self, components: Dict[str, Any], leaf_nodes: List[str]) -> str:
         """Generate documentation for all modules using level-based concurrency."""
@@ -524,15 +264,15 @@ class DocumentationGenerator:
 
         dedup_docs_directory(working_dir)
 
-        self._freeze_doc_filenames(module_tree)
-        self._freeze_doc_filenames(first_module_tree)
+        freeze_doc_filenames(module_tree)
+        freeze_doc_filenames(first_module_tree)
         file_manager.save_json(module_tree, module_tree_path)
         file_manager.save_json(first_module_tree, first_module_tree_path)
 
         self._gen_state = self._gen_state or GenerationState.load(state_path)
         self._state_mgr = self._state_mgr or GenerationStateManager(self._gen_state, state_path)
-        await self._state_mgr.update_metadata(self.commit_id or "", _config_fingerprint(self.config))
-        planned_tasks = self._build_generation_tasks(module_tree)
+        await self._state_mgr.update_metadata(self.commit_id or "", config_fingerprint(self.config))
+        planned_tasks = build_generation_tasks(module_tree, self.config)
         if not self._gen_state.tasks:
             try:
                 await self._state_mgr.bulk_add_tasks(planned_tasks)
@@ -597,237 +337,20 @@ class DocumentationGenerator:
         desc: str = "Generating docs",
         include_root: bool = True,
     ) -> None:
-        """Process all modules in *graph_tree* using a dependency-aware async queue.
-
-        Leaf nodes (no children) are enqueued immediately and processed in
-        parallel.  A parent node is enqueued only after ALL its children
-        complete, preserving the bottom-up ordering required for documentation
-        quality.  When *include_root* is True a virtual ROOT task runs
-        ``generate_parent_module_docs`` for the repo-level overview after all
-        top-level modules finish.
-        """
-        ROOT_KEY = "__root__"
-        max_concurrent = self.config.max_concurrent
-
-        # ── Build dependency graph ────────────────────────────────────────
-        all_tasks: Dict[str, tuple] = {}
-        pending_count: Dict[str, int] = {}
-        child_to_parent: Dict[str, str] = {}
-
-        def _walk(tree: Dict[str, Any], parent_path: List[str], parent_key: Optional[str] = None):
-            for name, info in tree.items():
-                current_path = parent_path + [name]
-                key = "/".join(current_path)
-                children = info.get("children") or {}
-                is_queue_leaf = not children or not isinstance(children, dict)
-                all_tasks[key] = (current_path, name, info, is_queue_leaf)
-                if parent_key is not None:
-                    child_to_parent[key] = parent_key
-                if not is_queue_leaf:
-                    pending_count[key] = len(children)
-                    _walk(children, current_path, parent_key=key)
-
-        _walk(graph_tree, [])
-
-        top_level_keys = list(graph_tree.keys())
-        if include_root:
-            pending_count[ROOT_KEY] = len(top_level_keys)
-            for name in top_level_keys:
-                child_to_parent[name] = ROOT_KEY
-
-        lock = asyncio.Lock()
-        queue: asyncio.Queue[str] = asyncio.Queue()
-
-        leaf_count = 0
-        for key, (_, _, _, is_leaf) in all_tasks.items():
-            if is_leaf:
-                await queue.put(key)
-                leaf_count += 1
-
-        total_tasks = len(all_tasks) + (1 if include_root else 0)
-        logger.info(
-            f"📊 Dynamic queue: {leaf_count} leaf tasks, "
-            f"{len(all_tasks) - leaf_count} parent tasks"
-            + (", 1 root overview" if include_root else "")
-        )
-
-        progress = tqdm(
-            total=total_tasks,
+        await run_module_queue_impl(
+            config=self.config,
+            graph_tree=graph_tree,
+            components=components,
+            working_dir=working_dir,
+            tree_manager=tree_manager,
+            process_module=self.agent_orchestrator.process_module,
+            generate_root_overview=(lambda: self.generate_parent_module_docs([], working_dir, tree_manager)),
             desc=desc,
-            unit="module",
-            dynamic_ncols=True,
-            leave=True,
+            include_root=include_root,
+            gen_state=getattr(self, "_gen_state", None),
+            state_mgr=getattr(self, "_state_mgr", None),
+            progress_factory=tqdm,
         )
-
-        # Retry delays for transient server errors: 10 s, 30 s, 90 s.
-        # Model-quality errors (bad JSON output, exceeded tool retries) resolve
-        # immediately on a fresh agent — no delay needed.
-        _WORKER_RETRY_DELAYS = [10, 30, 90]
-
-        def _jitter(base: float) -> float:
-            """Add uniform 0-50% jitter to a base delay."""
-            return base + random.uniform(0, base * 0.5)
-
-        def _get_retry_after(exc: Exception) -> float | None:
-            """Extract and sanitize Retry-After from a 429 response header."""
-            import openai
-            if not isinstance(exc, openai.RateLimitError):
-                return None
-            headers = getattr(getattr(exc, "response", None), "headers", {})
-            val = headers.get("retry-after") or headers.get("Retry-After")
-            if val:
-                try:
-                    seconds = float(val)
-                except (ValueError, OverflowError):
-                    return None
-                if not (0 <= seconds < float("inf")):
-                    return None
-                return min(seconds, _MAX_RETRY_AFTER)
-            return None
-
-        def _is_context_length_error(exc: Exception) -> bool:
-            """Return True when the error is a deterministic input-too-long rejection.
-
-            These 400 errors are caused by the prompt exceeding the model's
-            context window.  Retrying with the same input will always fail, so
-            the retry loop must skip them entirely.
-            """
-            if isinstance(exc, openai.APIStatusError) and exc.status_code == 400:
-                msg = str(exc)
-                return (
-                    "input length" in msg
-                    or "Range of input" in msg
-                    or "context_length_exceeded" in msg
-                    or "maximum context length" in msg.lower()
-                )
-            return False
-
-        def _retry_delay(attempt: int, exc: Exception) -> int:
-            """Return seconds to wait before the given retry attempt.
-
-            Server-side transient errors (rate limits, 5xx) need real back-off.
-            Model-quality errors (HTTP 400 invalid JSON args, UnexpectedModelBehavior)
-            resolve immediately once a fresh agent context is used — delay = 0.
-            Context-length errors are deterministic — never retried (caller checks).
-            """
-            is_model_quality = (
-                isinstance(exc, UnexpectedModelBehavior)
-                or (
-                    isinstance(exc, openai.APIStatusError)
-                    and exc.status_code == 400
-                )
-            )
-            if is_model_quality:
-                return 0
-            return _WORKER_RETRY_DELAYS[attempt - 1]
-
-        # ── Worker ───────────────────────────────────────────────────────
-        async def _worker(_worker_id: int):
-            while True:
-                try:
-                    key = await queue.get()
-                except asyncio.CancelledError:
-                    return
-                label = "overview" if key == ROOT_KEY else all_tasks[key][1]
-                try:
-                    progress.set_postfix_str(label, refresh=False)
-                    task_t0 = asyncio.get_event_loop().time()
-                    task_models_used = ""
-                    last_exc = None
-                    for attempt in range(len(_WORKER_RETRY_DELAYS) + 1):
-                        if attempt > 0:
-                            delay = _retry_delay(attempt, last_exc)
-                            logger.warning(
-                                f"  ↻ Retrying '{label}'"
-                                + (f" in {delay}s" if delay else " immediately")
-                                + f" (attempt {attempt}/{len(_WORKER_RETRY_DELAYS)})"
-                                + f" after: {last_exc}"
-                            )
-                            if delay:
-                                retry_after = _get_retry_after(last_exc)
-                                actual_delay = retry_after if retry_after is not None else _jitter(delay)
-                                await asyncio.sleep(actual_delay)
-                        try:
-                            if key == ROOT_KEY:
-                                state_mgr = getattr(self, "_state_mgr", None)
-                                if state_mgr:
-                                    await state_mgr.mark_running("overview:root")
-                                logger.info("📚 Generating repository overview")
-                                await self.generate_parent_module_docs([], working_dir, tree_manager)
-                                task_models_used = self.config.main_model
-                            else:
-                                path, name, info, _ = all_tasks[key]
-                                state_mgr = getattr(self, "_state_mgr", None)
-                                gen_state = getattr(self, "_gen_state", None)
-                                if state_mgr and gen_state:
-                                    await state_mgr.mark_running(
-                                        doc_id_for_path(graph_tree, path)
-                                    )
-                                _, task_models_used = await self.agent_orchestrator.process_module(
-                                    name, components,
-                                    info.get("components", []),
-                                    path, working_dir, tree_manager,
-                                    gen_state=getattr(self, "_gen_state", None),
-                                    state_mgr=getattr(self, "_state_mgr", None),
-                                )
-                            last_exc = None
-                            break  # success
-                        except Exception as exc:
-                            last_exc = exc
-                            if _is_context_length_error(exc):
-                                logger.warning(
-                                    f"  ✗ '{label}' prompt exceeds model context limit"
-                                    " — skipping retries"
-                                )
-                                break  # deterministic; retrying the same input won't help
-
-                    if last_exc is not None:
-                        raise last_exc
-
-                    task_elapsed = asyncio.get_event_loop().time() - task_t0
-                    progress.update(1)
-                    model_suffix = f" (model: {task_models_used})" if task_models_used else ""
-                    logger.info(f"✓ Task '{label}' completed in {task_elapsed:.1f}s{model_suffix}")
-
-                    # Unblock parent when all siblings are done
-                    parent_key = child_to_parent.get(key)
-                    if parent_key is not None:
-                        async with lock:
-                            pending_count[parent_key] -= 1
-                            remaining = pending_count[parent_key]
-                        if remaining == 0:
-                            if parent_key == ROOT_KEY:
-                                logger.info("🔓 All top-level modules done — enqueueing root overview")
-                            else:
-                                logger.info(f"🔓 Parent unblocked: {all_tasks[parent_key][1]}")
-                            await queue.put(parent_key)
-
-                except Exception as e:
-                    progress.update(1)
-                    logger.error(f"✗ Failed to process '{label}' after all retries: {e}")
-                    logger.error(traceback.format_exc())
-                    state_mgr = getattr(self, "_state_mgr", None)
-                    if state_mgr:
-                        failed_doc_id = "overview:root"
-                        if key != ROOT_KEY:
-                            failed_doc_id = doc_id_for_path(graph_tree, all_tasks[key][0])
-                        await state_mgr.mark_failed(failed_doc_id, str(e))
-                    # Don't unblock parent — fill pass will handle gaps
-                finally:
-                    queue.task_done()
-
-        workers = [asyncio.create_task(_worker(i)) for i in range(max_concurrent)]
-        try:
-            await queue.join()
-        finally:
-            for w in workers:
-                w.cancel()
-            # Wait for workers to finish so their closures release the `progress`
-            # reference before we close it.  Without this gather the GC defers
-            # the tqdm __del__ to the next _run_module_queue call (fill pass),
-            # where sys.stderr may already be in a bad state.
-            await asyncio.gather(*workers, return_exceptions=True)
-            progress.close()
 
     async def _fill_missing_module_docs(
         self,
@@ -836,53 +359,22 @@ class DocumentationGenerator:
         tree_manager,
         max_retries: int,
     ) -> None:
-        """Retry missing module docs using the same dependency-aware queue.
-
-        Uses _run_module_queue so parent-child ordering is respected even
-        during retries — a parent won't run before its children have docs.
-        ``process_module`` and ``generate_parent_module_docs`` both skip
-        nodes whose .md already exists, so only truly missing modules are
-        regenerated.
-        """
-        def _count_missing(tree: Dict[str, Any], path: List[str]) -> int:
-            count = 0
-            for name, info in tree.items():
-                module_path = path + [name]
-                if not self._module_doc_exists(working_dir, module_path, tree):
-                    count += 1
-                children = info.get("children") or {}
-                if children:
-                    count += _count_missing(children, module_path)
-            return count
-
-        def _missing_names(tree: Dict[str, Any], path: List[str]) -> List[str]:
-            names: List[str] = []
-            for name, info in tree.items():
-                module_path = path + [name]
-                if not self._module_doc_exists(working_dir, module_path, tree):
-                    names.append("-".join(module_path))
-                children = info.get("children") or {}
-                if children:
-                    names.extend(_missing_names(children, module_path))
-            return names
-
-        for attempt in range(max_retries):
-            module_tree = await tree_manager.get_snapshot()
-            missing_count = _count_missing(module_tree, [])
-            if missing_count == 0:
-                return
-            missing_names = _missing_names(module_tree, [])
-            logger.warning(
-                f"↩ Fill pass {attempt + 1}/{max_retries}: "
-                f"{missing_count} module(s) without docs — "
-                f"{', '.join(missing_names[:5])}"
-                f"{'...' if len(missing_names) > 5 else ''}"
-            )
-            await self._run_module_queue(
-                module_tree, components, working_dir, tree_manager,
-                desc=f"Fill pass {attempt + 1}/{max_retries}",
-                include_root=False,
-            )
+        await fill_missing_module_docs_impl(
+            config=SimpleNamespace(max_retries=max_retries),
+            working_dir=working_dir,
+            components=components,
+            tree_manager=tree_manager,
+            run_module_queue=lambda **kwargs: self._run_module_queue(
+                kwargs["graph_tree"],
+                kwargs["components"],
+                kwargs["working_dir"],
+                kwargs["tree_manager"],
+                desc=kwargs["desc"],
+                include_root=kwargs["include_root"],
+            ),
+            module_doc_exists=module_doc_exists,
+            gen_state=getattr(self, "_gen_state", None),
+        )
 
     # ── Parent / overview generation ─────────────────────────────────────
 
@@ -892,112 +384,31 @@ class DocumentationGenerator:
         module_path: List[str],
         working_dir: str,
     ) -> Dict[str, str]:
-        """Return ``{child_name: md5_hex}`` for every direct child's doc file."""
-        if not module_path:
-            # Root overview: direct children are top-level tree keys
-            children_dict = module_tree
-        else:
-            target = module_tree
-            for p in module_path:
-                target = target[p]
-            children_dict = target.get("children") or {}
-        hashes: Dict[str, str] = {}
-        for child_name in children_dict:
-            child_doc_id = doc_id_for_path(module_tree, module_path + [child_name])
-            gen_state = getattr(self, "_gen_state", None)
-            task = gen_state.get_task(child_doc_id) if gen_state else None
-            if task and task.content_hash:
-                hashes[child_name] = task.content_hash
-            elif gen_state is None:
-                child_path = find_module_doc(working_dir, module_path + [child_name])
-                hashes[child_name] = _file_hash(child_path) if child_path else ""
-            else:
-                hashes[child_name] = ""
-        return hashes
+        return collect_child_doc_hashes_impl(
+            OverviewContext(
+                config=self.config,
+                module_tree=module_tree,
+                working_dir=working_dir,
+                gen_state=getattr(self, "_gen_state", None),
+            ),
+            module_path,
+        )
 
     async def generate_parent_module_docs(self, module_path: List[str],
                                         working_dir: str,
                                         tree_manager: Optional[ModuleTreeManager] = None) -> Dict[str, Any]:
-        """Generate documentation for a parent module based on its children's documentation."""
-        module_name = module_path[-1] if len(module_path) >= 1 else os.path.basename(os.path.normpath(self.config.repo_path))
-
-        logger.debug(f"Generating parent documentation for: {module_name}")
-
-        # Get module tree
-        if tree_manager:
-            module_tree = await tree_manager.get_snapshot()
-        else:
-            module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-            module_tree = file_manager.load_json(module_tree_path)
-
-        # Determine output path
-        if len(module_path) == 0:
-            output_path = os.path.join(working_dir, OVERVIEW_FILENAME)
-        else:
-            doc_id = doc_id_for_path(module_tree, module_path)
-            gen_state = getattr(self, "_gen_state", None)
-            output_file = gen_state.get_output_file(doc_id) if gen_state else None
-            output_path = os.path.join(
-                working_dir,
-                output_file or doc_id_for_path(module_tree, module_path).split("module:", 1)[-1] + ".md",
-            )
-
-        # Collect hashes of direct child docs to detect staleness
-        child_hashes = self._collect_child_doc_hashes(module_tree, module_path, working_dir)
-        current_input_hash = _hash_mapping(
-            child_hashes,
-            extra=[self.config.output_language, "overview-v7", "/".join(module_path)],
+        return await generate_parent_module_docs_impl(
+            OverviewContext(
+                config=self.config,
+                module_tree={},
+                working_dir=working_dir,
+                gen_state=getattr(self, "_gen_state", None),
+                state_mgr=getattr(self, "_state_mgr", None),
+                tree_manager=tree_manager,
+                call_llm=call_llm,
+            ),
+            module_path,
         )
-        parent_doc_id = "overview:root" if len(module_path) == 0 else doc_id_for_path(module_tree, module_path)
-
-        # Skip only when doc exists AND child docs haven't changed
-        existing = output_path if os.path.exists(output_path) else None
-        if existing and os.path.getsize(existing) > 100:
-            gen_state = getattr(self, "_gen_state", None)
-            parent_task = gen_state.get_task(parent_doc_id) if gen_state else None
-            if parent_task and parent_task.status == "completed" and parent_task.input_hash == current_input_hash:
-                logger.debug(f"✓ Docs already exists at {existing} (children unchanged)")
-                return module_tree
-            logger.info(f"↻ Child docs changed for '{module_name}', regenerating")
-
-        # Create repo structure with 1-depth children docs and target indicator
-        repo_structure = self.build_overview_structure(module_tree, module_path, working_dir)
-
-        prompt = format_overview_prompt(
-            name=module_name,
-            repo_structure=json.dumps(repo_structure, indent=4),
-            is_repo=(len(module_path) == 0),
-            output_language=self.config.output_language,
-        )
-
-        try:
-            # Run LLM call in a thread so it doesn't block the event loop
-            parent_docs = await asyncio.to_thread(call_llm, prompt, self.config)
-
-            # Parse and save parent documentation
-            if "<OVERVIEW>" in parent_docs and "</OVERVIEW>" in parent_docs:
-                parent_content = parent_docs.split("<OVERVIEW>")[1].split("</OVERVIEW>")[0].strip()
-            else:
-                # LLM didn't wrap in tags — use the full response as-is
-                parent_content = parent_docs.strip()
-            file_manager.save_text(parent_content, output_path)
-
-            state_mgr = getattr(self, "_state_mgr", None)
-            if state_mgr:
-                await state_mgr.mark_completed(
-                    parent_doc_id,
-                    content_hash=_file_hash(output_path),
-                    model=self.config.main_model,
-                    input_hash=current_input_hash,
-                )
-
-            logger.debug(f"Successfully generated parent documentation for: {module_name}")
-            return module_tree
-
-        except Exception as e:
-            logger.error(f"Error generating parent documentation for {module_name}: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            raise
 
     async def run(self) -> None:
         """Run the complete documentation generation process using dynamic programming."""
@@ -1028,7 +439,7 @@ class DocumentationGenerator:
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
             state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
             existing_state = GenerationState.load(state_path)
-            current_config_fp = _config_fingerprint(self.config)
+            current_config_fp = config_fingerprint(self.config)
 
             cached_tree = file_manager.load_json(first_module_tree_path) if os.path.exists(first_module_tree_path) else None
 
@@ -1045,7 +456,7 @@ class DocumentationGenerator:
 
             if not need_recluster:
                 module_tree = heal_module_tree_components(cached_tree, components)
-                self._freeze_doc_filenames(module_tree)
+                freeze_doc_filenames(module_tree)
                 file_manager.save_json(module_tree, first_module_tree_path)
                 if not os.path.exists(module_tree_path):
                     file_manager.save_json(module_tree, module_tree_path)
@@ -1056,7 +467,7 @@ class DocumentationGenerator:
                     index_products=self.index_products,
                 )
                 if module_tree:
-                    self._freeze_doc_filenames(module_tree)
+                    freeze_doc_filenames(module_tree)
                     file_manager.save_json(module_tree, first_module_tree_path)
                     file_manager.save_json(module_tree, module_tree_path)
 
