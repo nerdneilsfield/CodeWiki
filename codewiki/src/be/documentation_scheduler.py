@@ -16,6 +16,69 @@ from codewiki.src.utils import doc_id_for_path
 logger = logging.getLogger(__name__)
 
 
+def is_leaf_module(module_info: Dict[str, Any]) -> bool:
+    """Check if a module is a leaf module."""
+    children = module_info.get("children", {})
+    return not children or (isinstance(children, dict) and len(children) == 0)
+
+
+def get_processing_order(
+    module_tree: Dict[str, Any],
+    parent_path: Optional[List[str]] = None,
+) -> List[tuple[List[str], str]]:
+    """Get topological processing order with leaf modules first."""
+    if parent_path is None:
+        parent_path = []
+    processing_order = []
+
+    def collect_modules(tree: Dict[str, Any], path: List[str]):
+        for module_name, module_info in tree.items():
+            current_path = path + [module_name]
+            if module_info.get("children") and isinstance(module_info["children"], dict) and module_info["children"]:
+                collect_modules(module_info["children"], current_path)
+                processing_order.append((current_path, module_name))
+            else:
+                processing_order.append((current_path, module_name))
+
+    collect_modules(module_tree, parent_path)
+    return processing_order
+
+
+def get_processing_levels(
+    module_tree: Dict[str, Any],
+    parent_path: Optional[List[str]] = None,
+) -> List[List[tuple]]:
+    """Group modules into dependency-safe levels for parallel processing."""
+    if parent_path is None:
+        parent_path = []
+
+    node_levels: Dict[str, tuple] = {}
+
+    def assign_levels(tree: Dict[str, Any], path: List[str]):
+        for name, info in tree.items():
+            current_path = path + [name]
+            key = "/".join(current_path)
+            children = info.get("children") or {}
+            if not children or not isinstance(children, dict):
+                node_levels[key] = (0, current_path, name, info)
+            else:
+                assign_levels(children, current_path)
+                child_max = max(
+                    node_levels["/".join(current_path + [cn])][0]
+                    for cn in children
+                    if "/".join(current_path + [cn]) in node_levels
+                )
+                node_levels[key] = (child_max + 1, current_path, name, info)
+
+    assign_levels(module_tree, parent_path)
+
+    by_level: Dict[int, List[tuple]] = {}
+    for _key, (level, path, name, info) in node_levels.items():
+        by_level.setdefault(level, []).append((path, name, info))
+
+    return [by_level[i] for i in sorted(by_level.keys())]
+
+
 async def run_module_queue(
     *,
     config,

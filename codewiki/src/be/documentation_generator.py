@@ -1,9 +1,7 @@
 import logging
 import os
-from collections import defaultdict
 from typing import Dict, List, Any, Optional
 import traceback
-from types import SimpleNamespace
 
 from tqdm import tqdm
 
@@ -47,6 +45,9 @@ from codewiki.src.be.documentation_overview import (
 )
 from codewiki.src.be.documentation_scheduler import (
     fill_missing_module_docs as fill_missing_module_docs_impl,
+    get_processing_levels as get_processing_levels_impl,
+    get_processing_order as get_processing_order_impl,
+    is_leaf_module as is_leaf_module_impl,
     run_module_queue as run_module_queue_impl,
 )
 
@@ -132,92 +133,16 @@ class DocumentationGenerator:
         metadata_path = os.path.join(working_dir, "metadata.json")
         file_manager.save_json(metadata, metadata_path)
 
-    # ── Level-based scheduling ────────────────────────────────────────────
-
     def get_processing_levels(
         self, module_tree: Dict[str, Any], parent_path: Optional[List[str]] = None
     ) -> List[List[tuple]]:
-        """Group modules into levels for parallel processing.
-
-        Returns a list of levels, where level 0 contains the deepest leaf
-        modules and the highest level contains top-level parent modules.
-        Modules within the same level are independent and can be processed
-        concurrently.
-        """
-        if parent_path is None:
-            parent_path = []
-
-        # node_key -> (level, module_path, module_name, module_info)
-        node_levels: Dict[str, tuple] = {}
-
-        def assign_levels(tree: Dict[str, Any], path: List[str]):
-            for name, info in tree.items():
-                current_path = path + [name]
-                key = "/".join(current_path)
-                children = info.get("children") or {}
-                if not children or not isinstance(children, dict):
-                    # Leaf node — level 0
-                    node_levels[key] = (0, current_path, name, info)
-                else:
-                    # Recurse into children first
-                    assign_levels(children, current_path)
-                    # Parent level = max child level + 1
-                    child_max = max(
-                        node_levels["/".join(current_path + [cn])][0]
-                        for cn in children
-                        if "/".join(current_path + [cn]) in node_levels
-                    )
-                    node_levels[key] = (child_max + 1, current_path, name, info)
-
-        assign_levels(module_tree, parent_path)
-
-        by_level: Dict[int, List[tuple]] = defaultdict(list)
-        for _key, (level, path, name, info) in node_levels.items():
-            by_level[level].append((path, name, info))
-
-        return [by_level[i] for i in sorted(by_level.keys())]
-
-    # ── Legacy helper (kept for backward compat) ─────────────────────────
+        return get_processing_levels_impl(module_tree, parent_path)
 
     def get_processing_order(self, module_tree: Dict[str, Any], parent_path: Optional[List[str]] = None) -> List[tuple[List[str], str]]:
-        """Get the processing order using topological sort (leaf modules first)."""
-        if parent_path is None:
-            parent_path = []
-        processing_order = []
-
-        def collect_modules(tree: Dict[str, Any], path: List[str]):
-            for module_name, module_info in tree.items():
-                current_path = path + [module_name]
-
-                # If this module has children, process them first
-                if module_info.get("children") and isinstance(module_info["children"], dict) and module_info["children"]:
-                    collect_modules(module_info["children"], current_path)
-                    # Add this parent module after its children
-                    processing_order.append((current_path, module_name))
-                else:
-                    # This is a leaf module, add it immediately
-                    processing_order.append((current_path, module_name))
-
-        collect_modules(module_tree, parent_path)
-        return processing_order
+        return get_processing_order_impl(module_tree, parent_path)
 
     def is_leaf_module(self, module_info: Dict[str, Any]) -> bool:
-        """Check if a module is a leaf module (has no children or empty children)."""
-        children = module_info.get("children", {})
-        return not children or (isinstance(children, dict) and len(children) == 0)
-
-    @staticmethod
-    def _strip_tree_for_overview(tree: Dict[str, Any]) -> Dict[str, Any]:
-        """Return a lightweight copy of *tree* with component lists and internal
-        flags removed — keeps only module names and hierarchy."""
-        light: Dict[str, Any] = {}
-        for name, info in tree.items():
-            entry: Dict[str, Any] = {}
-            children = info.get("children")
-            if isinstance(children, dict) and children:
-                entry["children"] = DocumentationGenerator._strip_tree_for_overview(children)
-            light[name] = entry
-        return light
+        return is_leaf_module_impl(module_info)
 
     def build_overview_structure(self, module_tree: Dict[str, Any], module_path: List[str],
                                  working_dir: str) -> Dict[str, Any]:
@@ -347,8 +272,8 @@ class DocumentationGenerator:
             generate_root_overview=(lambda: self.generate_parent_module_docs([], working_dir, tree_manager)),
             desc=desc,
             include_root=include_root,
-            gen_state=getattr(self, "_gen_state", None),
-            state_mgr=getattr(self, "_state_mgr", None),
+            gen_state=self._gen_state,
+            state_mgr=self._state_mgr,
             progress_factory=tqdm,
         )
 
@@ -360,7 +285,7 @@ class DocumentationGenerator:
         max_retries: int,
     ) -> None:
         await fill_missing_module_docs_impl(
-            config=SimpleNamespace(max_retries=max_retries),
+            config=self.config,
             working_dir=working_dir,
             components=components,
             tree_manager=tree_manager,
@@ -373,7 +298,7 @@ class DocumentationGenerator:
                 include_root=kwargs["include_root"],
             ),
             module_doc_exists=module_doc_exists,
-            gen_state=getattr(self, "_gen_state", None),
+            gen_state=self._gen_state,
         )
 
     # ── Parent / overview generation ─────────────────────────────────────
@@ -389,7 +314,7 @@ class DocumentationGenerator:
                 config=self.config,
                 module_tree=module_tree,
                 working_dir=working_dir,
-                gen_state=getattr(self, "_gen_state", None),
+                gen_state=self._gen_state,
             ),
             module_path,
         )
@@ -402,8 +327,8 @@ class DocumentationGenerator:
                 config=self.config,
                 module_tree={},
                 working_dir=working_dir,
-                gen_state=getattr(self, "_gen_state", None),
-                state_mgr=getattr(self, "_state_mgr", None),
+                gen_state=self._gen_state,
+                state_mgr=self._state_mgr,
                 tree_manager=tree_manager,
                 call_llm=call_llm,
             ),
