@@ -26,7 +26,7 @@ class FileManager:
         os.makedirs(parent_dir, exist_ok=True)
         tmp_fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", dir=parent_dir)
         try:
-            with os.fdopen(tmp_fd, "w") as f:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4)
                 f.flush()
                 os.fsync(f.fileno())
@@ -44,7 +44,7 @@ class FileManager:
         if not os.path.exists(filepath):
             return None
         try:
-            with open(filepath, "r") as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             return None
@@ -52,13 +52,26 @@ class FileManager:
     @staticmethod
     def save_text(content: str, filepath: str) -> None:
         """Save text content to file."""
-        with open(filepath, "w") as f:
-            f.write(content)
+        parent_dir = os.path.dirname(os.path.abspath(filepath)) or "."
+        os.makedirs(parent_dir, exist_ok=True)
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", dir=parent_dir)
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, filepath)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
 
     @staticmethod
     def load_text(filepath: str) -> str:
         """Load text content from file."""
-        with open(filepath, "r") as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             return f.read()
 
 
