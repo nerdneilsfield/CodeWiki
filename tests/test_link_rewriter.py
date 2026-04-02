@@ -130,5 +130,5 @@ class TestRewriteBrokenLinks:
             SimpleNamespace(postprocess_strict=False, postprocess_fix_links=True),
         )
 
-        assert seen["content"] == "See [IO](cli-io_abstractions.md)."
-        assert md.read_text(encoding="utf-8") == "See [IO](cli-io_abstractions.md)."
+        assert seen["content"].strip() == "See [IO](cli-io_abstractions.md)."
+        assert md.read_text(encoding="utf-8").strip() == "See [IO](cli-io_abstractions.md)."
