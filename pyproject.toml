@@ -63,6 +63,7 @@ dependencies = [
     "mermaid-parser-py>=0.0.2",
     "mermaid-py>=0.8.0",
     "markdown-it-py>=3.0.0",
+    "nh3>=0.2.15",
     "json_repair>=0.30.0",
     "tomli_w>=1.0.0",
 ]

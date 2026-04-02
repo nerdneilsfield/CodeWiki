@@ -12,7 +12,9 @@ Usage:
 """
 
 import argparse
+import html as html_mod
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Dict, Optional
@@ -21,9 +23,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from markdown_it import MarkdownIt
+import nh3
 
 from .template_utils import render_template
-from .templates import DOCS_VIEW_TEMPLATE
+from .templates import DOCS_VIEW_TEMPLATE, prepare_docs_content
 from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
 from codewiki.src.be.postprocess.anchor import heading_to_slug
 
@@ -171,26 +174,22 @@ def markdown_to_html(content: str, base_url: Optional[str] = None) -> str:
 
     # Post-process to ensure mermaid code blocks are properly formatted
     # Look for code blocks with language-mermaid class and convert them to mermaid divs
-    import re
-
     # Pattern to match mermaid code blocks
     pattern = r'<pre><code class="language-mermaid">(.*?)</code></pre>'
 
     def replace_mermaid(match):
         mermaid_code = match.group(1)
-        # Decode HTML entities that might have been encoded
-        import html
-
-        mermaid_code = html.unescape(mermaid_code)
+        mermaid_code = html_mod.unescape(mermaid_code)
+        mermaid_code = nh3.clean(mermaid_code, tags=set(), attributes={})
         return f'<div class="mermaid">{mermaid_code}</div>'
 
     # Replace mermaid code blocks with proper mermaid divs
-    html = re.sub(pattern, replace_mermaid, html, flags=re.DOTALL)
+    html_output = re.sub(pattern, replace_mermaid, html, flags=re.DOTALL)
 
     # Inject stable heading IDs (replaces sequential h-0/h-1 JS assignment)
-    html = _inject_heading_ids(html)
+    html_output = _inject_heading_ids(html_output)
 
-    return html
+    return prepare_docs_content(html_output)
 
 
 def get_file_title(file_path: Path) -> str:
