@@ -68,7 +68,7 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
 </WRITING_APPROACH>
 
 <DOCUMENTATION_STRUCTURE>
-1. **Main Documentation File** (`{module_name}.md`; actual filename uses module path joined by `-`):
+1. **Main Documentation File** (write to the filename assigned by the system in the user prompt):
    - Opening paragraph: a vivid, jargon-light explanation of what this module does and why it matters — a reader should "get it" in 30 seconds
    - Architecture overview: a Mermaid diagram followed by a narrative walkthrough explaining each component's role and the data/control flow between them
    - Key design decisions: what patterns were adopted (and what alternatives exist), with tradeoff analysis
@@ -76,7 +76,7 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
    - Cross-module dependencies: how this module interacts with the rest of the system, with references to other module docs
 
 2. **Sub-module Documentation** (delegated via tool):
-   - Each sub-module gets its own doc file; filename uses module path joined by `-`
+   - Each sub-module gets its own doc file; the filename is assigned by the system
    - Core components explained in narrative prose with analogies, not just bullet lists
    - Key functions/classes: purpose, internal mechanics, parameters, return values, side effects
    - Dependency analysis: what each component calls, what calls it, and the data contracts between them
@@ -102,7 +102,7 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
 
 <WORKFLOW>
 1. Analyze the provided code components, dependency graph, and module structure; explore additional dependencies if needed
-2. Create the module doc file (module path joined by `-`) with overview, architecture narrative, design decisions, and sub-module summaries
+2. Create the module doc file using the exact assigned filename from the user prompt, with overview, architecture narrative, design decisions, and sub-module summaries
 3. Use `generate_sub_module_documentation` to delegate sub-module docs for COMPLEX modules (more than 1 code file, clearly separable into sub-topics)
 4. After sub-modules are documented, make ONE final edit to the module doc file to ensure all sub-module pages are properly cross-referenced
 </WORKFLOW>
@@ -186,7 +186,7 @@ Good: "`Tokenizer.split()` exists because the downstream parser expects a flat t
 <WORKFLOW>
 1. Analyze provided code components, dependency graph, and module structure
 2. Explore additional dependencies between components if needed
-3. Generate the module doc file (module path joined by `-`) with architecture narrative, component deep-dives, dependency analysis, and design tradeoffs
+3. Generate the module doc file using the exact assigned filename from the user prompt, with architecture narrative, component deep-dives, dependency analysis, and design tradeoffs
 </WORKFLOW>
 
 <AVAILABLE_TOOLS>
@@ -209,7 +209,7 @@ Your documentation should answer these questions:
 <MODULE_TREE>
 {module_tree}
 </MODULE_TREE>
-* NOTE: Reference other modules via links based on dependency relationships. All docs are flat in the same folder; filenames are built from the module path joined by '-' (e.g., [Child Module](parent-child.md)).
+* NOTE: Reference other modules via links based on dependency relationships. All docs are flat in the same folder. Use ONLY the filenames explicitly provided by the system link map/context. Never guess filenames or use `../`.
 
 <CORE_COMPONENT_CODES>
 {formatted_core_component_codes}
@@ -1316,17 +1316,13 @@ def format_overview_prompt(name: str, repo_structure: str, is_repo: bool = True,
     Returns:
         Formatted prompt string
     """
-    lang_instruction = ""
-    if output_language and output_language.lower() != "en":
-        lang_name = LANGUAGE_NAMES.get(output_language.lower(), output_language)
-        lang_instruction = f"\nIMPORTANT: Write the overview content in {lang_name}. Keep code, file names, and identifiers in their original language.\n"
-
     if is_repo:
         prompt = REPO_OVERVIEW_PROMPT.format(repo_name=name, repo_structure=repo_structure)
     else:
         prompt = MODULE_OVERVIEW_PROMPT.format(module_name=name, repo_structure=repo_structure)
 
-    if lang_instruction:
-        prompt = prompt + lang_instruction
+    lang_section = _build_language_section(output_language)
+    if lang_section:
+        prompt = f"{lang_section}\n\n{prompt}"
 
     return prompt + EVIDENCE_RULES_BLOCK

@@ -633,7 +633,21 @@ def fix_docs(working_dir: str, config: Config) -> FixStats:
 
     _save_hash_cache(docs_path, updated_cache)
 
-    # ── Phase 4: Link validation ──────────────────────────────────────────────
+    # ── Phase 4a: Link rewriting ──────────────────────────────────────────────
+    if getattr(config, "postprocess_fix_links", True):
+        try:
+            from codewiki.src.be.postprocess.link_rewriter import rewrite_broken_links
+
+            rewrite_stats = rewrite_broken_links(working_dir)
+            if rewrite_stats["rewritten"] or rewrite_stats["removed"]:
+                logger.info(
+                    f"  \U0001f517 Links: rewrote {rewrite_stats['rewritten']}, "
+                    f"removed {rewrite_stats['removed']} broken link(s)"
+                )
+        except Exception as exc:
+            logger.warning(f"Link rewriting failed: {exc}")
+
+    # ── Phase 4b: Link validation ──────────────────────────────────────────────
     try:
         from codewiki.src.be.postprocess.link_validator import validate_links
         link_issues = validate_links(working_dir)

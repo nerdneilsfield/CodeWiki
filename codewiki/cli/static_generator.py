@@ -110,7 +110,7 @@ article img{max-width:100%;border-radius:var(--r);}
 # Page template (uses string.Template — $var substitution, no brace escaping)
 # ──────────────────────────────────────────────────────────────────────────────
 
-_PAGE_TEMPLATE = Template("""\
+_PAGE_TEMPLATE = Template(r"""\
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -318,11 +318,16 @@ def _resolve_nav_hrefs(
     for key, data in module_tree.items():
         module_path = base + [key]
         map_key = "/".join(module_path)
-        found = find_module_doc(docs_dir, module_path)
-        if found:
-            result[map_key] = os.path.basename(found).replace(".md", ".html")
+        doc_filename = data.get("_doc_filename")
+        if doc_filename:
+            found_path = os.path.join(docs_dir, doc_filename)
+            result[map_key] = doc_filename.replace(".md", ".html") if os.path.exists(found_path) else None
         else:
-            result[map_key] = None
+            found = find_module_doc(docs_dir, module_path)
+            if found:
+                result[map_key] = os.path.basename(found).replace(".md", ".html")
+            else:
+                result[map_key] = None
         children = data.get("children") or {}
         if children:
             result.update(_resolve_nav_hrefs(children, docs_dir, module_path))
@@ -347,7 +352,7 @@ def _build_nav_html(
         href = (resolved_hrefs or {}).get(map_key)
         has_page = href is not None
         if not href:
-            href = module_doc_filename(module_path).replace(".md", ".html")
+            href = data.get("_doc_filename", module_doc_filename(module_path)).replace(".md", ".html")
         active = ' on' if _normalize_for_match(current_html) == _normalize_for_match(href) else ''
         pl = depth * 12
         nav_key = f"{key}-d{depth}".replace('.', '-').replace('/', '-').replace(' ', '-')
@@ -428,8 +433,23 @@ def _rewrite_md_to_html_links(html: str) -> str:
     """Replace href="something.md" with href="something.html" in rendered HTML."""
     def _replace(m: re.Match) -> str:
         href = m.group(1)
-        if href.endswith(".md") and not href.startswith("http") and not href.startswith("#"):
-            href = re.sub(r"\.md$", ".html", href)
+        if href.startswith("http") or href.startswith("#"):
+            return f'href="{href}"'
+
+        suffix = ""
+        split_at = len(href)
+        for marker in ("#", "?"):
+            idx = href.find(marker)
+            if idx != -1 and idx < split_at:
+                split_at = idx
+        if split_at != len(href):
+            suffix = href[split_at:]
+            href = href[:split_at]
+
+        if href.endswith(".md"):
+            href = re.sub(r"\.md$", ".html", href) + suffix
+        else:
+            href = href + suffix
         return f'href="{href}"'
     return re.sub(r'href="([^"]*)"', _replace, html)
 
@@ -485,6 +505,10 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
     def _inline(m: re.Match) -> str:
         inner = m.group(1)
         if _CJK_RE.search(inner):
+            return m.group(0)
+        before = m.string[: m.start()].rstrip()
+        after = m.string[m.end() :].lstrip()
+        if (before and _CJK_RE.search(before[-1])) or (after and _CJK_RE.search(after[0])):
             return m.group(0)
         idx = len(protected)
         ph = f'CWIKIMI{idx:06d}'
@@ -597,7 +621,9 @@ class StaticHTMLGenerator:
         meta_html = _build_meta_html(metadata, hide_repo_links=hide_repo_links)
 
         # Collect all .md files
-        md_files = sorted(docs_dir.glob("*.md"))
+        md_files = sorted(
+            f for f in docs_dir.glob("*.md") if not f.name.startswith("_")
+        )
         if not md_files:
             logger.warning(f"No .md files found in {docs_dir}")
             return []
