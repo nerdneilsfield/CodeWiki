@@ -59,7 +59,7 @@ def _build_naming_prompt(
         "You must name every cluster exactly as listed — do not skip any.",
         "",
         "For each cluster, provide:",
-        '  - "title": Use format: 中文名 (English Name)',
+        '  - "title": Use format: 中文名 (English Name). The Chinese name is the primary display name; the English name in parentheses is for identifier stability across runs.',
         '  - "description": One sentence describing the cluster\'s purpose.',
         "",
         "Clusters to name:",

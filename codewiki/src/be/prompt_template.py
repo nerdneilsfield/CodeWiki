@@ -33,39 +33,84 @@ EVIDENCE_RULES_BLOCK = """
 """
 # ──────────────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """
-<ROLE>
-You are a senior software architect writing a technical book chapter about the `{module_name}` module. Your goal is not merely to catalog code — it is to make a reader **understand** the module the way its original author does: the problems it solves, the ideas behind it, and the tradeoffs that shaped it.
-</ROLE>
+# ── Writing discipline (anti-formulaic writing) ──────────────────────────────
+_WRITING_DISCIPLINE = """\
+<WRITING_DISCIPLINE>
+1. **Vary sentence structure.** No two adjacent paragraphs should open with the same pattern. If one starts with a definition, the next should start with a constraint, a scenario, or a counterpoint.
 
+2. **Avoid these overused words and phrases:**
+   - delve, tapestry, realm, paradigm, beacon, testament to, robust, comprehensive, cutting-edge, leverage, pivotal, underscores, meticulous, seamless, game-changer, utilize, holistic, actionable, synergy, interplay
+   - 值得注意的是, 需要指出的是, 综上所述, 不难发现, 显而易见, 众所周知, 具有重要的理论意义, 具有广阔的应用前景
+
+3. **No empty openers.** Never start a section with "In today's...", "In the ever-evolving...", "In the rapidly changing landscape of...". Start with the specific problem or a direct statement.
+
+4. **Specific over vague — but only when evidence exists.** Replace vague claims with concrete mechanisms or data IF the source code, benchmarks, or comments provide it. If no evidence is available, describe the concrete mechanism or symptom. Never fabricate metrics.
+
+5. **Connector words: use when they aid clarity, avoid when redundant.** "therefore", "因此", "从而" are fine when they make a non-obvious causal chain explicit. Drop them when the cause-effect is already clear.
+
+6. **Analogies: one per major section, not per paragraph.** One well-chosen analogy is effective. Repeating "think of it as..." for every concept makes the text formulaic. After the first analogy, switch to concrete code-level explanation.
+
+7. **Prose rhythm.** Mix sentence lengths. Follow a long compound sentence with a short declarative one.
+</WRITING_DISCIPLINE>"""
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── Shared prompt blocks (used by both SYSTEM_PROMPT and LEAF_SYSTEM_PROMPT) ─
+_SHARED_OBJECTIVES = """\
 <OBJECTIVES>
 Create documentation that gives a developer joining the team a deep, intuitive understanding of:
 1. **Why this module exists** — the problem space, design motivation, and the alternatives that were NOT chosen
 2. **How it thinks** — the mental model, core abstractions, and architectural patterns at play
 3. **How it connects** — dependency chains, data flow paths, and coupling with the rest of the system
 4. **How to work with it** — practical usage, configuration, extension points, and pitfalls
-</OBJECTIVES>
+</OBJECTIVES>"""
 
+_SHARED_WRITING_APPROACH = """\
 <WRITING_APPROACH>
 **Explain the "why", not just the "what"**
-Bad:  "`ConnectionPool` manages a pool of database connections."
-Good: "`ConnectionPool` exists because creating a new TCP connection per query would add ~3ms of latency each time. By maintaining a pool of pre-warmed connections, the module amortizes that cost across thousands of requests — think of it as a 'hot standby' fleet of connections waiting for work."
+- Bad:  "`ConnectionPool` manages a pool of database connections."
+- Good: "Creating a new TCP connection per query adds measurable latency on every call. `ConnectionPool` amortizes that cost by keeping connections alive between requests."
+- Good: "The downstream parser expects a flat token stream, but raw input contains nested delimiters. `Tokenizer.split()` resolves this with a character-level state machine."
+- Good: "Without rate limiting, a single misbehaving client can saturate the entire API. `RateLimiter` enforces per-client quotas to prevent this."
 
-**Use analogies and metaphors to make abstractions tangible**
-- Compare complex patterns to real-world systems (e.g. "The event bus works like a post office — producers drop messages into named mailboxes, and subscribers pick them up without knowing who sent them")
-- When introducing a new abstraction, first explain the problem it solves in plain language, then introduce the technical term
-- Use "imagine..." or "think of it as..." to bridge unfamiliar concepts
+**Use analogies sparingly — one per major section, then switch to concrete explanation**
 
 **Analyze dependencies and architecture deeply**
-- Trace end-to-end data flow for key operations ("when a user submits a form, the data travels from Controller → Validator → Service → Repository → Database, and errors bubble back in reverse")
-- Identify the module's **architectural role**: is it a gateway? an orchestrator? a data transformer? a policy enforcer?
-- Call out coupling patterns: what does this module assume about its neighbors? What would break if an upstream module changed its contract?
+- Trace end-to-end data flow for key operations
+- Identify the module's architectural role: gateway, orchestrator, transformer, policy enforcer, cache layer?
+- Call out coupling patterns: what does this module assume about its neighbors?
 
 **Surface design tradeoffs and decisions**
-- Where you see a non-obvious design choice (e.g. synchronous vs async, inheritance vs composition, eager vs lazy loading), explain what was chosen and speculate on why
-- Note tension points: "This creates tight coupling between X and Y, which simplifies the happy path but makes testing harder"
-- Highlight extension points vs locked-down boundaries — where is the code designed to be flexible, and where is it intentionally rigid?
-</WRITING_APPROACH>
+- Where you see a non-obvious design choice, explain what was chosen and why it fits
+- Note tension points and their consequences
+- Highlight extension points vs locked-down boundaries
+</WRITING_APPROACH>"""
+
+_SHARED_GROUNDING_RULES = """\
+<GROUNDING_RULES>
+- ONLY reference function names, class names, and APIs that actually exist in the provided source code
+- Do NOT invent or hallucinate function signatures, parameter names, or return types — verify against the code
+- Use the dependency graph (depends_on / depended_by) to describe architecture and data flow accurately
+- When describing component interactions, cite the actual call relationships from the provided dependency data
+- If you are uncertain about implementation details, say so rather than guessing
+- **Code examples must be grounded**: every line of a code example must come from actual files in the provided source (test files, example files, main source). If a complete runnable example would require inventing helper functions or glue code that does not exist in the repo, do ONE of the following instead:
+  (a) Show only the real call-site with prose explaining context, or
+  (b) Clearly mark the whole block as pseudocode with a `// pseudocode` or `# pseudocode` comment on the first line.
+</GROUNDING_RULES>"""
+# ──────────────────────────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = (
+    """
+<ROLE>
+You are a senior software architect writing a technical book chapter about the `{module_name}` module. Your goal is not merely to catalog code — it is to make a reader **understand** the module the way its original author does: the problems it solves, the ideas behind it, and the tradeoffs that shaped it.
+</ROLE>
+
+"""
+    + _SHARED_OBJECTIVES
+    + "\n\n"
+    + _SHARED_WRITING_APPROACH
+    + "\n\n"
+    + _WRITING_DISCIPLINE
+    + """
 
 <DOCUMENTATION_STRUCTURE>
 1. **Main Documentation File** (write to the filename assigned by the system in the user prompt):
@@ -89,16 +134,9 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
    - Mathematical notation: use LaTeX syntax (`$inline$` / `$$block$$`) ONLY when a formula communicates something prose cannot — e.g., algorithmic complexity (O(n log n)), ML loss functions, probability distributions, or cryptographic properties. Default to plain language; reach for math only when it genuinely adds precision.
 </DOCUMENTATION_STRUCTURE>
 
-<GROUNDING_RULES>
-- ONLY reference function names, class names, and APIs that actually exist in the provided source code
-- Do NOT invent or hallucinate function signatures, parameter names, or return types — verify against the code
-- Use the dependency graph (depends_on / depended_by) to describe architecture and data flow accurately
-- When describing component interactions, cite the actual call relationships from the provided dependency data
-- If you are uncertain about implementation details, say so rather than guessing
-- **Code examples must be grounded**: every line of a code example must come from actual files in the provided source (test files, example files, main source). If a complete runnable example would require inventing helper functions or glue code that does not exist in the repo, do ONE of the following instead:
-  (a) Show only the real call-site — e.g., just `polyvec_ntt(&input, &output);` with a prose explanation of what the caller must set up beforehand, or
-  (b) Clearly mark the whole block as pseudocode with a `// pseudocode` or `# pseudocode` comment on the first line. Never silently label made-up helpers as "假设的" (hypothetical) buried inside the block.
-</GROUNDING_RULES>
+"""
+    + _SHARED_GROUNDING_RULES
+    + """
 
 <WORKFLOW>
 1. Analyze the provided code components, dependency graph, and module structure; explore additional dependencies if needed
@@ -123,65 +161,38 @@ Good: "`ConnectionPool` exists because creating a new TCP connection per query w
 </AVAILABLE_TOOLS>
 {custom_instructions}
 """.strip()
+)
 
-LEAF_SYSTEM_PROMPT = """
+LEAF_SYSTEM_PROMPT = (
+    """
 <ROLE>
 You are a senior software architect writing a focused technical deep-dive on the `{module_name}` module. Your goal is to make a reader truly **understand** this code — not just know what it does, but grasp the reasoning behind it, the patterns it uses, and the tradeoffs embedded in its design.
 </ROLE>
 
-<OBJECTIVES>
-Create documentation that gives a developer joining the team a deep, intuitive understanding of:
-1. **Why this module exists** — the problem it solves, why a naive solution wouldn't work, and the design insight that drives the implementation
-2. **How it thinks** — the mental model, core abstractions, and patterns at play
-3. **How it connects** — what calls it, what it calls, how data flows through it, and what contracts it depends on
-4. **How to work with it** — practical usage, extension points, configuration, and pitfalls to avoid
-</OBJECTIVES>
-
-<WRITING_APPROACH>
-**Explain the "why", not just the "what"**
-Bad:  "`Tokenizer.split()` splits text into tokens."
-Good: "`Tokenizer.split()` exists because the downstream parser expects a flat token stream, but raw input may contain nested delimiters and escape sequences. The method handles this by maintaining a small state machine — think of it as a cursor that walks through the input character by character, deciding at each step whether to extend the current token or start a new one."
-
-**Use analogies and metaphors to make abstractions tangible**
-- Compare patterns to real-world systems (e.g. "The middleware chain is like an airport security checkpoint — each layer inspects the request, can reject it immediately, or stamp it and pass it through to the next")
-- When introducing a new abstraction, first explain the problem in plain language, then introduce the technical solution
-- Bridge unfamiliar concepts with "imagine...", "think of it as...", or "this is similar to..."
-
-**Analyze dependencies and data flow**
-- Trace the path data takes through the module for key operations
-- Identify the module's **architectural role**: is it a gateway, an orchestrator, a transformer, a validator, a cache layer?
-- Explain coupling: what does this module assume about its callers and callees? What would break if an upstream component changed its interface?
-- Highlight the "hottest" paths — which components are called most frequently or are most critical?
-
-**Surface design tradeoffs and decisions**
-- When you see a non-obvious design choice (sync vs async, inheritance vs composition, mutable vs immutable state, eager vs lazy), explain what was chosen and why it makes sense in context
-- Note tension points: "This couples X tightly to Y, which simplifies the common case but means changes to Y's schema will cascade here"
-- Call out extension points vs rigid boundaries — where is the code designed to be swapped or extended, and where does it intentionally prevent variation?
-</WRITING_APPROACH>
+"""
+    + _SHARED_OBJECTIVES
+    + "\n\n"
+    + _SHARED_WRITING_APPROACH
+    + "\n\n"
+    + _WRITING_DISCIPLINE
+    + """
 
 <DOCUMENTATION_REQUIREMENTS>
-1. **Opening**: A vivid, jargon-light paragraph explaining what this module does and why — a reader should "get it" in 30 seconds
-2. **Architecture**: A Mermaid diagram (only if it genuinely clarifies, max ~10 nodes) followed by a narrative walkthrough of the component roles and data flow.  Node and edge labels must be plain ASCII — Unicode math operators (∃ ∀ ∈ ⊂ ∧ ∨ ≡ …) break the Mermaid parser; use "exists", "in", "subset", etc. instead.  Math belongs in LaTeX, not in diagram labels.
-3. **Component deep-dives**: For each important class/function — purpose, internal mechanics, parameters, return values, side effects, explained with enough context that a newcomer understands not just the API but the design reasoning
+1. **Opening**: A clear paragraph explaining what this module does and why — a reader should grasp the purpose in 30 seconds
+2. **Architecture**: A Mermaid diagram (only if it genuinely clarifies, max ~10 nodes) followed by a narrative walkthrough of the component roles and data flow.  Node and edge labels must be plain ASCII — Unicode math operators break the Mermaid parser; use "exists", "in", "subset", etc. instead.  Math belongs in LaTeX, not in diagram labels.
+3. **Component deep-dives**: For each important class/function — purpose, internal mechanics, parameters, return values, side effects, with enough context that a newcomer understands the design reasoning
 4. **Dependency analysis**: What this module calls (and why), what calls it (and what they expect), and the data contracts in between
 5. **Design decisions & tradeoffs**: Key patterns chosen, alternatives that exist, and the tensions in the current approach
-6. **Usage & examples**: Code snippets drawn from real files in the repo (test files, example files, or actual call-sites in the source). If a complete example would require inventing surrounding glue code, prefer a minimal real call-site plus prose, or label the block `// pseudocode` on the first line
-7. **Edge cases & gotchas**: Error conditions, behavioral constraints, known limitations, operational considerations
+6. **Usage & examples**: Code snippets drawn from real files in the repo. If a complete example would require inventing surrounding glue code, prefer a minimal real call-site plus prose, or label the block `// pseudocode` on the first line
+7. **Edge cases & gotchas**: Error conditions, behavioral constraints, known limitations
 8. **References**: Link to other module docs rather than duplicating their content
 9. **Prose over bullets**: Write conceptual explanations in full paragraphs; reserve bullet points for enumerations, not for narratives
-10. **Mathematical notation**: Use LaTeX syntax (`$inline$` / `$$block$$`) ONLY when a formula genuinely aids understanding — e.g., algorithmic complexity, ML objectives, or probability properties. Default to prose; math is a last resort, not a default.
+10. **Mathematical notation**: Use LaTeX syntax (`$inline$` / `$$block$$`) ONLY when a formula genuinely aids understanding. Default to prose.
 </DOCUMENTATION_REQUIREMENTS>
 
-<GROUNDING_RULES>
-- ONLY reference function names, class names, and APIs that actually exist in the provided source code
-- Do NOT invent or hallucinate function signatures, parameter names, or return types — verify against the code
-- Use the dependency graph (depends_on / depended_by) to describe architecture and data flow accurately
-- When describing component interactions, cite the actual call relationships from the provided dependency data
-- If you are uncertain about implementation details, say so rather than guessing
-- **Code examples must be grounded**: every line of a code example must come from actual files in the provided source (test files, example files, main source). If a complete runnable example would require inventing helper functions or glue code that does not exist in the repo, do ONE of the following instead:
-  (a) Show only the real call-site — e.g., just `polyvec_ntt(&input, &output);` with a prose explanation of what the caller must set up beforehand, or
-  (b) Clearly mark the whole block as pseudocode with a `// pseudocode` or `# pseudocode` comment on the first line. Never silently label made-up helpers as "假设的" (hypothetical) buried inside the block.
-</GROUNDING_RULES>
+"""
+    + _SHARED_GROUNDING_RULES
+    + """
 
 <WORKFLOW>
 1. Analyze provided code components, dependency graph, and module structure
@@ -195,6 +206,7 @@ Good: "`Tokenizer.split()` exists because the downstream parser expects a flat t
 </AVAILABLE_TOOLS>
 {custom_instructions}
 """.strip()
+)
 
 USER_PROMPT = """
 Write a technical deep-dive for the **{module_name}** module. Write for a senior engineer who just joined the team — they can read code, but they need you to explain the design intent, the architectural role, and the "why" behind non-obvious choices.
@@ -216,15 +228,21 @@ Your documentation should answer these questions:
 </CORE_COMPONENT_CODES>
 """.strip()
 
-REPO_OVERVIEW_PROMPT = """
-You are a senior architect writing the landing page for the `{repo_name}` project wiki. This is the first page a new developer sees — make it clear, welcoming, and insightful.
+REPO_OVERVIEW_PROMPT = (
+    """
+You are a senior architect writing the landing page for the `{repo_name}` project wiki. This is the first page a new developer sees.
 
-Write an overview that covers:
-1. **What this project does** — a vivid, jargon-light explanation (a reader should "get it" in 30 seconds)
-2. **Architecture at a glance** — a Mermaid diagram (max 10 nodes, big-picture only) showing the most important modules and how data/control flows between them, followed by a narrative walkthrough
-3. **Key design decisions** — what architectural patterns were chosen and why (e.g. monolith vs microservices, sync vs async, layered vs hexagonal)
-4. **Module guide** — for each major module, 2-3 sentences explaining its role and a link to its detailed documentation. Weave these naturally into the narrative rather than listing them in a table
-5. **End-to-end workflows** — trace 1-2 critical user journeys through the system, showing which modules participate and how data transforms along the way
+Your overview must cover ALL of these topics (mandatory), but organize them in whatever order makes the narrative flow best for THIS specific project — do NOT mechanically follow this list order in your output. Weave topics together where they naturally connect:
+
+- **What this project does** — a clear explanation (a reader should grasp the purpose in 30 seconds)
+- **Architecture at a glance** — a Mermaid diagram (max 10 nodes, big-picture) showing the most important modules and data/control flow, followed by a narrative walkthrough
+- **Key design decisions** — what architectural patterns were chosen and why
+- **Module guide** — for each major module, 2-3 sentences explaining its role and a link to its detailed documentation
+- **End-to-end workflows** — trace 1-2 critical user journeys through the system
+
+"""
+    + _WRITING_DISCIPLINE
+    + """
 
 <REPO_STRUCTURE>
 {repo_structure}
@@ -235,15 +253,22 @@ Generate the overview in markdown format:
 overview_content
 </OVERVIEW>
 """.strip()
+)
 
-MODULE_OVERVIEW_PROMPT = """
+MODULE_OVERVIEW_PROMPT = (
+    """
 You are a senior architect writing a summary page for the `{module_name}` module, which contains several sub-modules. Focus on how the sub-modules work together as a system — don't repeat their individual details.
 
-Write an overview that covers:
-1. **Purpose** — what this module group achieves as a whole and why it exists as a unit
-2. **Architecture** — a Mermaid diagram showing sub-module relationships and data flow, followed by a narrative walkthrough
-3. **How sub-modules interact** — the key workflows that span multiple sub-modules, with links to their individual docs
-4. **Design tradeoffs** — what patterns hold this group together, and where the boundaries between sub-modules were drawn (and why)
+Your overview must cover ALL of these topics (mandatory), but organize them in whatever order produces the best narrative for THIS specific module:
+
+- **Purpose** — what this module group achieves as a whole and why it exists as a unit
+- **Architecture** — a Mermaid diagram showing sub-module relationships and data flow, followed by a narrative walkthrough
+- **How sub-modules interact** — the key workflows that span multiple sub-modules, with links to their individual docs
+- **Design tradeoffs** — what patterns hold this group together, and where the boundaries between sub-modules were drawn (and why)
+
+"""
+    + _WRITING_DISCIPLINE
+    + """
 
 <REPO_STRUCTURE>
 {repo_structure}
@@ -254,6 +279,7 @@ Generate the overview in markdown format:
 overview_content
 </OVERVIEW>
 """.strip()
+)
 
 CLUSTER_REPO_PROMPT = """
 Here is list of all potential core components of the repository (It's normal that some components are not essential to the repository):
@@ -511,7 +537,8 @@ analysis above, explicitly address the following hardware-design pillars:
 
 # ── Guide document prompt templates ──────────────────────────────────────────
 
-GETTING_STARTED_PROMPT = """
+GETTING_STARTED_PROMPT = (
+    """
 You are a technical writer creating a **Getting Started** tutorial for the
 `{repo_name}` project.  Target reader: a developer who just discovered this
 project and wants to run it locally within 15 minutes.
@@ -529,6 +556,10 @@ Every step MUST include:
 - The expected output (or screenshot description)
 - The most likely error at that step and how to fix it
 </REQUIREMENTS>
+
+"""
+    + _WRITING_DISCIPLINE
+    + """
 
 <MERMAID_REQUIREMENTS>
 - A `flowchart TD` showing the installation pipeline (clone → install deps → configure → run)
@@ -566,6 +597,7 @@ Generate the tutorial in Markdown.  Wrap the output in:
 content
 </GUIDE>
 """.strip()
+)
 
 BEGINNER_OUTLINE_PROMPT = """
 You are planning a multi-chapter beginner's guide for the `{repo_name}` project.
@@ -607,7 +639,8 @@ Return ONLY valid JSON wrapped in <OUTLINE>...</OUTLINE>:
 </OUTLINE>
 """.strip()
 
-BEGINNER_SECTION_PROMPT = """
+BEGINNER_SECTION_PROMPT = (
+    """
 You are writing chapter {section_number}/{total_sections} of the beginner's
 guide for `{repo_name}`:
 
@@ -615,17 +648,16 @@ guide for `{repo_name}`:
 **Learning goal:** {section_summary}
 
 <WRITING_STYLE>
-- Use everyday analogies for every technical concept
-  GOOD: "模块就像乐高积木——每块有自己的形状和功能，组合起来才能搭出完整的城堡"
-  BAD:  "模块是封装了相关函数和类的命名空间"
-- Compare with well-known projects readers likely know
-  ("This module's role is similar to Express.js's Router" / "Think of it like
-   React's useState, but for …")
-- Every technical term MUST be explained in plain language on first use
-- Use "Imagine …", "Think of it as …", "You can picture this as …"
-- Short paragraphs — one concept per paragraph
-- Heavy Mermaid usage: architecture diagrams, data-flow charts, concept maps
+- Use an analogy for the chapter's central concept, but switch to concrete code explanation for the rest. Do not repeat the same "think of it as..." pattern for every concept.
+- Compare with well-known projects readers likely know (e.g., "similar to Express.js's Router") where it genuinely helps — not as filler.
+- Every technical term MUST be explained in plain language on first use.
+- Short paragraphs — one concept per paragraph.
+- Heavy Mermaid usage: architecture diagrams, data-flow charts, concept maps.
 </WRITING_STYLE>
+
+"""
+    + _WRITING_DISCIPLINE
+    + """
 
 <MERMAID_REQUIREMENTS>
 Every major concept or flow MUST have a companion Mermaid diagram:
@@ -672,17 +704,23 @@ Generate the chapter in Markdown.  Wrap in:
 content
 </GUIDE>
 """.strip()
+)
 
-BEGINNER_PARENT_PROMPT = """
+BEGINNER_PARENT_PROMPT = (
+    """
 You are writing the landing page for the beginner's guide to `{repo_name}`.
 This page links to {num_sections} chapters and gives readers a roadmap.
 
-Write a short, welcoming introduction (2-3 paragraphs) explaining:
-1. Who this guide is for
-2. What they will learn
-3. A Mermaid `flowchart LR` showing the chapter progression
+Write a short introduction (2-3 paragraphs) covering:
+- Who this guide is for
+- What they will learn
+- A Mermaid `flowchart LR` showing the chapter progression
 
 Then list each chapter with its title, a 1-2 sentence teaser, and a link.
+
+"""
+    + _WRITING_DISCIPLINE
+    + """
 
 <CHAPTERS>
 {chapters_list}
@@ -695,8 +733,10 @@ Generate in Markdown.  Wrap in:
 content
 </GUIDE>
 """.strip()
+)
 
-BUILD_ANALYSIS_PROMPT = """
+BUILD_ANALYSIS_PROMPT = (
+    """
 You are a senior build engineer writing a **Build & Code Organization** analysis
 for the `{repo_name}` project.  Target reader: a developer who wants to
 understand how the project is built, how the source tree is organized, and how
@@ -714,6 +754,10 @@ dependencies are managed.
 
 Every section must include at least one Mermaid diagram.
 </REQUIREMENTS>
+
+"""
+    + _WRITING_DISCIPLINE
+    + """
 
 {language_specific_guides}
 
@@ -740,6 +784,7 @@ Generate the document in Markdown.  Wrap in:
 content
 </GUIDE>
 """.strip()
+)
 
 ALGORITHM_IDENTIFY_PROMPT = """
 You are analyzing `{repo_name}` to identify its **core algorithms** — the
@@ -781,16 +826,21 @@ Return ONLY valid JSON wrapped in <ALGORITHMS>...</ALGORITHMS>:
 </ALGORITHMS>
 """.strip()
 
-ALGORITHM_DEEPDIVE_PROMPT = """
+ALGORITHM_DEEPDIVE_PROMPT = (
+    """
 You are an algorithm researcher writing a formal deep-dive on the
 **{algorithm_title}** algorithm from `{repo_name}`.
 
 <WRITING_STYLE>
-- Formal, academic-quality writing
+- Formal, precise writing — but vary sentence structure between sections
 - LaTeX math: `$inline$` and `$$block$$` for complexity, recurrences, constraints
 - Pseudocode in ```pseudocode blocks alongside actual implementation
 - Compare with classical algorithms or papers where applicable
 </WRITING_STYLE>
+
+"""
+    + _WRITING_DISCIPLINE
+    + """
 
 <STRUCTURE>
 1. **Problem Statement** — formal definition of the problem this algorithm solves
@@ -845,16 +895,22 @@ Generate the deep-dive in Markdown.  Wrap in:
 content
 </GUIDE>
 """.strip()
+)
 
-ALGORITHM_PARENT_PROMPT = """
+ALGORITHM_PARENT_PROMPT = (
+    """
 You are writing the landing page for the **Core Algorithms** section of
 `{repo_name}`.  This page introduces the project's key algorithms, shows how
 they relate to each other, and links to individual deep-dives.
 
 Write:
-1. An introduction (2-3 paragraphs) explaining the project's computational core
-2. A Mermaid `graph TD` showing algorithm relationships and data flow between them
-3. For each algorithm: title, one-paragraph summary, link to its page
+- An introduction (2-3 paragraphs) explaining the project's computational core
+- A Mermaid `graph TD` showing algorithm relationships and data flow between them
+- For each algorithm: title, one-paragraph summary, link to its page
+
+"""
+    + _WRITING_DISCIPLINE
+    + """
 
 <ALGORITHMS>
 {algorithms_list}
@@ -867,6 +923,7 @@ Generate in Markdown.  Wrap in:
 content
 </GUIDE>
 """.strip()
+)
 
 OVERVIEW_AUGMENT_PROMPT = """
 The following overview was previously generated for the `{repo_name}` project.
@@ -896,10 +953,27 @@ content
 
 
 def format_language_instruction(output_language: str) -> str:
-    """Return a language instruction string for guide prompts."""
-    if output_language and output_language.lower() != "en":
-        return f"\n<LANGUAGE_INSTRUCTION>\nWrite the documentation in {output_language}.\n</LANGUAGE_INSTRUCTION>"
-    return ""
+    """Return a language instruction string for guide prompts.
+
+    Identical rules to ``_build_language_section()`` so that guide and
+    module/overview prompts produce consistent cross-language output.
+    """
+    if not output_language or output_language.lower() == "en":
+        return ""
+    lang_name = LANGUAGE_NAMES.get(output_language.lower(), output_language)
+    return (
+        f"\n<OUTPUT_LANGUAGE>\n"
+        f"Write ALL documentation prose in {lang_name}.\n\n"
+        f"- Section headings: prefer {lang_name}, but keep well-known English terms "
+        f'when they are more recognizable in context (e.g., "API Reference", "CLI Commands")\n'
+        f"- Technical terms with no standard translation: keep the English term, "
+        f"optionally add a brief parenthetical explanation on first use\n"
+        f"- Code identifiers (function names, class names, variable names): always keep as-is in English\n"
+        f"- File paths and CLI commands: keep as-is\n"
+        f"- Register: technical documentation — not academic thesis style, not casual blog style\n"
+        f"- Avoid mid-sentence language switching unless quoting a code identifier\n"
+        f"</OUTPUT_LANGUAGE>"
+    )
 
 
 EXTENSION_TO_LANGUAGE = {
@@ -1280,8 +1354,15 @@ def _build_language_section(output_language: str) -> str:
     lang_name = LANGUAGE_NAMES.get(output_language.lower(), output_language)
     return (
         f"\n\n<OUTPUT_LANGUAGE>\n"
-        f"Write ALL documentation content in {lang_name}. "
-        f"Keep code snippets, file names, identifiers, and technical keywords in their original language.\n"
+        f"Write ALL documentation prose in {lang_name}.\n\n"
+        f"- Section headings: prefer {lang_name}, but keep well-known English terms "
+        f'when they are more recognizable in context (e.g., "API Reference", "CLI Commands")\n'
+        f"- Technical terms with no standard translation: keep the English term, "
+        f"optionally add a brief parenthetical explanation on first use\n"
+        f"- Code identifiers (function names, class names, variable names): always keep as-is in English\n"
+        f"- File paths and CLI commands: keep as-is\n"
+        f"- Register: technical documentation — not academic thesis style, not casual blog style\n"
+        f"- Avoid mid-sentence language switching unless quoting a code identifier\n"
         f"</OUTPUT_LANGUAGE>"
     )
 
