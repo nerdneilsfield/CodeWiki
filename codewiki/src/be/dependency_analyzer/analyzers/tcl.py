@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class VitisHLSTclAnalyzer:
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = str(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -188,7 +188,7 @@ class VitisHLSTclAnalyzer:
 def analyze_tcl_file(
     file_path: str,
     content: str,
-    repo_path: str = None,
+    repo_path: str | None = None,
 ) -> Tuple[List[Node], List[CallRelationship]]:
     analyzer = VitisHLSTclAnalyzer(file_path, content, repo_path)
     return analyzer.nodes, analyzer.call_relationships

@@ -20,7 +20,10 @@ class DependencyParser:
     """Parser for extracting code components from multi-language repositories."""
 
     def __init__(
-        self, repo_path: str, include_patterns: List[str] = None, exclude_patterns: List[str] = None
+        self,
+        repo_path: str,
+        include_patterns: Optional[List[str]] = None,
+        exclude_patterns: Optional[List[str]] = None,
     ):
         """
         Initialize the dependency parser.
@@ -38,7 +41,7 @@ class DependencyParser:
 
         self.analysis_service = AnalysisService()
 
-    def parse_repository(self, filtered_folders: List[str] = None) -> Dict[str, Node]:
+    def parse_repository(self, filtered_folders: Optional[List[str]] = None) -> Dict[str, Node]:
         logger.debug(f"Parsing repository at {self.repo_path}")
 
         # Log custom patterns if set

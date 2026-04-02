@@ -29,7 +29,7 @@ def _get_cpp_parser() -> "Parser":
 
 
 class TreeSitterCppAnalyzer:
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = Path(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -61,7 +61,7 @@ class TreeSitterCppAnalyzer:
         else:
             return str(self.file_path)
 
-    def _get_component_id(self, name: str, parent_class: str = None) -> str:
+    def _get_component_id(self, name: str, parent_class: str | None = None) -> str:
         module_path = self._get_module_path()
         if parent_class:
             return (
@@ -198,7 +198,7 @@ class TreeSitterCppAnalyzer:
 
             if node_type and node_name:
                 if node_type == "method":
-                    component_id = self._get_component_id(node_name, containing_class)
+                    component_id = self._get_component_id(node_name, containing_class or None)
                     top_level_key = component_id
                 else:
                     component_id = self._get_component_id(node_name)
@@ -653,7 +653,7 @@ class TreeSitterCppAnalyzer:
 
 
 def analyze_cpp_file(
-    file_path: str, content: str, repo_path: str = None
+    file_path: str, content: str, repo_path: str | None = None
 ) -> Tuple[List[Node], List[CallRelationship]]:
     analyzer = TreeSitterCppAnalyzer(file_path, content, repo_path)
     return analyzer.nodes, analyzer.call_relationships

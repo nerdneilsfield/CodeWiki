@@ -138,39 +138,41 @@ class ConfigManager:
                     agent_instructions=AgentInstructions(),
                 )
 
+        config = self.require_config()
+
         # Update fields if provided
         if base_url is not None:
-            self._config.base_url = base_url
+            config.base_url = base_url
         if main_model is not None:
-            self._config.main_model = main_model
+            config.main_model = main_model
         if cluster_model is not None:
-            self._config.cluster_model = cluster_model
+            config.cluster_model = cluster_model
         if fallback_model is not None:
-            self._config.fallback_model = fallback_model
+            config.fallback_model = fallback_model
         if long_context_model is not None:
-            self._config.long_context_model = long_context_model
+            config.long_context_model = long_context_model
         if long_context_threshold is not None:
-            self._config.long_context_threshold = long_context_threshold
+            config.long_context_threshold = long_context_threshold
         if default_output is not None:
-            self._config.default_output = default_output
+            config.default_output = default_output
         if max_tokens is not None:
-            self._config.max_tokens = max_tokens
+            config.max_tokens = max_tokens
         if max_token_per_module is not None:
-            self._config.max_token_per_module = max_token_per_module
+            config.max_token_per_module = max_token_per_module
         if max_token_per_leaf_module is not None:
-            self._config.max_token_per_leaf_module = max_token_per_leaf_module
+            config.max_token_per_leaf_module = max_token_per_leaf_module
         if max_depth is not None:
-            self._config.max_depth = max_depth
+            config.max_depth = max_depth
         if max_concurrent is not None:
-            self._config.max_concurrent = max_concurrent
+            config.max_concurrent = max_concurrent
         if max_retries is not None:
-            self._config.max_retries = max_retries
+            config.max_retries = max_retries
         if output_language is not None:
-            self._config.output_language = output_language
+            config.output_language = output_language
 
         # Validate configuration (only if base fields are set)
-        if self._config.base_url and self._config.main_model and self._config.cluster_model:
-            self._config.validate()
+        if config.base_url and config.main_model and config.cluster_model:
+            config.validate()
 
         # Save API key to keyring, fallback to config file
         if api_key is not None:
@@ -182,7 +184,7 @@ class ConfigManager:
                     self._keyring_available = False
 
         # Save non-sensitive config to JSON (api_key included if keyring unavailable)
-        config_data = {"version": CONFIG_VERSION, **self._config.to_dict()}
+        config_data = {"version": CONFIG_VERSION, **config.to_dict()}
         if not self._keyring_available and self._api_key is not None:
             config_data["api_key"] = self._api_key
 
@@ -213,6 +215,12 @@ class ConfigManager:
         Returns:
             Configuration object or None if not loaded
         """
+        return self._config
+
+    def require_config(self) -> Configuration:
+        """Return the loaded configuration or raise if unavailable."""
+        if self._config is None:
+            raise ConfigurationError("Configuration is not loaded")
         return self._config
 
     def is_configured(self) -> bool:

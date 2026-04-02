@@ -3,7 +3,7 @@ import time
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
-from typing import AsyncIterable, List, Tuple
+from typing import Any, AsyncIterable, List, Tuple
 import logging
 import tiktoken
 import traceback
@@ -56,7 +56,7 @@ async def agent_progress_handler(ctx, stream: AsyncIterable) -> None:
 # ------------------------------------------------------------
 
 
-def is_complex_module(components: dict[str, any], core_component_ids: list[str]) -> bool:
+def is_complex_module(components: dict[str, Any], core_component_ids: list[str]) -> bool:
     files = set()
     for component_id in core_component_ids:
         if component_id in components:

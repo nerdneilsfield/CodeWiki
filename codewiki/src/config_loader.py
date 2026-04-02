@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, cast
 import os
 import tomllib
 
@@ -304,15 +304,34 @@ def load_app_config(path: str | Path, resolve_secrets: bool = True) -> AppConfig
 
     _resolve = _resolve_env_ref if resolve_secrets else (lambda v: v)
 
-    providers = [
-        ProviderConfig(
-            **{
-                **provider_data,
-                "api_keys": [_resolve(v) for v in provider_data.get("api_keys", [])],
-            }
+    providers = []
+    for provider_data in data.get("providers", []):
+        provider_dict = cast(dict[str, Any], provider_data)
+        api_keys = list(provider_dict.get("api_keys", []))
+        model_list = [
+            str(model) for model in cast(Iterable[Any], provider_dict.get("model_list", []))
+        ]
+        extra_headers = {
+            str(key): str(value)
+            for key, value in cast(dict[Any, Any], provider_dict.get("extra_headers", {})).items()
+        }
+        providers.append(
+            ProviderConfig(
+                name=str(provider_dict.get("name", "")),
+                type=str(provider_dict.get("type", "")),
+                api_keys=[_resolve(v) for v in api_keys],
+                model_list=model_list,
+                extra_headers=extra_headers,
+                base_url=cast(Optional[str], provider_dict.get("base_url")),
+                endpoint=cast(Optional[str], provider_dict.get("endpoint")),
+                api_version=cast(Optional[str], provider_dict.get("api_version")),
+                deployment=cast(Optional[str], provider_dict.get("deployment")),
+                anthropic_version=cast(Optional[str], provider_dict.get("anthropic_version")),
+                project_id=cast(Optional[str], provider_dict.get("project_id")),
+                location=cast(Optional[str], provider_dict.get("location")),
+                credentials_path=cast(Optional[str], provider_dict.get("credentials_path")),
+            )
         )
-        for provider_data in data.get("providers", [])
-    ]
 
     app_config = AppConfig(
         runtime=runtime,

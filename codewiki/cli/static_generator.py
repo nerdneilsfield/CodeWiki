@@ -659,7 +659,7 @@ class StaticHTMLGenerator:
         mt_path = docs_dir / "module_tree.json"
         if mt_path.exists():
             try:
-                module_tree = file_manager.load_json(mt_path)
+                module_tree = file_manager.load_json(str(mt_path)) or {}
             except Exception as e:
                 logger.warning(f"Could not load module_tree.json: {e}")
 
@@ -667,7 +667,7 @@ class StaticHTMLGenerator:
         meta_path = docs_dir / "metadata.json"
         if meta_path.exists():
             try:
-                metadata = file_manager.load_json(meta_path)
+                metadata = file_manager.load_json(str(meta_path))
             except Exception as e:
                 logger.warning(f"Could not load metadata.json: {e}")
 
@@ -697,7 +697,7 @@ class StaticHTMLGenerator:
 
             # Render markdown → HTML
             try:
-                md_content = file_manager.load_text(md_path)
+                md_content = file_manager.load_text(str(md_path))
             except Exception as e:
                 logger.warning(f"Skipping {md_path.name}: {e}")
                 continue

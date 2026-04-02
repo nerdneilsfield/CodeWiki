@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class TreeSitterCSharpAnalyzer:
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = Path(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -352,7 +352,7 @@ class TreeSitterCSharpAnalyzer:
 
 
 def analyze_csharp_file(
-    file_path: str, content: str, repo_path: str = None
+    file_path: str, content: str, repo_path: str | None = None
 ) -> Tuple[List[Node], List[CallRelationship]]:
     analyzer = TreeSitterCSharpAnalyzer(file_path, content, repo_path)
     return analyzer.nodes, analyzer.call_relationships

@@ -10,7 +10,7 @@ import sys
 src_dir = os.path.join(os.path.dirname(__file__), "src")
 sys.path.insert(0, src_dir)
 
-from fe.web_app import main
+from codewiki.src.fe.web_app import main
 
 if __name__ == "__main__":
     main()

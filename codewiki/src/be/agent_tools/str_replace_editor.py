@@ -8,6 +8,7 @@ import json
 import re
 import subprocess
 import sys
+import warnings
 from collections import defaultdict
 from pathlib import Path
 from typing import Annotated, List, Optional, Tuple, Literal, Union
@@ -16,6 +17,8 @@ from pydantic import BeforeValidator
 import io
 
 import logging
+from tree_sitter import Query, QueryCursor
+from tree_sitter_language_pack import get_language, get_parser
 
 # Configure logging and monitoring
 
@@ -232,9 +235,6 @@ def flake8(file_path: str) -> str:
 
 class Filemap:
     def show_filemap(self, file_contents: str, encoding: str = "utf8"):
-        import warnings
-        from tree_sitter_languages import get_language, get_parser
-
         warnings.simplefilter("ignore", category=FutureWarning)
 
         parser = get_parser("python")
@@ -243,17 +243,21 @@ class Filemap:
         tree = parser.parse(bytes(file_contents.encode(encoding, errors="replace")))
 
         # See https://tree-sitter.github.io/tree-sitter/using-parsers#pattern-matching-with-queries.
-        query = language.query("""
+        query = Query(
+            language,
+            """
         (function_definition
         body: (_) @body)
-        """)
+        """,
+        )
+        cursor = QueryCursor(query)
 
         # TODO: consider special casing docstrings such that they are not elided. This
         # could be accomplished by checking whether `body.text.decode('utf8')` starts
         # with `"""` or `'''`.
         elide_line_ranges = [
             (node.start_point[0], node.end_point[0])
-            for node, _ in query.captures(tree.root_node)
+            for node in cursor.captures(tree.root_node).get("body", [])
             # Only elide if it's sufficiently long
             if node.end_point[0] - node.start_point[0] >= 5
         ]
@@ -851,13 +855,15 @@ async def str_replace_editor(
         return "Error: Either `path` or `file` parameter must be provided."
     if path is None:
         path = file
+    assert path is not None
+    target_path = path
 
     if working_dir == "docs":
         base_path = Path(ctx.deps.absolute_docs_path).resolve()
-        absolute_path = str(Path(ctx.deps.absolute_docs_path) / path)
+        absolute_path = str(Path(ctx.deps.absolute_docs_path) / target_path)
     else:
         base_path = Path(ctx.deps.absolute_repo_path).resolve()
-        absolute_path = str(Path(ctx.deps.absolute_repo_path) / path)
+        absolute_path = str(Path(ctx.deps.absolute_repo_path) / target_path)
     resolved = Path(absolute_path).resolve()
     if not resolved.is_relative_to(base_path):
         raise ValueError(f"Path {absolute_path} is outside the allowed directory")
@@ -894,8 +900,8 @@ async def str_replace_editor(
 
     result = "\n".join(tool.logs)
 
-    if command != "view" and path.endswith(".md"):
-        mermaid_validation = await validate_mermaid_diagrams(absolute_path, path)
+    if command != "view" and target_path.endswith(".md"):
+        mermaid_validation = await validate_mermaid_diagrams(absolute_path, target_path)
         result = result + "\n---------- Mermaid validation ----------\n" + mermaid_validation
 
     return result

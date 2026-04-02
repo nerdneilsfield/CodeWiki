@@ -52,7 +52,7 @@ class GitManager:
             status_lines = []
 
             # Changed files
-            changed = [item.a_path for item in self.repo.index.diff(None)]
+            changed = [item.a_path for item in self.repo.index.diff(None) if item.a_path]
             if changed:
                 status_lines.append(f"Modified: {', '.join(changed[:3])}")
                 if len(changed) > 3:

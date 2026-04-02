@@ -280,6 +280,9 @@ class DocumentationGenerator:
         desc: str = "Generating docs",
         include_root: bool = True,
     ) -> None:
+        async def _generate_root_overview() -> None:
+            await self.generate_parent_module_docs([], working_dir, tree_manager)
+
         await run_module_queue_impl(
             config=self.config,
             graph_tree=graph_tree,
@@ -287,9 +290,7 @@ class DocumentationGenerator:
             working_dir=working_dir,
             tree_manager=tree_manager,
             process_module=self.agent_orchestrator.process_module,
-            generate_root_overview=(
-                lambda: self.generate_parent_module_docs([], working_dir, tree_manager)
-            ),
+            generate_root_overview=(_generate_root_overview if include_root else None),
             desc=desc,
             include_root=include_root,
             gen_state=self._gen_state,
@@ -410,6 +411,7 @@ class DocumentationGenerator:
                     logger.info("Module tree cache invalidated (commit/config changed)")
 
             if not need_recluster:
+                assert cached_tree is not None
                 module_tree = heal_module_tree_components(cached_tree, components)
                 freeze_doc_filenames(module_tree)
                 file_manager.save_json(module_tree, first_module_tree_path)

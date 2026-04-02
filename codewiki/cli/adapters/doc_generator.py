@@ -98,15 +98,19 @@ class CLIDocumentationGenerator:
                 overrides=overrides,
             )
 
+        def _get_str(name: str, default: str = "") -> str:
+            value = self.config.get(name, default)
+            return value if isinstance(value, str) else default
+
         return BackendConfig.from_cli(
             repo_path=str(self.repo_path),
             output_dir=str(self.output_dir),
-            llm_base_url=self.config.get("base_url"),
-            llm_api_key=self.config.get("api_key"),
-            main_model=self.config.get("main_model"),
-            cluster_model=self.config.get("cluster_model"),
-            fallback_model=self.config.get("fallback_model"),
-            long_context_model=self.config.get("long_context_model") or None,
+            llm_base_url=_get_str("base_url"),
+            llm_api_key=_get_str("api_key"),
+            main_model=_get_str("main_model"),
+            cluster_model=_get_str("cluster_model"),
+            fallback_model=_get_str("fallback_model", "glm-4p5"),
+            long_context_model=_get_str("long_context_model") or None,
             long_context_threshold=self.config.get("long_context_threshold", 200000),
             max_tokens=self.config.get("max_tokens", 32768),
             max_token_per_module=self.config.get("max_token_per_module", 36369),
@@ -372,7 +376,7 @@ class CLIDocumentationGenerator:
         output_path = self.output_dir / "index.html"
         html_generator.generate(
             output_path=output_path,
-            title=repo_info["name"],
+            title=repo_info["name"] or self.repo_path.name,
             repository_url=repo_info["url"],
             github_pages_url=repo_info["github_pages_url"],
             docs_dir=self.output_dir,  # Auto-load module_tree and metadata from here

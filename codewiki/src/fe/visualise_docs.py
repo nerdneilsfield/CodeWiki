@@ -67,7 +67,7 @@ def load_module_tree(docs_folder: Path) -> Optional[Dict]:
         return None
 
     try:
-        tree = file_manager.load_json(tree_file)
+        tree = file_manager.load_json(str(tree_file))
         _attach_doc_filenames(tree, str(docs_folder))
         return tree
     except Exception as e:
@@ -102,7 +102,7 @@ def _attach_doc_filenames(
             _attach_doc_filenames(children, docs_dir, module_path)
 
 
-def _fix_markdown_links(content: str, base_url: str = None) -> str:
+def _fix_markdown_links(content: str, base_url: Optional[str] = None) -> str:
     """
     Pre-process markdown link URLs:
     - Percent-encode spaces so markdown-it can parse them.
@@ -161,7 +161,7 @@ def _inject_heading_ids(html: str) -> str:
     return re.sub(r"<(h[1-6])>(.*?)</\1>", replacer, html, flags=re.DOTALL)
 
 
-def markdown_to_html(content: str, base_url: str = None) -> str:
+def markdown_to_html(content: str, base_url: Optional[str] = None) -> str:
     """Convert markdown content to HTML, with special handling for mermaid diagrams."""
     # Pre-process: fix link URLs (spaces + optional absolute-URL rewriting)
     content = _fix_markdown_links(content, base_url)
@@ -196,7 +196,7 @@ def markdown_to_html(content: str, base_url: str = None) -> str:
 def get_file_title(file_path: Path) -> str:
     """Extract title from markdown file, fallback to filename."""
     try:
-        content = file_manager.load_text(file_path)
+        content = file_manager.load_text(str(file_path))
         first_line = content.split("\n")[0].strip()
         if first_line.startswith("# "):
             return first_line[2:].strip()
@@ -226,7 +226,7 @@ async def index():
         )
 
     try:
-        content = file_manager.load_text(overview_file)
+        content = file_manager.load_text(str(overview_file))
 
         html_content = markdown_to_html(content)
         title = get_file_title(overview_file)
@@ -279,7 +279,7 @@ async def serve_doc(filename: str):
             raise HTTPException(status_code=404, detail=f"File {filename} not found")
 
     try:
-        content = file_manager.load_text(file_path)
+        content = file_manager.load_text(str(file_path))
 
         html_content = markdown_to_html(content)
         title = get_file_title(file_path)

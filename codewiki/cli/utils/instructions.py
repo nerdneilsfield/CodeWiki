@@ -51,8 +51,8 @@ def display_post_generation_instructions(
     repo_url: Optional[str] = None,
     branch_name: Optional[str] = None,
     github_pages: bool = False,
-    files_generated: list = None,
-    statistics: dict = None,
+    files_generated: Optional[list] = None,
+    statistics: Optional[dict] = None,
 ):
     """
     Display post-generation instructions.

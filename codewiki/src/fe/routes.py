@@ -230,7 +230,7 @@ class WebRoutes:
         module_tree_file = docs_path / "module_tree.json"
         if module_tree_file.exists():
             try:
-                module_tree = file_manager.load_json(module_tree_file)
+                module_tree = file_manager.load_json(str(module_tree_file))
                 self._attach_doc_filenames(module_tree, docs_path)
             except Exception:
                 pass
@@ -240,7 +240,7 @@ class WebRoutes:
         metadata_file = docs_path / "metadata.json"
         if metadata_file.exists():
             try:
-                metadata = file_manager.load_json(metadata_file)
+                metadata = file_manager.load_json(str(metadata_file))
             except Exception:
                 pass
 
@@ -255,7 +255,7 @@ class WebRoutes:
             tree_file = docs_path / "module_tree.json"
             if tree_file.exists():
                 try:
-                    tree = file_manager.load_json(tree_file) or {}
+                    tree = file_manager.load_json(str(tree_file)) or {}
                     for _name, _info in tree.items():
                         pass
                 except Exception:
@@ -286,7 +286,7 @@ class WebRoutes:
                 raise HTTPException(status_code=404, detail=f"File {filename} not found")
 
         try:
-            content = file_manager.load_text(file_path)
+            content = file_manager.load_text(str(file_path))
 
             # Convert markdown to HTML (reuse from visualise_docs.py)
             from .visualise_docs import markdown_to_html, get_file_title

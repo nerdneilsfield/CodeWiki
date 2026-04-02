@@ -41,7 +41,7 @@ def _parse_cfg_sections(content: str) -> dict:
 def analyze_vitis_cfg(
     file_path: str,
     content: str,
-    repo_path: str = None,
+    repo_path: str | None = None,
 ) -> Tuple[List[Node], List[CallRelationship]]:
     nodes = []
     relationships = []

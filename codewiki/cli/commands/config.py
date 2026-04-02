@@ -286,7 +286,7 @@ def _validate_legacy(quick: bool, verbose: bool) -> None:
     else:
         click.secho("✓ API key present", fg="green")
 
-    config = manager.get_config()
+    config = manager.require_config()
 
     if not config.base_url:
         click.secho("✗ Base URL not set", fg="red")
@@ -466,26 +466,26 @@ def _show_legacy(output_json: bool) -> None:
         click.echo("\nRun 'codewiki config init' then 'codewiki config show --config config.toml'.")
         sys.exit(EXIT_CONFIG_ERROR)
 
-    config = manager.get_config()
+    config = manager.require_config()
     api_key = manager.get_api_key()
 
     if output_json:
         output = {
             "api_key": mask_api_key(api_key) if api_key else "Not set",
             "api_key_storage": "keychain" if manager.keyring_available else "encrypted_file",
-            "base_url": config.base_url if config else "",
-            "main_model": config.main_model if config else "",
-            "cluster_model": config.cluster_model if config else "",
-            "fallback_model": config.fallback_model if config else "glm-4p5",
-            "long_context_model": config.long_context_model if config else "",
-            "default_output": config.default_output if config else "docs",
-            "max_tokens": config.max_tokens if config else 32768,
-            "max_token_per_module": config.max_token_per_module if config else 36369,
-            "max_token_per_leaf_module": config.max_token_per_leaf_module if config else 16000,
-            "max_depth": config.max_depth if config else 2,
-            "max_concurrent": config.max_concurrent if config else 3,
+            "base_url": config.base_url,
+            "main_model": config.main_model,
+            "cluster_model": config.cluster_model,
+            "fallback_model": config.fallback_model,
+            "long_context_model": config.long_context_model,
+            "default_output": config.default_output,
+            "max_tokens": config.max_tokens,
+            "max_token_per_module": config.max_token_per_module,
+            "max_token_per_leaf_module": config.max_token_per_leaf_module,
+            "max_depth": config.max_depth,
+            "max_concurrent": config.max_concurrent,
             "agent_instructions": config.agent_instructions.to_dict()
-            if config and config.agent_instructions
+            if config.agent_instructions
             else {},
             "config_file": str(manager.config_file_path),
             "_legacy": True,
@@ -509,13 +509,12 @@ def _show_legacy(output_json: bool) -> None:
 
     click.echo()
     click.secho("API Settings", fg="cyan", bold=True)
-    if config:
-        click.echo(f"  Base URL:         {config.base_url or 'Not set'}")
-        click.echo(f"  Main Model:       {config.main_model or 'Not set'}")
-        click.echo(f"  Cluster Model:    {config.cluster_model or 'Not set'}")
-        click.echo(f"  Fallback Model:   {config.fallback_model or 'Not set'}")
-        if config.long_context_model:
-            click.echo(f"  Long-Context Model: {config.long_context_model}")
+    click.echo(f"  Base URL:         {config.base_url or 'Not set'}")
+    click.echo(f"  Main Model:       {config.main_model or 'Not set'}")
+    click.echo(f"  Cluster Model:    {config.cluster_model or 'Not set'}")
+    click.echo(f"  Fallback Model:   {config.fallback_model or 'Not set'}")
+    if config.long_context_model:
+        click.echo(f"  Long-Context Model: {config.long_context_model}")
 
     click.echo()
     click.secho("Token Settings", fg="cyan", bold=True)
@@ -783,7 +782,7 @@ def config_agent(
             click.echo("\nRun 'codewiki config init' to create a TOML config.")
             sys.exit(EXIT_CONFIG_ERROR)
 
-        config = manager.get_config()
+        config = manager.require_config()
 
         if clear:
             config.agent_instructions = AgentInstructions()

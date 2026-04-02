@@ -204,6 +204,7 @@ async def run_module_queue(
                 last_exc = None
                 for attempt in range(len(retry_delays) + 1):
                     if attempt > 0:
+                        assert last_exc is not None
                         delay = _retry_delay(attempt, last_exc)
                         logger.warning(
                             "  ↻ Retrying '%s'%s (attempt %s/%s) after: %s",

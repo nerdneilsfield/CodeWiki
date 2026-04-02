@@ -16,7 +16,7 @@ from codewiki.src.utils import file_manager
 class CacheManager:
     """Manages documentation cache."""
 
-    def __init__(self, cache_dir: str = None, cache_expiry_days: int = None):
+    def __init__(self, cache_dir: str | None = None, cache_expiry_days: int | None = None):
         self.cache_dir = Path(cache_dir or WebAppConfig.CACHE_DIR)
         self.cache_expiry_days = cache_expiry_days or WebAppConfig.CACHE_EXPIRY_DAYS
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -28,7 +28,7 @@ class CacheManager:
         index_file = self.cache_dir / "cache_index.json"
         if index_file.exists():
             try:
-                data = file_manager.load_json(index_file)
+                data = file_manager.load_json(str(index_file)) or {}
                 for key, value in data.items():
                     self.cache_index[key] = CacheEntry(
                         repo_url=value["repo_url"],
@@ -54,7 +54,7 @@ class CacheManager:
                     "last_accessed": entry.last_accessed.isoformat(),
                 }
 
-            file_manager.save_json(data, index_file)
+            file_manager.save_json(data, str(index_file))
         except Exception as e:
             print(f"Error saving cache index: {e}")
 

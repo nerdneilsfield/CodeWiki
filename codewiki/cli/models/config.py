@@ -42,7 +42,7 @@ class AgentInstructions:
     doc_type: Optional[str] = None  # e.g., "api", "architecture", "user-guide"
     custom_instructions: Optional[str] = None  # Free-form instructions
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         """Convert to dictionary, excluding None values."""
         result = {}
         if self.include_patterns:
@@ -154,9 +154,9 @@ class Configuration:
         for name in self.fallback_model.split(","):
             validate_model_name(name.strip())
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         """Convert to dictionary."""
-        result = {
+        result: dict[str, object] = {
             "base_url": self.base_url,
             "main_model": self.main_model,
             "cluster_model": self.cluster_model,
@@ -220,7 +220,7 @@ class Configuration:
         repo_path: str,
         output_dir: str,
         api_key: str,
-        runtime_instructions: AgentInstructions = None,
+        runtime_instructions: Optional[AgentInstructions] = None,
     ):
         """
         Convert CLI Configuration to Backend Config.

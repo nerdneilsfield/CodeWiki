@@ -29,7 +29,7 @@ def _get_java_parser() -> "Parser":
 
 
 class TreeSitterJavaAnalyzer:
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = Path(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -62,7 +62,7 @@ class TreeSitterJavaAnalyzer:
         else:
             return str(self.file_path)
 
-    def _get_component_id(self, name: str, parent_class: str = None) -> str:
+    def _get_component_id(self, name: str, parent_class: str | None = None) -> str:
         module_path = self._get_module_path()
         if parent_class:
             return f"{module_path}.{parent_class}.{name}"
@@ -426,7 +426,7 @@ class TreeSitterJavaAnalyzer:
 
 
 def analyze_java_file(
-    file_path: str, content: str, repo_path: str = None
+    file_path: str, content: str, repo_path: str | None = None
 ) -> Tuple[List[Node], List[CallRelationship]]:
     analyzer = TreeSitterJavaAnalyzer(file_path, content, repo_path)
     return analyzer.nodes, analyzer.call_relationships

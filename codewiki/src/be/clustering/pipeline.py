@@ -35,9 +35,9 @@ def cluster_modules_v2(
     components: Dict[str, Any],  # Dict[str, Node]
     config: Any,
     index_products: Any,  # IndexProducts
-    current_module_tree: dict = None,
-    current_module_name: str = None,
-    current_module_path: list = None,
+    current_module_tree: Optional[dict] = None,
+    current_module_name: Optional[str] = None,
+    current_module_path: Optional[list] = None,
     _token_threshold: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Clustering v2: graph-driven structure + heuristic naming.

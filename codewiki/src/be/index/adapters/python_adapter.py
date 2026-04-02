@@ -163,7 +163,9 @@ class PythonIndexAdapter:
             return f"py:{self._rel_path}#{class_name}.{name}({kind.value})"
         return f"py:{self._rel_path}#{name}({kind.value})"
 
-    def _make_range(self, node: ast.AST) -> SourceRange:
+    def _make_range(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+    ) -> SourceRange:
         return SourceRange(
             file_path=self._rel_path,
             start_line=node.lineno,
@@ -172,7 +174,7 @@ class PythonIndexAdapter:
             end_col=getattr(node, "end_col_offset", 0) or 0,
         )
 
-    def _source_hash(self, node: ast.AST) -> str:
+    def _source_hash(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> str:
         start = node.lineno - 1
         end = getattr(node, "end_lineno", node.lineno) or node.lineno
         snippet = "\n".join(self.lines[start:end])
@@ -227,8 +229,9 @@ class PythonIndexAdapter:
                 p = arg.arg
                 if arg.annotation:
                     p += f": {ast.unparse(arg.annotation)}"
-                if i < len(args.kw_defaults) and args.kw_defaults[i] is not None:
-                    p += f" = {ast.unparse(args.kw_defaults[i])}"
+                default_value = args.kw_defaults[i] if i < len(args.kw_defaults) else None
+                if default_value is not None:
+                    p += f" = {ast.unparse(default_value)}"
                 parts.append(p)
 
         # **kwargs
@@ -331,6 +334,7 @@ class PythonIndexAdapter:
         file_symbols_by_name: dict[str, Symbol] = {
             s.name: s for s in symbol_table.by_file(self._rel_path)
         }
+        assert self._tree is not None
 
         for func_node in ast.walk(self._tree):
             if not isinstance(func_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -424,6 +428,7 @@ class PythonIndexAdapter:
         self, func_node: ast.FunctionDef | ast.AsyncFunctionDef
     ) -> Optional[str]:
         """Return the class name that directly contains func_node, or None."""
+        assert self._tree is not None
         for class_node in ast.walk(self._tree):
             if not isinstance(class_node, ast.ClassDef):
                 continue

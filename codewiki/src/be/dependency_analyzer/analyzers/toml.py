@@ -16,7 +16,7 @@ class TreeSitterTOMLAnalyzer:
     nodes. No call relationships are generated (TOML is configuration, not code).
     """
 
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = Path(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -142,7 +142,7 @@ class TreeSitterTOMLAnalyzer:
 def analyze_toml_file(
     file_path: str,
     content: str,
-    repo_path: str = None,
+    repo_path: str | None = None,
 ) -> Tuple[List[Node], List[CallRelationship]]:
     analyzer = TreeSitterTOMLAnalyzer(file_path, content, repo_path)
     return analyzer.nodes, analyzer.call_relationships

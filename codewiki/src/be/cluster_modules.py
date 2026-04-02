@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, cast
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import PurePosixPath
@@ -226,7 +226,7 @@ def _heuristic_cluster_name(
                 dir_counts[part] += 1
 
     if dir_counts:
-        best = max(dir_counts, key=dir_counts.get)
+        best = max(dir_counts.items(), key=lambda item: item[1])[0]
         return best.replace("-", "_").replace(" ", "_")
     # Fallback: use the common file stem
     stems: Dict[str, int] = defaultdict(int)
@@ -235,7 +235,7 @@ def _heuristic_cluster_name(
             continue
         stems[PurePosixPath(components[cid].relative_path).stem] += 1
     if stems:
-        return max(stems, key=stems.get)
+        return max(stems.items(), key=lambda item: item[1])[0]
     return "cluster"
 
 
@@ -287,7 +287,9 @@ def graph_pre_cluster(
     # Scale cap with repo size: ~1 cluster per 50 nodes, clamped [12, 32].
     MAX_CLUSTERS = max(12, min(32, len(node_set) // 50))
     try:
-        communities = louvain_communities(G, weight="weight", resolution=1.0, seed=42)
+        communities = cast(
+            list[set[str]], louvain_communities(G, weight="weight", resolution=1.0, seed=42)
+        )
     except Exception as e:
         logger.warning(f"Louvain community detection failed: {e}")
         return {}, {}
@@ -296,11 +298,11 @@ def graph_pre_cluster(
         return {}, {}
 
     # Sort: largest first
-    communities = sorted(communities, key=len, reverse=True)
+    communities = cast(list[set[str]], sorted(communities, key=len, reverse=True))
 
-    def _merge_smallest(comms):
+    def _merge_smallest(comms: list[set[str]]) -> list[set[str]]:
         """Merge the smallest community into its most-connected neighbour."""
-        comms = sorted(comms, key=len)  # smallest first
+        comms = cast(list[set[str]], sorted(comms, key=len))  # smallest first
         smallest = comms[0]
         rest = comms[1:]
         best, best_score = 0, -1
@@ -309,7 +311,7 @@ def graph_pre_cluster(
             if score > best_score:
                 best, best_score = idx, score
         rest[best] = rest[best] | smallest
-        return sorted(rest, key=len, reverse=True)
+        return cast(list[set[str]], sorted(rest, key=len, reverse=True))
 
     # Phase 1: merge tiny (< 3 members) communities
     MIN_CLUSTER_SIZE = 3
@@ -324,7 +326,7 @@ def graph_pre_cluster(
                 if score > best_score:
                     best, best_score = idx, score
             large[best] = large[best] | tiny
-        communities = sorted(large, key=len, reverse=True)
+        communities = cast(list[set[str]], sorted(large, key=len, reverse=True))
 
     # Phase 2: enforce MAX_CLUSTERS cap — keep merging smallest until at cap
     while len(communities) > MAX_CLUSTERS:
@@ -339,7 +341,7 @@ def graph_pre_cluster(
     # Build cluster dict with heuristic names
     clusters: Dict[str, List[str]] = {}
     node_to_cluster: Dict[str, str] = {}
-    used_names: set = set()
+    used_names: set[str] = set()
     for community in communities:
         members = list(community)
         name = _heuristic_cluster_name(members, components)
@@ -402,9 +404,9 @@ def cluster_modules(
     leaf_nodes: List[str],
     components: Dict[str, Node],
     config: Config,
-    current_module_tree: dict[str, Any] = {},
-    current_module_name: str = None,
-    current_module_path: List[str] = [],
+    current_module_tree: Optional[dict[str, Any]] = None,
+    current_module_name: Optional[str] = None,
+    current_module_path: Optional[List[str]] = None,
     _token_threshold: Optional[int] = None,
     index_products=None,  # NEW: when provided, use v2 pipeline
 ) -> Dict[str, Any]:
@@ -426,6 +428,11 @@ def cluster_modules(
     documentation agents use to decide whether to call
     ``generate_sub_module_documentation``.
     """
+    if current_module_tree is None:
+        current_module_tree = {}
+    if current_module_path is None:
+        current_module_path = []
+
     # V2 dispatch: when index_products is provided, attempt graph-driven clustering
     if index_products is not None:
         try:
@@ -564,7 +571,7 @@ def cluster_modules(
             counts[parent] += 1
         if not counts:
             return ""
-        return max(counts, key=counts.get)
+        return max(counts.items(), key=lambda item: item[1])[0]
 
     def _ensure_paths(tree: Dict[str, Any]) -> None:
         for info in tree.values():

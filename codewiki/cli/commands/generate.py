@@ -50,11 +50,14 @@ def _legacy_model_ref(provider_name: str, model_name: str | None) -> str | None:
 
 def _legacy_config_to_app_config(config, api_key: str) -> AppConfig:
     provider_name = "legacy"
-    fallback_models = [
-        _legacy_model_ref(provider_name, name.strip())
-        for name in (config.fallback_model or "").split(",")
-        if name.strip()
-    ]
+    fallback_models: list[str] = []
+    for name in (config.fallback_model or "").split(","):
+        stripped = name.strip()
+        if not stripped:
+            continue
+        ref = _legacy_model_ref(provider_name, stripped)
+        if ref is not None:
+            fallback_models.append(ref)
     long_context_model = _legacy_model_ref(provider_name, config.long_context_model)
 
     return AppConfig(
@@ -114,8 +117,11 @@ def _load_generation_app_config(config_path: str | None) -> AppConfig:
 
     config_manager = ConfigManager()
     if config_manager.load() and config_manager.is_configured():
+        legacy_config = config_manager.get_config()
+        if legacy_config is None:
+            raise ConfigurationError("Legacy configuration could not be loaded.")
         return _legacy_config_to_app_config(
-            config_manager.get_config(),
+            legacy_config,
             config_manager.get_api_key() or "",
         )
 

@@ -13,7 +13,7 @@ from anthropic import Anthropic
 from openai import OpenAI, AsyncOpenAI
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.fallback import FallbackModel
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIModelSettings
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -54,8 +54,8 @@ def _get_cached_anthropic_provider(api_key: str, base_url: str | None = None) ->
     return AnthropicProvider(api_key=api_key, base_url=base_url)
 
 
-def _model_settings(config: Config) -> OpenAIModelSettings:
-    return OpenAIModelSettings(temperature=0.0, max_tokens=config.max_tokens)
+def _model_settings(config: Config) -> OpenAIChatModelSettings:
+    return OpenAIChatModelSettings(temperature=0.0, max_tokens=config.max_tokens)
 
 
 def _has_provider_registry(config: Config) -> bool:
@@ -162,6 +162,8 @@ def create_fallback_models(config: Config) -> FallbackModel:
 
 
 def create_long_context_model(config: Config):
+    if config.long_context_model is None:
+        raise ValueError("long_context_model is not configured")
     if _has_provider_registry(config):
         return create_model_from_ref(config, config.long_context_model)
     return OpenAIChatModel(
@@ -275,7 +277,12 @@ def _call_claude(
     return "".join(parts)
 
 
-def call_llm(prompt: str, config: Config, model: str = None, temperature: float = 0.0) -> str:
+def call_llm(
+    prompt: str,
+    config: Config,
+    model: str | None = None,
+    temperature: float = 0.0,
+) -> str:
     from codewiki.src.be.utils import count_tokens
 
     if model is None:
@@ -303,12 +310,12 @@ def call_llm(prompt: str, config: Config, model: str = None, temperature: float 
     else:
         resolved_model_name = model
 
-    last_exc: Exception = None
+    last_exc: Exception | None = None
     use_streaming = False
     t0 = time.time()
     for attempt, delay in enumerate([0] + _RETRY_DELAYS):
         if delay:
-            retry_after = _parse_retry_after(last_exc)
+            retry_after = _parse_retry_after(last_exc) if last_exc is not None else None
             wait = retry_after if retry_after is not None else delay
             msg = (
                 f"⚠  LLM retry {attempt}/{len(_RETRY_DELAYS)}"
@@ -367,4 +374,6 @@ def call_llm(prompt: str, config: Config, model: str = None, temperature: float 
                 _logger.info(
                     f"call_llm [model={model}]: connection timeout detected — switching to streaming for next retry"
                 )
-    raise last_exc
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("LLM call retry loop exited without producing a response or exception")

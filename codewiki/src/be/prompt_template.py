@@ -1018,7 +1018,7 @@ def format_user_prompt(
     module_name: str,
     core_component_ids: list[str],
     components: Dict[str, Any],
-    module_tree: dict[str, any],
+    module_tree: dict[str, Any],
 ) -> str:
     """
     Format the user prompt with module name and organized core component codes.
@@ -1036,7 +1036,7 @@ def format_user_prompt(
     # to avoid sending the entire tree (thousands of component IDs) in every prompt
     lines = []
 
-    def _format_module_tree(module_tree: dict[str, any], indent: int = 0):
+    def _format_module_tree(module_tree: dict[str, Any], indent: int = 0):
         for key, value in module_tree.items():
             is_current = key == module_name
             if is_current:
@@ -1271,8 +1271,8 @@ def format_user_prompt(
 
 def format_cluster_prompt(
     potential_core_components: str,
-    module_tree: dict[str, any] = {},
-    module_name: str = None,
+    module_tree: dict[str, Any] | None = None,
+    module_name: str | None = None,
     graph_clusters_hint: str = "",
 ) -> str:
     """
@@ -1283,7 +1283,7 @@ def format_cluster_prompt(
     # format module tree — only show component lists for the current module
     lines = []
 
-    def _format_module_tree(module_tree: dict[str, any], indent: int = 0):
+    def _format_module_tree(module_tree: dict[str, Any], indent: int = 0):
         for key, value in module_tree.items():
             is_current = key == module_name
             if is_current:
@@ -1301,6 +1301,7 @@ def format_cluster_prompt(
                 lines.append(f"{'  ' * (indent + 1)} Children:")
                 _format_module_tree(value["children"], indent + 2)
 
+    module_tree = module_tree or {}
     _format_module_tree(module_tree, 0)
     formatted_module_tree = "\n".join(lines)
 
@@ -1368,7 +1369,7 @@ def _build_language_section(output_language: str) -> str:
 
 
 def format_system_prompt(
-    module_name: str, custom_instructions: str = None, output_language: str = "en"
+    module_name: str, custom_instructions: str | None = None, output_language: str = "en"
 ) -> str:
     """
     Format the system prompt with module name and optional custom instructions.
@@ -1393,7 +1394,7 @@ def format_system_prompt(
 
 
 def format_leaf_system_prompt(
-    module_name: str, custom_instructions: str = None, output_language: str = "en"
+    module_name: str, custom_instructions: str | None = None, output_language: str = "en"
 ) -> str:
     """
     Format the leaf system prompt with module name and optional custom instructions.

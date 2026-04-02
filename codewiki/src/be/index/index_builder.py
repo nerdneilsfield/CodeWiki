@@ -24,6 +24,7 @@ from codewiki.src.be.index.symbol_table import SymbolTable
 from codewiki.src.be.index.import_graph import ImportGraph
 from codewiki.src.be.index.component_card import CardBuilder
 from codewiki.src.be.index.adapters.python_adapter import PythonIndexAdapter
+from codewiki.src.be.index.adapters.ts_js_adapter import TSJSIndexAdapter
 from codewiki.src.be.index.edge_index import EdgeIndex
 from codewiki.src.be.index.graph_stats import GraphStats
 from codewiki.src.be.dependency_analyzer.utils.patterns import CODE_EXTENSIONS
@@ -174,17 +175,11 @@ class IndexBuilder:
                 all_imports.extend(imports)
                 adapters_by_file[file_path] = adapter
             elif lang in ("typescript", "javascript"):
-                try:
-                    from codewiki.src.be.index.adapters.ts_js_adapter import TSJSIndexAdapter
-
-                    adapter = TSJSIndexAdapter(abs_path, content, self.repo_path, language=lang)
-                    symbols, imports = adapter.extract()
-                    all_symbols.extend(symbols)
-                    all_imports.extend(imports)
-                    adapters_by_file[file_path] = adapter
-                except ImportError:
-                    logger.debug(f"TS/JS adapter not available, using generic for {file_path}")
-                    self._generic_fallback(abs_path, content, lang, all_symbols, all_call_rels)
+                adapter = TSJSIndexAdapter(abs_path, content, self.repo_path, language=lang)
+                symbols, imports = adapter.extract()
+                all_symbols.extend(symbols)
+                all_imports.extend(imports)
+                adapters_by_file[file_path] = adapter
             else:
                 self._generic_fallback(abs_path, content, lang, all_symbols, all_call_rels)
 
@@ -198,9 +193,10 @@ class IndexBuilder:
 
         # Pass 2a: language-specific CALLS extraction (Python AST, TS tree-sitter, etc.).
         for file_path, adapter in adapters_by_file.items():
-            if hasattr(adapter, "extract_calls"):
+            extract_calls = getattr(adapter, "extract_calls", None)
+            if callable(extract_calls):
                 try:
-                    edges.extend(adapter.extract_calls(symbol_table, import_graph))
+                    edges.extend(extract_calls(symbol_table, import_graph))
                 except Exception as e:
                     logger.warning(f"extract_calls failed for {file_path}: {e}")
 

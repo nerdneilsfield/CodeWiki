@@ -4,14 +4,7 @@ from pathlib import Path
 import os
 
 from tree_sitter import Parser, Language
-
-try:
-    import tree_sitter_cmake
-except ImportError as _exc:
-    raise ImportError(
-        "tree-sitter-cmake is required for CMake analysis. "
-        "Install it with: pip install 'codewiki[cmake]' or pip install tree-sitter-cmake"
-    ) from _exc
+import tree_sitter_cmake
 from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationship
 
 logger = logging.getLogger(__name__)
@@ -34,7 +27,7 @@ _STRUCTURAL_COMMANDS = {
 
 
 class TreeSitterCMakeAnalyzer:
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = Path(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -288,7 +281,7 @@ class TreeSitterCMakeAnalyzer:
 def analyze_cmake_file(
     file_path: str,
     content: str,
-    repo_path: str = None,
+    repo_path: str | None = None,
 ) -> Tuple[List[Node], List[CallRelationship]]:
     analyzer = TreeSitterCMakeAnalyzer(file_path, content, repo_path)
     return analyzer.nodes, analyzer.call_relationships

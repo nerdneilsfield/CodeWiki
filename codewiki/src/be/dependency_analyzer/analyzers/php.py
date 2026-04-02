@@ -99,7 +99,7 @@ class NamespaceResolver:
         """Set the current namespace."""
         self.current_namespace = ns.replace("\\\\", "\\")
 
-    def register_use(self, fqn: str, alias: str = None):
+    def register_use(self, fqn: str, alias: str | None = None):
         """Register a use statement with optional alias."""
         fqn = fqn.replace("\\\\", "\\").lstrip("\\")
         alias = alias or fqn.split("\\")[-1]
@@ -138,7 +138,7 @@ class NamespaceResolver:
 class TreeSitterPHPAnalyzer:
     """Analyzes PHP files using tree-sitter to extract nodes and relationships."""
 
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = Path(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -197,7 +197,7 @@ class TreeSitterPHPAnalyzer:
                 return str(self.file_path)
         return str(self.file_path)
 
-    def _get_component_id(self, name: str, parent_class: str = None) -> str:
+    def _get_component_id(self, name: str, parent_class: str | None = None) -> str:
         """Generate component ID for a node."""
         # Use namespace if available
         if self.namespace_resolver.current_namespace:
@@ -275,7 +275,7 @@ class TreeSitterPHPAnalyzer:
                             alias_name = self._find_child_by_type(alias_node, "name")
                             if alias_name:
                                 alias = alias_name.text.decode()
-                        self.namespace_resolver.register_use(fqn, alias)
+                        self.namespace_resolver.register_use(fqn, alias or None)
         else:
             # Handle simple use: use App\User; or use App\User as U;
             for child in node.children:
@@ -292,9 +292,11 @@ class TreeSitterPHPAnalyzer:
                             alias_name = self._find_child_by_type(alias_node, "name")
                             if alias_name:
                                 alias = alias_name.text.decode()
-                        self.namespace_resolver.register_use(fqn, alias)
+                        self.namespace_resolver.register_use(fqn, alias or None)
 
-    def _extract_nodes(self, node, lines: List[str], depth: int = 0, parent_class: str = None):
+    def _extract_nodes(
+        self, node, lines: List[str], depth: int = 0, parent_class: str | None = None
+    ):
         """Extract class, interface, trait, enum, function, and method nodes."""
         if depth > MAX_RECURSION_DEPTH:
             logger.warning(f"Max recursion depth reached in {self.file_path}")
@@ -675,7 +677,7 @@ class TreeSitterPHPAnalyzer:
 
 
 def analyze_php_file(
-    file_path: str, content: str, repo_path: str = None
+    file_path: str, content: str, repo_path: str | None = None
 ) -> Tuple[List[Node], List[CallRelationship]]:
     """
     Analyze a PHP file and extract nodes and call relationships.

@@ -26,19 +26,13 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
+import mdformat
+
 from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.postprocess.lint_report import LintError, LintReport
 from codewiki.src.config import Config
 
 logger = logging.getLogger(__name__)
-
-# ── mdformat (optional dependency) ─────────────────────────────────────────────
-try:
-    import mdformat
-
-    _HAS_MDFORMAT = True
-except ImportError:
-    _HAS_MDFORMAT = False
 
 
 # ── Math block extraction ───────────────────────────────────────────────────────
@@ -119,8 +113,6 @@ def _save_hash_cache(docs_path: Path, cache: dict[str, str]) -> None:
 
 
 def _format_markdown(text: str, stats: FixStats) -> str:
-    if not _HAS_MDFORMAT:
-        return text
     try:
         formatted = mdformat.text(text)
         if formatted != text:

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class TreeSitterGoAnalyzer:
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = Path(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -39,7 +39,7 @@ class TreeSitterGoAnalyzer:
                 return str(self.file_path)
         return str(self.file_path)
 
-    def _get_component_id(self, name: str, receiver_type: str = None) -> str:
+    def _get_component_id(self, name: str, receiver_type: str | None = None) -> str:
         module_path = self._get_module_path()
         if receiver_type:
             return f"{module_path}.{receiver_type}.{name}"
@@ -96,7 +96,7 @@ class TreeSitterGoAnalyzer:
                 name = self._node_text(name_node)
                 params = self._extract_params(node)
                 component_name = f"{receiver_type}.{name}" if receiver_type else name
-                component_id = self._get_component_id(name, receiver_type)
+                component_id = self._get_component_id(name, receiver_type or None)
                 node_obj = Node(
                     id=component_id,
                     name=component_name,
@@ -238,7 +238,7 @@ class TreeSitterGoAnalyzer:
                     (c for c in current.children if c.type == "field_identifier"), None
                 )
                 if name_node:
-                    return self._get_component_id(self._node_text(name_node), receiver_type)
+                    return self._get_component_id(self._node_text(name_node), receiver_type or None)
             current = current.parent
         return None
 
@@ -271,7 +271,7 @@ class TreeSitterGoAnalyzer:
 def analyze_go_file(
     file_path: str,
     content: str,
-    repo_path: str = None,
+    repo_path: str | None = None,
 ) -> Tuple[List[Node], List[CallRelationship]]:
     analyzer = TreeSitterGoAnalyzer(file_path, content, repo_path)
     return analyzer.nodes, analyzer.call_relationships

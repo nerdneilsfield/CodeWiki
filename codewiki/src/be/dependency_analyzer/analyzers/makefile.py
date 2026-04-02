@@ -4,21 +4,14 @@ from pathlib import Path
 import os
 
 from tree_sitter import Parser, Language
-
-try:
-    import tree_sitter_make
-except ImportError as _exc:
-    raise ImportError(
-        "tree-sitter-make is required for Makefile analysis. "
-        "Install it with: pip install 'codewiki[make]' or pip install tree-sitter-make"
-    ) from _exc
+import tree_sitter_make
 from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationship
 
 logger = logging.getLogger(__name__)
 
 
 class TreeSitterMakefileAnalyzer:
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = Path(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -168,7 +161,7 @@ class TreeSitterMakefileAnalyzer:
 def analyze_makefile_file(
     file_path: str,
     content: str,
-    repo_path: str = None,
+    repo_path: str | None = None,
 ) -> Tuple[List[Node], List[CallRelationship]]:
     analyzer = TreeSitterMakefileAnalyzer(file_path, content, repo_path)
     return analyzer.nodes, analyzer.call_relationships

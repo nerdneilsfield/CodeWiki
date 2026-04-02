@@ -711,7 +711,12 @@ class CallGraphAnalyzer:
         for func_id in self.functions.keys():
             degree_centrality[func_id] = len(graph.get(func_id, set()))
 
-        sorted_func_ids = sorted(degree_centrality, key=degree_centrality.get, reverse=True)
+        sorted_func_ids = [
+            func_id
+            for func_id, _degree in sorted(
+                degree_centrality.items(), key=lambda item: item[1], reverse=True
+            )
+        ]
 
         selected_func_ids = sorted_func_ids[:target_count]
 

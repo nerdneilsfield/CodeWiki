@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class TreeSitterRustAnalyzer:
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = Path(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -40,7 +40,7 @@ class TreeSitterRustAnalyzer:
                 return str(self.file_path)
         return str(self.file_path)
 
-    def _get_component_id(self, name: str, impl_type: str = None) -> str:
+    def _get_component_id(self, name: str, impl_type: str | None = None) -> str:
         module_path = self._get_module_path()
         if impl_type:
             return f"{module_path}.{impl_type}.{name}"
@@ -287,7 +287,7 @@ class TreeSitterRustAnalyzer:
                     fn_name = self._node_text(name_node)
                     # Check if inside an impl block
                     impl_type = self._find_containing_impl_type(current)
-                    return self._get_component_id(fn_name, impl_type)
+                    return self._get_component_id(fn_name, impl_type or None)
             current = current.parent
         return None
 
@@ -349,7 +349,7 @@ class TreeSitterRustAnalyzer:
 def analyze_rust_file(
     file_path: str,
     content: str,
-    repo_path: str = None,
+    repo_path: str | None = None,
 ) -> Tuple[List[Node], List[CallRelationship]]:
     analyzer = TreeSitterRustAnalyzer(file_path, content, repo_path)
     return analyzer.nodes, analyzer.call_relationships

@@ -29,7 +29,7 @@ def _get_c_parser() -> "Parser":
 
 
 class TreeSitterCAnalyzer:
-    def __init__(self, file_path: str, content: str, repo_path: str = None):
+    def __init__(self, file_path: str, content: str, repo_path: str | None = None):
         self.file_path = Path(file_path)
         self.content = content
         self.repo_path = repo_path or ""
@@ -379,7 +379,7 @@ class TreeSitterCAnalyzer:
 
 
 def analyze_c_file(
-    file_path: str, content: str, repo_path: str = None
+    file_path: str, content: str, repo_path: str | None = None
 ) -> Tuple[List[Node], List[CallRelationship]]:
     analyzer = TreeSitterCAnalyzer(file_path, content, repo_path)
     return analyzer.nodes, analyzer.call_relationships
