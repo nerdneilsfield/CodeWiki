@@ -10,6 +10,7 @@ def prepare_docs_content(content: str) -> str:
     """Sanitize rendered docs HTML before it is injected with ``|safe``."""
     return sanitize_html(content)
 
+
 # Web interface HTML template
 WEB_INTERFACE_TEMPLATE = """
 <!DOCTYPE html>
