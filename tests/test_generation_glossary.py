@@ -178,6 +178,40 @@ class TestBuildGlossary:
         assert entry.kind == "function"
         assert entry.file_path == "src/utils.py"
 
+    def test_build_glossary_preserves_common_abbreviations_in_first_sentence(self):
+        """First-sentence extraction must not split on e.g./i.e."""
+        from codewiki.src.be.generation.glossary import build_glossary
+
+        sym = _make_symbol(
+            "Abbrev",
+            docstring="Supports many formats, e.g. JSON and YAML. Extra details later.",
+        )
+        index_products = _FakeIndexProducts([sym])
+
+        result = build_glossary(index_products)
+
+        assert (
+            result["Abbrev"].definition
+            == "Supports many formats, e.g. JSON and YAML. (class, src/mod.py)"
+        )
+
+    def test_build_glossary_preserves_ie_in_first_sentence(self):
+        """First-sentence extraction must not split on i.e."""
+        from codewiki.src.be.generation.glossary import build_glossary
+
+        sym = _make_symbol(
+            "IeCase",
+            docstring="Normalizes edge cases, i.e. malformed input. Additional notes follow.",
+        )
+        index_products = _FakeIndexProducts([sym])
+
+        result = build_glossary(index_products)
+
+        assert (
+            result["IeCase"].definition
+            == "Normalizes edge cases, i.e. malformed input. (class, src/mod.py)"
+        )
+
     def test_build_glossary_missing_symbol_table_attr(self):
         """Object without symbol_table attribute returns empty dict (defensive)."""
         from codewiki.src.be.generation.glossary import build_glossary

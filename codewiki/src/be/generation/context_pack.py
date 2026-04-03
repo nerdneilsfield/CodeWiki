@@ -272,7 +272,10 @@ def _filter_link_map(link_map: dict[str, str], module_file_paths: set[str]) -> d
     """Filter link map to entries near the current module's files/directories.
 
     Uses the link-map key as the primary signal. This works for path-shaped keys
-    and still gives title/path-token overlap a chance before falling back.
+    and still gives title/path-token overlap a chance.
+
+    If nothing scores as relevant, return an empty subset rather than the full
+    map so the context remains selective by default.
     """
     if not link_map or not module_file_paths:
         return link_map
@@ -298,7 +301,7 @@ def _filter_link_map(link_map: dict[str, str], module_file_paths: set[str]) -> d
             scored_entries.append((score, key, doc_path))
 
     if not scored_entries:
-        return link_map
+        return {}
 
     scored_entries.sort(key=lambda item: (-item[0], item[1]))
     return {key: doc_path for _, key, doc_path in scored_entries}

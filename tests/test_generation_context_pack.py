@@ -344,6 +344,27 @@ def test_build_context_pack_filters_link_map_by_module_paths(
     assert "docs/utils/helpers.md" not in ctx
 
 
+def test_build_context_pack_does_not_fallback_to_full_link_map_when_irrelevant(
+    module_components, components, index_with_cards_and_edges
+):
+    from codewiki.src.be.generation.context_pack import build_context_pack
+
+    link_map = {
+        "CLI Transport": "cli_transport.md",
+        "Database Adapter": "database_adapter.md",
+        "HTTP Gateway": "http_gateway.md",
+    }
+
+    result = build_context_pack(
+        module_components=module_components,
+        components=components,
+        index_products=index_with_cards_and_edges,
+        link_map=link_map,
+    )
+
+    assert result["link_map_context"] == ""
+
+
 # ---------------------------------------------------------------------------
 # Test 8: format_context_pack_section — None or empty input
 # ---------------------------------------------------------------------------
@@ -590,11 +611,11 @@ def test_build_context_pack_glossary_and_link_map_both_present(module_components
         components=components,
         index_products=index,
         glossary={"key": "value"},
-        link_map={"src/a.py": "docs/a.md"},
+        link_map={MODULE_FILE: "docs/auth/login.md"},
     )
 
     assert "key" in result["glossary_context"]
-    assert "src/a.py" in result["link_map_context"]
+    assert MODULE_FILE in result["link_map_context"]
 
 
 def test_confidence_label_included_in_edge_description(module_components, components):

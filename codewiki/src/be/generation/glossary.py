@@ -10,6 +10,11 @@ from typing import Any
 
 from codewiki.src.be.index.models import Visibility, ExportStatus
 
+_ABBREVIATIONS = {
+    "e.g.": "e<DOT>g<DOT>",
+    "i.e.": "i<DOT>e<DOT>",
+}
+
 
 @dataclass(frozen=True)
 class GlossaryEntry:
@@ -18,6 +23,17 @@ class GlossaryEntry:
     symbol_id: str
     file_path: str
     kind: str
+
+
+def _first_sentence(text: str) -> str:
+    """Extract the first sentence while preserving common abbreviations."""
+    protected = text.strip()
+    for original, placeholder in _ABBREVIATIONS.items():
+        protected = protected.replace(original, placeholder)
+    first_sentence = re.split(r"(?<=[.!?])\s+", protected)[0].strip()
+    for original, placeholder in _ABBREVIATIONS.items():
+        first_sentence = first_sentence.replace(placeholder, original)
+    return first_sentence
 
 
 def build_glossary(
@@ -51,8 +67,7 @@ def build_glossary(
         # First sentence of docstring — use regex to avoid splitting on "e.g." or "i.e."
         doc_summary = ""
         if sym.docstring:
-            first_sentence = re.split(r"(?<=[.!?])\s+", sym.docstring.strip())[0]
-            doc_summary = first_sentence.strip()
+            doc_summary = _first_sentence(sym.docstring)
             if not doc_summary.endswith((".", "!", "?")):
                 doc_summary += "."
 
