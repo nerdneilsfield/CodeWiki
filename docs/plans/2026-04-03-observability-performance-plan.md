@@ -10,6 +10,8 @@
 
 **Key constraint:** O1+O3 (token tracking) and P5 (retry removal) both change `call_llm`'s contract. They are merged into one task to avoid double migration.
 
+**Execution constraint:** Task 3 and Task 4 MUST be executed as one continuous batch — do not insert other tasks between them. Both touch `call_llm` / usage wiring; a half-migrated state between them will break callers.
+
 ---
 
 ## File Map
