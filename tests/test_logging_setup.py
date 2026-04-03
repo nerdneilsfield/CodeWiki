@@ -64,3 +64,19 @@ class TestLoggingSetup:
         assert not any(
             "Remove `format_exc_info` from your processor chain" in str(w.message) for w in caught
         )
+
+    def test_cli_logger_compatibility_adapter_emits_via_structlog(self):
+        from codewiki.cli.utils.logging import create_logger
+        from codewiki.src.logging_setup import configure_cli_logging
+
+        configure_cli_logging(verbose=False)
+
+        current_stderr = io.StringIO()
+        with contextlib.redirect_stderr(current_stderr):
+            logger = create_logger(verbose=False)
+            logger.success("config ok")
+            logger.warning("pay attention")
+
+        output = current_stderr.getvalue()
+        assert "config ok" in output
+        assert "pay attention" in output
