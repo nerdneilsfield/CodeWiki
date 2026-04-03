@@ -51,6 +51,12 @@ from codewiki.src.be.documentation_scheduler import (
     run_module_queue as run_module_queue_impl,
 )
 from codewiki.src.be.llm_usage import LLMUsageStats
+from codewiki.src.be.pipeline import (
+    GenerationResult,
+    ModuleSummary,
+    PipelineContext,
+    PipelineRunner,
+)
 
 
 class DocumentationGenerator:
@@ -109,7 +115,8 @@ class DocumentationGenerator:
         components: Dict[str, Any],
         num_leaf_nodes: int,
         usage_stats: LLMUsageStats | None = None,
-    ):
+        generation_result: GenerationResult | None = None,
+    ) -> dict[str, Any]:
         """Create a metadata file with documentation generation information."""
         from datetime import datetime
 
@@ -132,6 +139,8 @@ class DocumentationGenerator:
         }
         if usage_stats is not None:
             metadata["statistics"]["token_usage"] = usage_stats.to_dict()
+        if generation_result is not None:
+            metadata.update(generation_result.to_metadata_dict())
 
         # Add generated markdown files to the metadata
         try:
@@ -143,6 +152,7 @@ class DocumentationGenerator:
 
         metadata_path = os.path.join(working_dir, "metadata.json")
         file_manager.save_json(metadata, metadata_path)
+        return metadata
 
     def get_processing_levels(
         self, module_tree: Dict[str, Any], parent_path: Optional[List[str]] = None
@@ -174,7 +184,7 @@ class DocumentationGenerator:
 
     async def generate_module_documentation(
         self, components: Dict[str, Any], leaf_nodes: List[str]
-    ) -> str:
+    ) -> tuple[str, ModuleSummary]:
         """Generate documentation for all modules using level-based concurrency."""
         working_dir = os.path.abspath(self.config.docs_dir)
         try:
@@ -202,7 +212,7 @@ class DocumentationGenerator:
                 if os.path.exists(repo_overview_path):
                     os.rename(repo_overview_path, os.path.join(working_dir, OVERVIEW_FILENAME))
 
-                return working_dir
+                return working_dir, ModuleSummary()
 
             dedup_docs_directory(working_dir)
 
@@ -270,7 +280,7 @@ class DocumentationGenerator:
             logger.info(
                 f"📊 Running queue on {len(graph_tree)} top-level modules (concurrency={max_concurrent})"
             )
-            await self._run_module_queue(
+            summary = await self._run_module_queue(
                 graph_tree,
                 components,
                 working_dir,
@@ -280,13 +290,16 @@ class DocumentationGenerator:
             )
 
             # ── Fill any modules whose .md was not written ────────────────────
-            await self._fill_missing_module_docs(working_dir, components, tree_manager, max_retries)
+            fill_summary = await self._fill_missing_module_docs(
+                working_dir, components, tree_manager, max_retries
+            )
+            summary.extend(fill_summary)
 
             # ── Generate repo-level overview after all modules are complete ───
             logger.info("📚 Generating repository overview")
             await self.generate_parent_module_docs([], working_dir, tree_manager)
 
-            return working_dir
+            return working_dir, summary
         finally:
             if self._state_mgr is not None:
                 await self._state_mgr.flush()
@@ -299,11 +312,11 @@ class DocumentationGenerator:
         tree_manager,
         desc: str = "Generating docs",
         include_root: bool = True,
-    ) -> None:
+    ) -> ModuleSummary:
         async def _generate_root_overview() -> None:
             await self.generate_parent_module_docs([], working_dir, tree_manager)
 
-        await run_module_queue_impl(
+        return await run_module_queue_impl(
             config=self.config,
             graph_tree=graph_tree,
             components=components,
@@ -324,8 +337,8 @@ class DocumentationGenerator:
         components: Dict[str, Any],
         tree_manager,
         max_retries: int,
-    ) -> None:
-        await fill_missing_module_docs_impl(
+    ) -> ModuleSummary:
+        return await fill_missing_module_docs_impl(
             config=self.config,
             working_dir=working_dir,
             components=components,
@@ -380,136 +393,252 @@ class DocumentationGenerator:
             module_path,
         )
 
-    async def run(self) -> None:
-        """Run the complete documentation generation process using dynamic programming."""
-        try:
-            # Build dependency graph
-            components, leaf_nodes = self.graph_builder.build_dependency_graph()
+    def _build_initial_context(self) -> PipelineContext:
+        return PipelineContext(
+            config=self.config,
+            working_dir=os.path.abspath(self.config.docs_dir),
+            usage_stats=self.usage_stats,
+            graph_builder=self.graph_builder,
+            agent_orchestrator=self.agent_orchestrator,
+            generator=self,
+            commit_id=self.commit_id or "",
+        )
 
-            logger.debug(f"Found {len(leaf_nodes)} leaf nodes")
+    async def _build_index(self, ctx: PipelineContext) -> None:
+        from codewiki.src.be.index.index_builder import IndexBuilder
 
-            # Build v3 index (symbol table, import graph, component cards)
-            try:
-                from codewiki.src.be.index.index_builder import IndexBuilder
+        index_builder = IndexBuilder(
+            repo_path=self.config.repo_path,
+            include_patterns=self.config.include_patterns,
+            exclude_patterns=self.config.exclude_patterns,
+            output_dir=self.config.docs_dir,
+        )
+        ctx.index_products = index_builder.build()
 
-                index_builder = IndexBuilder(
-                    repo_path=self.config.repo_path,
-                    include_patterns=self.config.include_patterns,
-                    exclude_patterns=self.config.exclude_patterns,
-                    output_dir=self.config.docs_dir,
-                )
-                self.index_products = index_builder.build()
-            except Exception:
-                logger.warning(
-                    "Index build failed; continuing without index products", exc_info=True
-                )
-                self.index_products = None
+    async def _cluster_modules(self, ctx: PipelineContext) -> None:
+        from codewiki.src.be.generation.glossary import build_glossary, build_link_map
 
-            # Cluster modules
-            working_dir = os.path.abspath(self.config.docs_dir)
-            file_manager.ensure_directory(working_dir)
-            first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
-            module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-            state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
-            existing_state = GenerationState.load(state_path)
-            current_config_fp = config_fingerprint(self.config)
+        working_dir = os.path.abspath(self.config.docs_dir)
+        file_manager.ensure_directory(working_dir)
+        first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
+        module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
+        state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
+        existing_state = GenerationState.load(state_path)
+        current_config_fp = config_fingerprint(self.config)
 
-            cached_tree = (
-                file_manager.load_json(first_module_tree_path)
-                if os.path.exists(first_module_tree_path)
-                else None
+        cached_tree = (
+            file_manager.load_json(first_module_tree_path)
+            if os.path.exists(first_module_tree_path)
+            else None
+        )
+
+        need_recluster = True
+        if cached_tree:
+            if (
+                existing_state.repo_commit == (self.commit_id or "")
+                and existing_state.config_fingerprint == current_config_fp
+            ):
+                need_recluster = False
+                logger.debug("Module tree cache hit (same commit)")
+            else:
+                logger.info("Module tree cache invalidated (commit/config changed)")
+
+        if not need_recluster:
+            assert cached_tree is not None
+            module_tree = heal_module_tree_components(cached_tree, ctx.components)
+            freeze_doc_filenames(module_tree)
+            file_manager.save_json(module_tree, first_module_tree_path)
+            if not os.path.exists(module_tree_path):
+                file_manager.save_json(module_tree, module_tree_path)
+        else:
+            logger.debug("Clustering modules (no valid cache at %s)", first_module_tree_path)
+            module_tree = cluster_modules(
+                ctx.leaf_nodes,
+                ctx.components,
+                self.config,
+                index_products=ctx.index_products,
+                usage_stats=self.usage_stats,
             )
-
-            need_recluster = True
-            if cached_tree:
-                if (
-                    existing_state.repo_commit == (self.commit_id or "")
-                    and existing_state.config_fingerprint == current_config_fp
-                ):
-                    need_recluster = False
-                    logger.debug("Module tree cache hit (same commit)")
-                else:
-                    logger.info("Module tree cache invalidated (commit/config changed)")
-
-            if not need_recluster:
-                assert cached_tree is not None
-                module_tree = heal_module_tree_components(cached_tree, components)
+            if module_tree:
                 freeze_doc_filenames(module_tree)
                 file_manager.save_json(module_tree, first_module_tree_path)
-                if not os.path.exists(module_tree_path):
-                    file_manager.save_json(module_tree, module_tree_path)
-            else:
-                logger.debug(f"Clustering modules (no valid cache at {first_module_tree_path})")
-                module_tree = cluster_modules(
-                    leaf_nodes,
-                    components,
-                    self.config,
-                    index_products=self.index_products,
-                    usage_stats=self.usage_stats,
-                )
-                if module_tree:
-                    freeze_doc_filenames(module_tree)
-                    file_manager.save_json(module_tree, first_module_tree_path)
-                    file_manager.save_json(module_tree, module_tree_path)
+                file_manager.save_json(module_tree, module_tree_path)
 
-            logger.debug(f"Grouped components into {len(module_tree)} modules")
+        try:
+            glossary = build_glossary(ctx.index_products) if ctx.index_products else {}
+            link_map = build_link_map(module_tree) if module_tree else {}
+            self.agent_orchestrator.set_generation_context(
+                index_products=ctx.index_products,
+                global_assets={"glossary": glossary, "link_map": link_map},
+            )
+            logger.info(
+                "Generation v2 context set: %s glossary terms, %s link map entries",
+                len(glossary),
+                len(link_map),
+            )
+        except Exception as exc:
+            logger.warning("Failed to set generation v2 context; continuing without", exc_info=True)
+            ctx.result.add_warning(f"Generation context setup failed: {exc}")
 
-            # v2: build global assets and inject into agent orchestrator
+        existing_state.repo_commit = self.commit_id or ""
+        existing_state.config_fingerprint = current_config_fp
+        self._gen_state = existing_state
+
+        ctx.working_dir = working_dir
+        ctx.module_tree = module_tree
+        ctx.gen_state = existing_state
+
+    async def _initialize_generation_state_from_tree(
+        self,
+        module_tree: Dict[str, Any],
+        working_dir: str,
+    ) -> None:
+        cleanup_legacy_internal_files(working_dir)
+
+        module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
+        first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
+        state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
+
+        dedup_docs_directory(working_dir)
+        freeze_doc_filenames(module_tree)
+        file_manager.save_json(module_tree, module_tree_path)
+        file_manager.save_json(module_tree, first_module_tree_path)
+
+        self._gen_state = self._gen_state or GenerationState.load(state_path)
+        self._state_mgr = self._state_mgr or GenerationStateManager(self._gen_state, state_path)
+        await self._state_mgr.update_metadata(self.commit_id or "", config_fingerprint(self.config))
+        planned_tasks = build_generation_tasks(
+            module_tree, self.config, existing_state=self._gen_state
+        )
+        if not self._gen_state.tasks:
             try:
-                from codewiki.src.be.generation.glossary import build_glossary, build_link_map
-
-                glossary = build_glossary(self.index_products) if self.index_products else {}
-                link_map = build_link_map(module_tree) if module_tree else {}
-                self.agent_orchestrator.set_generation_context(
-                    index_products=self.index_products,
-                    global_assets={"glossary": glossary, "link_map": link_map},
-                )
-                logger.info(
-                    f"Generation v2 context set: {len(glossary)} glossary terms, {len(link_map)} link map entries"
-                )
-            except Exception:
+                await self._state_mgr.bulk_add_tasks(planned_tasks)
+                await self._state_mgr.flush()
+            except ValueError as exc:
                 logger.warning(
-                    "Failed to set generation v2 context; continuing without", exc_info=True
+                    "Skipping colliding planned tasks during initial ledger load: %s", exc
                 )
-
-            existing_state.repo_commit = self.commit_id or ""
-            existing_state.config_fingerprint = current_config_fp
-            self._gen_state = existing_state
-
-            # Generate module documentation using dynamic programming approach
-            # This processes leaf modules first, then parent modules
-            working_dir = await self.generate_module_documentation(components, leaf_nodes)
-
-            # Generate guide documents (Get Started, Beginner's Guide, etc.)
-            logger.info("📖 Starting guide document generation")
-            guide_gen = GuideGenerator(
-                config=self.config,
-                components=components,
-                module_tree=module_tree,
-                working_dir=working_dir,
-                usage_stats=self.usage_stats,
+                for task in planned_tasks:
+                    try:
+                        await self._state_mgr.add_task(task)
+                        await self._state_mgr.flush()
+                    except ValueError as item_exc:
+                        logger.warning(
+                            "Skipped task %s due to output_file collision: %s",
+                            task.doc_id,
+                            item_exc,
+                        )
+        else:
+            existing_ids = set(self._gen_state.tasks)
+            missing_tasks = [task for task in planned_tasks if task.doc_id not in existing_ids]
+            if missing_tasks:
+                try:
+                    await self._state_mgr.bulk_add_tasks(missing_tasks)
+                    await self._state_mgr.flush()
+                except ValueError as exc:
+                    logger.warning("Skipping colliding missing tasks: %s", exc)
+                    for task in missing_tasks:
+                        try:
+                            await self._state_mgr.add_task(task)
+                            await self._state_mgr.flush()
+                        except ValueError as item_exc:
+                            logger.warning(
+                                "Skipped task %s due to output_file collision: %s",
+                                task.doc_id,
+                                item_exc,
+                            )
+            await self._state_mgr.mark_stale(
+                {task.doc_id: task.input_hash for task in planned_tasks}
             )
-            await guide_gen.run()
+        await self._state_mgr.promote_ready()
 
-            # Phase: post-processing fix (markdown + math + mermaid)
-            from codewiki.src.be.docs_fixer import fix_docs
+    async def _generate_docs_from_tree(
+        self,
+        components: Dict[str, Any],
+        leaf_nodes: List[str],
+        working_dir: str,
+        module_tree: Dict[str, Any],
+    ) -> tuple[str, ModuleSummary]:
+        if not module_tree:
+            logger.info("Processing whole repo because repo can fit in the context window")
+            repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
+            final_module_tree, _ = await self.agent_orchestrator.process_module(
+                repo_name, components, leaf_nodes, [], working_dir
+            )
 
-            fix_docs(working_dir, self.config, usage_stats=self.usage_stats)
+            module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
+            file_manager.save_json(final_module_tree, module_tree_path)
 
-            # Create documentation metadata after all usage-producing steps.
-            self.create_documentation_metadata(
-                working_dir,
+            repo_overview_path = os.path.join(working_dir, module_doc_filename([repo_name]))
+            if os.path.exists(repo_overview_path):
+                os.rename(repo_overview_path, os.path.join(working_dir, OVERVIEW_FILENAME))
+
+            return working_dir, ModuleSummary()
+
+        try:
+            tree_manager = ModuleTreeManager(
+                module_tree, os.path.join(working_dir, MODULE_TREE_FILENAME)
+            )
+            graph_tree = await tree_manager.get_snapshot()
+            logger.info(
+                "📊 Running queue on %s top-level modules (concurrency=%s)",
+                len(graph_tree),
+                self.config.max_concurrent,
+            )
+            summary = await self._run_module_queue(
+                graph_tree,
                 components,
-                len(leaf_nodes),
-                usage_stats=self.usage_stats,
+                working_dir,
+                tree_manager,
+                desc="Generating docs",
+                include_root=False,
             )
-
-            logger.debug(
-                f"Documentation generation completed successfully using dynamic programming!"
+            fill_summary = await self._fill_missing_module_docs(
+                working_dir, components, tree_manager, self.config.max_retries
             )
-            logger.debug(f"Processing order: leaf modules → parent modules → repository overview")
-            logger.debug(f"Documentation saved to: {working_dir}")
+            summary.extend(fill_summary)
 
+            logger.info("📚 Generating repository overview")
+            await self.generate_parent_module_docs([], working_dir, tree_manager)
+            return working_dir, summary
+        finally:
+            if self._state_mgr is not None:
+                await self._state_mgr.flush()
+
+    async def _generate_guides(self, ctx: PipelineContext) -> None:
+        logger.info("📖 Starting guide document generation")
+        guide_gen = GuideGenerator(
+            config=self.config,
+            components=ctx.components,
+            module_tree=ctx.module_tree,
+            working_dir=ctx.working_dir,
+            usage_stats=self.usage_stats,
+        )
+        await guide_gen.run()
+
+    def _postprocess_docs(self, ctx: PipelineContext) -> None:
+        from codewiki.src.be.docs_fixer import fix_docs
+
+        fix_docs(ctx.working_dir, self.config, usage_stats=self.usage_stats)
+
+    def _write_metadata(self, ctx: PipelineContext) -> dict[str, Any]:
+        return self.create_documentation_metadata(
+            ctx.working_dir,
+            ctx.components,
+            len(ctx.leaf_nodes),
+            usage_stats=self.usage_stats,
+            generation_result=ctx.result,
+        )
+
+    async def run(self) -> GenerationResult:
+        """Run documentation generation via the staged pipeline."""
+        from codewiki.src.be.stages import DEFAULT_STAGES
+
+        try:
+            runner = PipelineRunner(list(DEFAULT_STAGES))
+            result = await runner.execute(self._build_initial_context())
+            logger.debug("Documentation generation completed with status=%s", result.status)
+            return result
         except Exception as e:
             logger.error(f"Documentation generation failed: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")

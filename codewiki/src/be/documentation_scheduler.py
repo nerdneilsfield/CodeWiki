@@ -424,7 +424,7 @@ async def fill_missing_module_docs(
     run_module_queue: Callable[..., Awaitable[ModuleSummary]],
     module_doc_exists: Callable[..., bool],
     gen_state=None,
-) -> None:
+) -> ModuleSummary:
     """Retry missing module docs using the same dependency-aware queue."""
 
     def _count_missing(tree: Dict[str, Any], path: List[str]) -> int:
@@ -449,11 +449,12 @@ async def fill_missing_module_docs(
                 names.extend(_missing_names(children, module_path))
         return names
 
+    summary = ModuleSummary()
     for attempt in range(config.max_retries):
         module_tree = await tree_manager.get_snapshot()
         missing_count = _count_missing(module_tree, [])
         if missing_count == 0:
-            return
+            return summary
         missing_names = _missing_names(module_tree, [])
         logger.warning(
             "↩ Fill pass %s/%s: %s module(s) without docs — %s%s",
@@ -463,7 +464,7 @@ async def fill_missing_module_docs(
             ", ".join(missing_names[:5]),
             "..." if len(missing_names) > 5 else "",
         )
-        await run_module_queue(
+        batch_summary = await run_module_queue(
             graph_tree=module_tree,
             components=components,
             working_dir=working_dir,
@@ -472,3 +473,5 @@ async def fill_missing_module_docs(
             include_root=False,
             gen_state=gen_state,
         )
+        summary.extend(batch_summary)
+    return summary

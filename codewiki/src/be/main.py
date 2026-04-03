@@ -58,7 +58,11 @@ async def main() -> None:
 
         # Create and run documentation generator
         doc_generator = DocumentationGenerator(config)
-        await doc_generator.run()
+        result = await doc_generator.run()
+        if result.status == "failed":
+            raise RuntimeError("; ".join(result.warnings) or "documentation generation failed")
+        if result.status == "degraded":
+            logger.warning("Generation completed with issues: %s", "; ".join(result.warnings))
 
     except KeyboardInterrupt:
         logger.debug("Documentation generation interrupted by user")

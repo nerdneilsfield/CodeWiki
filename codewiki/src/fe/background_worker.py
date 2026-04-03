@@ -267,9 +267,18 @@ class BackgroundWorker:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                loop.run_until_complete(doc_generator.run())
+                result = loop.run_until_complete(doc_generator.run())
             finally:
                 loop.close()
+
+            if result.status == "failed":
+                raise RuntimeError("; ".join(result.warnings) or "documentation generation failed")
+            if result.status == "degraded":
+                logger.warning(
+                    "Job %s: documentation generated with issues: %s",
+                    job_id,
+                    "; ".join(result.warnings),
+                )
 
             # Cache the results
             docs_path = os.path.abspath(config.docs_dir)
@@ -279,7 +288,11 @@ class BackgroundWorker:
             job.status = "completed"
             job.completed_at = datetime.now()
             job.docs_path = docs_path
-            job.progress = "Documentation generation completed"
+            job.progress = (
+                "Documentation generation completed with issues"
+                if result.status == "degraded"
+                else "Documentation generation completed"
+            )
 
             # Save job status to disk
             self.save_job_statuses()

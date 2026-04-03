@@ -39,6 +39,13 @@ class ModuleSummary:
             "retried_then_succeeded": list(self.retried_then_succeeded),
         }
 
+    def extend(self, other: "ModuleSummary") -> None:
+        self.completed.extend(other.completed)
+        self.failed.extend(other.failed)
+        self.skipped.extend(other.skipped)
+        self.retried_then_succeeded.extend(other.retried_then_succeeded)
+        self.total += other.total
+
 
 @dataclass
 class GenerationResult:
@@ -80,6 +87,7 @@ class PipelineContext:
     usage_stats: Any = None
     graph_builder: Any = None
     agent_orchestrator: Any = None
+    generator: Any = None
     commit_id: str = ""
     result: GenerationResult = field(default_factory=GenerationResult)
 

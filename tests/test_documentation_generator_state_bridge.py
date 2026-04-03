@@ -88,7 +88,9 @@ def test_generation_tasks_can_mark_existing_state_stale(tmp_path):
     )
     state._mark_stale_tasks({"module:mod-cli": module_task.input_hash})
 
-    assert state.get_task("module:mod-cli").status == "stale"
+    stale_task = state.get_task("module:mod-cli")
+    assert stale_task is not None
+    assert stale_task.status == "stale"
 
 
 def test_dedup_docs_directory_removes_similar_smaller_duplicates(tmp_path):
@@ -151,6 +153,8 @@ def test_get_processing_levels_returns_leaf_first_levels(tmp_path):
 
 
 def test_run_orchestrates_generation_pipeline_in_order(tmp_path, monkeypatch):
+    from codewiki.src.be.pipeline import ModuleSummary
+
     gen = _make_generator(tmp_path)
     events = []
     components = {"comp": {"file_path": "a.py"}}
@@ -158,57 +162,62 @@ def test_run_orchestrates_generation_pipeline_in_order(tmp_path, monkeypatch):
     module_tree = {"Root": {"path": "root", "children": {}, "components": ["comp"]}}
     working_dir = str(tmp_path / "docs")
 
-    class _DummyGuideGenerator:
-        def __init__(self, **kwargs):
-            events.append("guide_init")
+    async def _fake_build_index(ctx):
+        events.append("build_index")
+        ctx.index_products = None
 
-        async def run(self):
-            events.append("guide_run")
+    async def _fake_cluster(ctx):
+        events.append("cluster")
+        ctx.module_tree = module_tree
+        ctx.working_dir = working_dir
 
-    async def _fake_generate_module_documentation(_components, _leaf_nodes):
+    async def _fake_state_init(_module_tree, _working_dir):
+        assert _module_tree == module_tree
+        assert _working_dir == working_dir
+        events.append("state_init")
+
+    async def _fake_generate_docs(_components, _leaf_nodes, _working_dir, _module_tree):
         assert _components == components
         assert _leaf_nodes == leaf_nodes
-        events.append("generate_module_documentation")
-        return working_dir
-
-    def _fake_create_metadata(_working_dir, _components, _num_leaf_nodes, usage_stats=None):
         assert _working_dir == working_dir
-        assert _components == components
-        assert _num_leaf_nodes == len(leaf_nodes)
-        assert usage_stats is gen.usage_stats
-        events.append("create_metadata")
+        assert _module_tree == module_tree
+        events.append("module_generation")
+        return working_dir, ModuleSummary(completed=["module:root"], total=1)
 
-    def _fake_fix_docs(_working_dir, _config, usage_stats=None):
-        assert _working_dir == working_dir
-        assert usage_stats is gen.usage_stats
-        events.append("fix_docs")
+    async def _fake_guides(ctx):
+        assert ctx.working_dir == working_dir
+        events.append("guide")
+
+    def _fake_postprocess(ctx):
+        assert ctx.working_dir == working_dir
+        events.append("postprocess")
+
+    def _fake_write_metadata(ctx):
+        assert ctx.working_dir == working_dir
+        assert ctx.components == components
+        assert ctx.usage_stats is gen.usage_stats
+        events.append("metadata")
+        return {"ok": True}
 
     gen.graph_builder = MagicMock()
     gen.graph_builder.build_dependency_graph.return_value = (components, leaf_nodes)
-    gen.generate_module_documentation = _fake_generate_module_documentation
-    gen.create_documentation_metadata = _fake_create_metadata
+    gen._build_index = _fake_build_index
+    gen._cluster_modules = _fake_cluster
+    gen._initialize_generation_state_from_tree = _fake_state_init
+    gen._generate_docs_from_tree = _fake_generate_docs
+    gen._generate_guides = _fake_guides
+    gen._postprocess_docs = _fake_postprocess
+    gen._write_metadata = _fake_write_metadata
 
-    monkeypatch.setattr(
-        "codewiki.src.be.documentation_generator.cluster_modules",
-        lambda *args, **kwargs: module_tree,
-    )
-    monkeypatch.setattr(
-        "codewiki.src.be.documentation_generator.GuideGenerator", _DummyGuideGenerator
-    )
-    monkeypatch.setattr("codewiki.src.be.docs_fixer.fix_docs", _fake_fix_docs)
-
-    # Bypass index build and context wiring details; the orchestration order is the contract here.
-    monkeypatch.setattr(
-        "codewiki.src.be.index.index_builder.IndexBuilder",
-        MagicMock(side_effect=RuntimeError("skip index")),
-    )
-
-    asyncio.run(gen.run())
+    result = asyncio.run(gen.run())
 
     assert events == [
-        "generate_module_documentation",
-        "guide_init",
-        "guide_run",
-        "fix_docs",
-        "create_metadata",
+        "build_index",
+        "cluster",
+        "state_init",
+        "module_generation",
+        "guide",
+        "postprocess",
+        "metadata",
     ]
+    assert result.metadata == {"ok": True}

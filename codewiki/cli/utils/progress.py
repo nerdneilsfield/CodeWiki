@@ -2,10 +2,13 @@
 Progress indicator utilities for CLI.
 """
 
+import logging
 import time
 from typing import Optional, Callable
 from datetime import datetime
 import click
+
+logger = logging.getLogger(__name__)
 
 
 class ProgressTracker:
@@ -68,13 +71,15 @@ class ProgressTracker:
 
         if self.verbose:
             elapsed = self._format_elapsed()
-            click.secho(
-                f"\n[{elapsed}] Phase {stage}/{self.total_stages}: {stage_name}",
-                fg="blue",
-                bold=True,
+            logger.info(
+                "[%s] Phase %s/%s: %s",
+                elapsed,
+                stage,
+                self.total_stages,
+                stage_name,
             )
         else:
-            click.secho(f"[{stage}/{self.total_stages}] {stage_name}", fg="blue", bold=True)
+            logger.info("[%s/%s] %s", stage, self.total_stages, stage_name)
 
     def update_stage(self, progress: float, message: Optional[str] = None):
         """
@@ -88,7 +93,7 @@ class ProgressTracker:
 
         if self.verbose and message:
             elapsed = self._format_elapsed()
-            click.echo(f"[{elapsed}]   {message}")
+            logger.info("[%s] %s", elapsed, message)
 
     def complete_stage(self, message: Optional[str] = None):
         """
@@ -103,9 +108,9 @@ class ProgressTracker:
             elapsed = self._format_elapsed()
             stage_time = time.time() - self.current_stage_start
             stage_name = self.STAGE_NAMES.get(self.current_stage, f"Stage {self.current_stage}")
-            click.secho(f"[{elapsed}]   {stage_name} complete ({stage_time:.1f}s)", fg="green")
+            logger.info("[%s] %s complete (%.1fs)", elapsed, stage_name, stage_time)
             if message:
-                click.echo(f"[{elapsed}]   {message}")
+                logger.info("[%s] %s", elapsed, message)
 
     def get_overall_progress(self) -> float:
         """

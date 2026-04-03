@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -115,8 +115,9 @@ def test_generate_command_uses_new_config_loading_path(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cli_backend_generation_forwards_usage_stats_to_cluster_modules(tmp_path):
+async def test_cli_backend_generation_consumes_generation_result(tmp_path):
     from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
+    from codewiki.src.be.pipeline import GenerationResult, ModuleSummary
 
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
@@ -136,42 +137,34 @@ async def test_cli_backend_generation_forwards_usage_stats_to_cluster_modules(tm
     backend_config = adapter._build_backend_config()
 
     fake_doc_generator = MagicMock()
-    fake_doc_generator.graph_builder.build_dependency_graph.return_value = (
-        {"comp": {"file_path": "a.py"}},
-        ["comp"],
+    fake_doc_generator.run = AsyncMock(
+        return_value=GenerationResult(
+            status="complete",
+            warnings=[],
+            module_summary=ModuleSummary(completed=["module:comp"], total=1),
+            metadata={
+                "statistics": {
+                    "total_components": 1,
+                    "leaf_nodes": 1,
+                    "token_usage": {"total_input": 3, "total_output": 2},
+                }
+            },
+        )
     )
-    fake_doc_generator.usage_stats = object()
-    fake_doc_generator.generate_module_documentation = MagicMock()
-    fake_doc_generator.create_documentation_metadata = MagicMock()
-
-    async def _fake_generate_module_documentation(*_args, **_kwargs):
-        return None
-
-    fake_doc_generator.generate_module_documentation.side_effect = (
-        _fake_generate_module_documentation
-    )
-
-    async def _fake_guide_run():
-        return None
-
-    guide_generator = MagicMock()
-    guide_generator.run.side_effect = _fake_guide_run
 
     with (
         patch(
             "codewiki.cli.adapters.doc_generator.DocumentationGenerator",
             return_value=fake_doc_generator,
         ),
-        patch("codewiki.src.be.cluster_modules.cluster_modules") as mock_cluster_modules,
-        patch("codewiki.src.utils.file_manager.load_json", return_value=None),
-        patch("codewiki.src.utils.file_manager.ensure_directory"),
-        patch("codewiki.src.utils.file_manager.save_json"),
-        patch("codewiki.src.be.guide_generator.GuideGenerator", return_value=guide_generator),
-        patch("os.path.exists", return_value=False),
-        patch("os.listdir", return_value=[]),
+        patch("codewiki.src.utils.file_manager.load_json", return_value={"Root": {"children": {}}}),
+        patch("os.listdir", return_value=["overview.md", "metadata.json"]),
     ):
-        mock_cluster_modules.return_value = {"Root": {"children": {}, "components": ["comp"]}}
         await adapter._run_backend_generation(backend_config)
 
-    _, kwargs = mock_cluster_modules.call_args
-    assert kwargs["usage_stats"] is fake_doc_generator.usage_stats
+    fake_doc_generator.run.assert_awaited_once()
+    assert adapter.job.statistics.total_files_analyzed == 1
+    assert adapter.job.statistics.leaf_nodes == 1
+    assert adapter.job.statistics.total_tokens_used == 5
+    assert adapter.job.module_count == 1
+    assert set(adapter.job.files_generated) == {"overview.md", "metadata.json"}

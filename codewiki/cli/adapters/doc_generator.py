@@ -22,6 +22,8 @@ from codewiki.src.be.documentation_generator import DocumentationGenerator
 from codewiki.src.config import Config as BackendConfig, set_cli_context
 from codewiki.src.config_loader import RuntimeOverrides
 
+logger = logging.getLogger(__name__)
+
 
 class CLIDocumentationGenerator:
     """
@@ -197,135 +199,53 @@ class CLIDocumentationGenerator:
                     except OSError:
                         pass
 
-        # Stage 1: Dependency Analysis
-        self.progress_tracker.start_stage(1, "Dependency Analysis")
+        self.progress_tracker.start_stage(1, "Documentation Generation")
         if self.verbose:
-            self.progress_tracker.update_stage(0.2, "Initializing dependency analyzer...")
+            self.progress_tracker.update_stage(0.1, "Running documentation pipeline...")
 
-        # Create documentation generator
         doc_generator = DocumentationGenerator(backend_config)
 
-        if self.verbose:
-            self.progress_tracker.update_stage(0.5, "Parsing source files...")
-
-        # Build dependency graph
         try:
-            components, leaf_nodes = doc_generator.graph_builder.build_dependency_graph()
-            self.job.statistics.total_files_analyzed = len(components)
-            self.job.statistics.leaf_nodes = len(leaf_nodes)
-
-            if self.verbose:
-                self.progress_tracker.update_stage(1.0, f"Found {len(leaf_nodes)} leaf nodes")
-        except Exception as e:
-            raise APIError(f"Dependency analysis failed: {e}")
-
-        self.progress_tracker.complete_stage()
-
-        # Stage 2: Module Clustering
-        self.progress_tracker.start_stage(2, "Module Clustering")
-        if self.verbose:
-            self.progress_tracker.update_stage(0.5, "Clustering modules with LLM...")
-
-        # Import clustering function
-        from codewiki.src.be.cluster_modules import cluster_modules
-        from codewiki.src.utils import file_manager
-        from codewiki.src.config import FIRST_MODULE_TREE_FILENAME, MODULE_TREE_FILENAME
-
-        working_dir = str(self.output_dir.absolute())
-        file_manager.ensure_directory(working_dir)
-        first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
-        module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-
-        try:
-            cached = (
-                file_manager.load_json(first_module_tree_path)
-                if os.path.exists(first_module_tree_path)
-                else None
-            )
-            if cached:
-                # Non-empty cache: skip LLM clustering
-                if self.verbose:
-                    self.progress_tracker.update_stage(0.5, "Loading cached module tree...")
-                module_tree = cached
-            else:
-                # No cache (or empty cache from a previous failed/small run): re-cluster
-                if self.verbose:
-                    self.progress_tracker.update_stage(0.5, "Clustering modules with LLM...")
-                module_tree = cluster_modules(
-                    leaf_nodes,
-                    components,
-                    backend_config,
-                    usage_stats=doc_generator.usage_stats,
-                )
-                if module_tree:
-                    file_manager.save_json(module_tree, first_module_tree_path)
-
-            # Only initialise module_tree.json when it doesn't yet exist.
-            # Overwriting it would destroy _completed flags written by a
-            # previous run, causing every complex module to be re-processed.
-            if not os.path.exists(module_tree_path):
-                file_manager.save_json(module_tree, module_tree_path)
-            self.job.module_count = len(module_tree)
-
-            if self.verbose:
-                if module_tree:
-                    self.progress_tracker.update_stage(
-                        1.0, f"Created {len(module_tree)} top-level modules"
-                    )
-                else:
-                    self.progress_tracker.update_stage(
-                        1.0, "Repository fits in a single context window — no clustering needed"
-                    )
-        except Exception as e:
-            raise APIError(f"Module clustering failed: {e}")
-
-        self.progress_tracker.complete_stage()
-
-        # Stage 3: Documentation Generation
-        self.progress_tracker.start_stage(3, "Documentation Generation")
-        if self.verbose:
-            self.progress_tracker.update_stage(0.1, "Generating module documentation...")
-
-        try:
-            # Run the actual documentation generation
-            await doc_generator.generate_module_documentation(components, leaf_nodes)
-
-            if self.verbose:
-                self.progress_tracker.update_stage(0.9, "Creating repository overview...")
-
-            # Generate guide documents (Get Started, Beginner's Guide, etc.)
-            # Reload module_tree from disk — the whole-repo path writes the real tree there
-            from codewiki.src.be.guide_generator import GuideGenerator
-            from codewiki.src.config import MODULE_TREE_FILENAME
-
-            saved_tree = (
-                file_manager.load_json(os.path.join(working_dir, MODULE_TREE_FILENAME))
-                or module_tree
-            )
-            guide_gen = GuideGenerator(
-                config=backend_config,
-                components=components,
-                module_tree=saved_tree,
-                working_dir=working_dir,
-                usage_stats=doc_generator.usage_stats,
-            )
-            await guide_gen.run()
-
-            # Create metadata after guide generation so token usage is complete.
-            doc_generator.create_documentation_metadata(
-                working_dir,
-                components,
-                len(leaf_nodes),
-                usage_stats=doc_generator.usage_stats,
-            )
-
-            # Collect generated files
-            for file_path in os.listdir(working_dir):
-                if file_path.endswith(".md") or file_path.endswith(".json"):
-                    self.job.files_generated.append(file_path)
-
+            result = await doc_generator.run()
         except Exception as e:
             raise APIError(f"Documentation generation failed: {e}")
+
+        if result.status == "failed":
+            raise APIError("; ".join(result.warnings) or "Documentation generation failed")
+
+        if result.status == "degraded":
+            logger.warning("Generation completed with issues:")
+            for warning in result.warnings:
+                logger.warning("  - %s", warning)
+            for failure in result.module_summary.failed:
+                logger.warning("  - Module %s failed: %s", failure.doc_id, failure.error)
+
+        from codewiki.src.utils import file_manager
+        from codewiki.src.config import MODULE_TREE_FILENAME
+
+        working_dir = str(self.output_dir.absolute())
+        metadata = result.metadata or {}
+        stats = metadata.get("statistics", {})
+        token_usage = stats.get("token_usage", {})
+
+        self.job.statistics.total_files_analyzed = int(stats.get("total_components", 0) or 0)
+        self.job.statistics.leaf_nodes = int(stats.get("leaf_nodes", 0) or 0)
+        self.job.statistics.total_tokens_used = int(
+            (token_usage.get("total_input", 0) or 0) + (token_usage.get("total_output", 0) or 0)
+        )
+
+        module_tree = file_manager.load_json(os.path.join(working_dir, MODULE_TREE_FILENAME)) or {}
+        self.job.module_count = len(module_tree)
+
+        for file_path in os.listdir(working_dir):
+            if file_path.endswith(".md") or file_path.endswith(".json"):
+                if file_path not in self.job.files_generated:
+                    self.job.files_generated.append(file_path)
+
+        if self.verbose:
+            self.progress_tracker.update_stage(
+                1.0, f"Pipeline finished with status {result.status}"
+            )
 
         self.progress_tracker.complete_stage()
 
