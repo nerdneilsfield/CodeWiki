@@ -11,7 +11,6 @@ import time
 import asyncio
 import os
 import logging
-import sys
 
 
 from codewiki.cli.utils.progress import ProgressTracker
@@ -124,48 +123,9 @@ class CLIDocumentationGenerator:
 
     def _configure_backend_logging(self):
         """Configure backend logger for CLI use with colored output."""
-        from codewiki.src.be.dependency_analyzer.utils.logging_config import ColoredFormatter
+        from codewiki.src.logging_setup import configure_cli_logging
 
-        # Get project-wide logger (covers both backend and CLI modules)
-        backend_logger = logging.getLogger("codewiki")
-
-        # Remove existing handlers to avoid duplicates
-        backend_logger.handlers.clear()
-
-        if self.verbose:
-            # In verbose mode, show DEBUG and above for our own code
-            backend_logger.setLevel(logging.DEBUG)
-
-            # Create console handler with formatting
-            console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setLevel(logging.DEBUG)
-
-            # Use colored formatter for better readability
-            colored_formatter = ColoredFormatter()
-            console_handler.setFormatter(colored_formatter)
-
-            # Add handler to logger
-            backend_logger.addHandler(console_handler)
-        else:
-            # In non-verbose mode, suppress backend logs (use WARNING level to hide INFO/DEBUG)
-            backend_logger.setLevel(logging.WARNING)
-
-            # Create console handler for warnings and errors only
-            console_handler = logging.StreamHandler(sys.stderr)
-            console_handler.setLevel(logging.WARNING)
-
-            # Use colored formatter even for warnings/errors
-            colored_formatter = ColoredFormatter()
-            console_handler.setFormatter(colored_formatter)
-
-            backend_logger.addHandler(console_handler)
-
-        # Prevent propagation to root logger to avoid duplicate messages
-        backend_logger.propagate = False
-
-        # Suppress noisy third-party loggers regardless of mode
-        for lib_logger_name in ("httpx", "openai", "urllib3", "httpcore", "pydantic_ai"):
-            logging.getLogger(lib_logger_name).setLevel(logging.WARNING)
+        configure_cli_logging(verbose=self.verbose)
 
     def generate(self) -> DocumentationJob:
         """

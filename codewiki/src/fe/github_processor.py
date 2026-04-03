@@ -4,11 +4,14 @@ GitHub repository processing utilities.
 """
 
 import os
+import logging
 import subprocess
 from typing import Dict
 from urllib.parse import urlparse
 
 from .config import WebAppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubRepoProcessor:
@@ -69,7 +72,7 @@ class GitHubRepoProcessor:
                 )
 
                 if result.returncode != 0:
-                    print(f"Error cloning repository: {result.stderr}")
+                    logger.error("Error cloning repository: %s", result.stderr)
                     return False
 
                 # Checkout specific commit
@@ -82,7 +85,7 @@ class GitHubRepoProcessor:
                 )
 
                 if result.returncode != 0:
-                    print(f"Error checking out commit {commit_id}: {result.stderr}")
+                    logger.error("Error checking out commit %s: %s", commit_id, result.stderr)
                     return False
             else:
                 # Clone repository with shallow depth (default behavior)
@@ -101,10 +104,10 @@ class GitHubRepoProcessor:
                 )
 
                 if result.returncode != 0:
-                    print(f"Error cloning repository: {result.stderr}")
+                    logger.error("Error cloning repository: %s", result.stderr)
                     return False
 
             return True
         except Exception as e:
-            print(f"Error cloning repository: {e}")
+            logger.error("Error cloning repository: %s", e)
             return False

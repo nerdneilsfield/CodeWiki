@@ -11,6 +11,7 @@ Features:
 """
 
 import argparse
+import logging
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse
 from fastapi.exception_handlers import http_exception_handler as _default_http_exc_handler
@@ -21,6 +22,9 @@ from .background_worker import BackgroundWorker
 from .routes import WebRoutes
 from .config import WebAppConfig
 from .templates import NOT_FOUND_TEMPLATE
+from codewiki.src.logging_setup import configure_web_logging
+
+logger = logging.getLogger(__name__)
 
 
 # Initialize FastAPI app
@@ -87,6 +91,8 @@ def main():
     """Main function to run the web application."""
     import uvicorn
 
+    configure_web_logging()
+
     parser = argparse.ArgumentParser(
         description="CodeWiki Web Application - Generate documentation for GitHub repositories"
     )
@@ -127,11 +133,14 @@ def main():
     # Start background worker
     background_worker.start()
 
-    print(f"🚀 CodeWiki Web Application starting...")
-    print(f"🌐 Server running at: http://{args.host}:{args.port}")
-    print(f"📁 Cache directory: {WebAppConfig.get_absolute_path(WebAppConfig.CACHE_DIR)}")
-    print(f"🗂️  Temp directory: {WebAppConfig.get_absolute_path(WebAppConfig.TEMP_DIR)}")
-    print("\nPress Ctrl+C to stop the server")
+    logger.info("CodeWiki Web Application starting")
+    logger.info("Server running at: http://%s:%s", args.host, args.port)
+    logger.info(
+        "Web paths: cache_dir=%s temp_dir=%s",
+        WebAppConfig.get_absolute_path(WebAppConfig.CACHE_DIR),
+        WebAppConfig.get_absolute_path(WebAppConfig.TEMP_DIR),
+    )
+    logger.info("Press Ctrl+C to stop the server")
 
     try:
         uvicorn.run(
@@ -142,7 +151,7 @@ def main():
             log_level="debug" if args.debug else "info",
         )
     except KeyboardInterrupt:
-        print("\n👋 Server stopped")
+        logger.info("Server stopped")
         background_worker.stop()
 
 

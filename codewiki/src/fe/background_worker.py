@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 from codewiki.src.be.documentation_generator import DocumentationGenerator
 from codewiki.src.config_loader import RuntimeOverrides, load_app_config
+from codewiki.src.logging_setup import configure_web_logging
 from .models import JobStatus
 from .cache_manager import CacheManager
 from .github_processor import GitHubRepoProcessor
@@ -37,6 +38,7 @@ class BackgroundWorker:
         temp_dir: str | None = None,
         config_path: str | None = None,
     ):
+        configure_web_logging()
         self.cache_manager = cache_manager
         self.temp_dir = temp_dir or WebAppConfig.TEMP_DIR
         self.config_path = config_path
