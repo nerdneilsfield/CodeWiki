@@ -2,7 +2,7 @@
 """Tests for retry jitter and Retry-After header handling."""
 
 from unittest.mock import MagicMock, patch
-from codewiki.src.be.llm_services import _sleep_with_jitter, _parse_retry_after
+from codewiki.src.be.documentation_scheduler import _sleep_with_jitter, _parse_retry_after
 
 
 def test_jitter_adds_randomness():
@@ -59,7 +59,7 @@ def test_parse_retry_after_clamps_negative_value():
     """Negative Retry-After must not be returned (would crash time.sleep)."""
     import openai
     from unittest.mock import MagicMock
-    from codewiki.src.be.llm_services import _parse_retry_after
+    from codewiki.src.be.documentation_scheduler import _parse_retry_after
 
     exc = MagicMock(spec=openai.RateLimitError)
     exc.response = MagicMock()
@@ -72,7 +72,7 @@ def test_parse_retry_after_clamps_oversized_value():
     """Retry-After > 120s must be clamped to 120 to prevent excessive blocking."""
     import openai
     from unittest.mock import MagicMock
-    from codewiki.src.be.llm_services import _parse_retry_after
+    from codewiki.src.be.documentation_scheduler import _parse_retry_after
 
     exc = MagicMock(spec=openai.RateLimitError)
     exc.response = MagicMock()

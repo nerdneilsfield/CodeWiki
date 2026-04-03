@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 import traceback
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -16,6 +17,29 @@ from codewiki.src.utils import doc_id_for_path
 logger = logging.getLogger(__name__)
 
 _MAX_RETRY_AFTER = 120.0
+
+
+def _sleep_with_jitter(base_delay: float) -> None:
+    """Sleep for base_delay plus bounded jitter."""
+    actual = base_delay + random.uniform(0, base_delay * 0.5)
+    time.sleep(actual)
+
+
+def _parse_retry_after(exc: Exception) -> float | None:
+    """Parse and clamp Retry-After from OpenAI rate-limit errors."""
+    if not isinstance(exc, openai.RateLimitError):
+        return None
+    headers = getattr(getattr(exc, "response", None), "headers", {})
+    val = headers.get("retry-after") or headers.get("Retry-After")
+    if val:
+        try:
+            seconds = float(val)
+        except (ValueError, OverflowError):
+            return None
+        if not (0 <= seconds < float("inf")):
+            return None
+        return min(seconds, _MAX_RETRY_AFTER)
+    return None
 
 
 def is_leaf_module(module_info: Dict[str, Any]) -> bool:
@@ -158,21 +182,6 @@ async def run_module_queue(
     def _jitter(base: float) -> float:
         return base + random.uniform(0, base * 0.5)
 
-    def _get_retry_after(exc: Exception) -> float | None:
-        if not isinstance(exc, openai.RateLimitError):
-            return None
-        headers = getattr(getattr(exc, "response", None), "headers", {})
-        val = headers.get("retry-after") or headers.get("Retry-After")
-        if val:
-            try:
-                seconds = float(val)
-            except (ValueError, OverflowError):
-                return None
-            if not (0 <= seconds < float("inf")):
-                return None
-            return min(seconds, _MAX_RETRY_AFTER)
-        return None
-
     def _is_context_length_error(exc: Exception) -> bool:
         if isinstance(exc, openai.APIStatusError) and exc.status_code == 400:
             msg = str(exc)
@@ -301,7 +310,7 @@ async def run_module_queue(
                             last_exc,
                         )
                         if delay:
-                            retry_after = _get_retry_after(last_exc)
+                            retry_after = _parse_retry_after(last_exc)
                             actual_delay = (
                                 retry_after if retry_after is not None else _jitter(delay)
                             )
