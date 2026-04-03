@@ -219,16 +219,16 @@ Run: `pytest tests/test_web_job_correctness.py -v`
 
 - [ ] **Step 3: Add new fields to JobStatus**
 
-In `codewiki/src/fe/models.py`, add to `JobStatus`:
+In `codewiki/src/fe/models.py`, add to `JobStatus` (using `field(default_factory=list)` for proper typing):
 ```python
-    generation_status: Optional[str] = None  # "complete" / "degraded" / "failed"
-    degradation_reasons: list = None  # type: ignore[assignment]
-    module_summary: Optional[dict] = None
+from dataclasses import dataclass, field
 
-    def __post_init__(self):
-        if self.degradation_reasons is None:
-            self.degradation_reasons = []
+    generation_status: Optional[str] = None  # "complete" / "degraded" / "failed"
+    degradation_reasons: list[str] = field(default_factory=list)
+    module_summary: Optional[dict] = None
 ```
+
+No `__post_init__` needed — `field(default_factory=list)` handles the mutable default correctly.
 
 Also add to `JobStatusResponse`:
 ```python
@@ -286,9 +286,26 @@ Move `self.save_job_statuses()` into the `finally` block (after cleanup), so bot
             self.save_job_statuses()
 ```
 
-- [ ] **Step 7: Update routes.py to use snapshot API**
+- [ ] **Step 7: Update routes.py — reads use snapshot API, writes use new set_job API**
 
-Replace all `self.background_worker.job_status[...]` and `self.background_worker.get_all_jobs()` with `self.background_worker.snapshot_job(...)` and `self.background_worker.snapshot_jobs()`.
+**Read paths:** Replace all `self.background_worker.get_all_jobs()` and `self.background_worker.get_job_status(job_id)` with `self.background_worker.snapshot_jobs()` / `self.background_worker.snapshot_job(job_id)`.
+
+**Write path (cache hit at routes.py:128):** Currently `self.background_worker.job_status[job_id] = job` writes directly to the shared dict. Add a lock-protected write method to BackgroundWorker:
+
+```python
+    def set_job(self, job_id: str, job: JobStatus) -> None:
+        """Thread-safe write of a job status entry."""
+        with self._job_lock:
+            self.job_status[job_id] = job
+```
+
+Then in routes.py:128, replace:
+```python
+# Old:
+self.background_worker.job_status[job_id] = job
+# New:
+self.background_worker.set_job(job_id, job)
+```
 
 - [ ] **Step 8: Run tests**
 
@@ -396,12 +413,11 @@ class TestH7NoForcedDebugLevel:
 
 
 class TestH8CommitIdCaseInsensitive:
-    def test_clone_repository_accepts_uppercase_hex(self):
-        import re
-        # The validator in github_processor should accept uppercase
-        from codewiki.src.fe.github_processor import clone_repository
-        source = inspect.getsource(clone_repository)
-        # Must have a validation that handles case
+    def test_clone_repository_normalizes_commit_id(self):
+        # clone_repository is a @staticmethod on GitHubRepoProcessor
+        from codewiki.src.fe.github_processor import GitHubRepoProcessor
+        source = inspect.getsource(GitHubRepoProcessor.clone_repository)
+        # Must normalize case before validation
         assert ".lower()" in source or "a-fA-F" in source
 ```
 
@@ -490,6 +506,26 @@ class TestNoNaiveDatetime:
             if "datetime.now()" in line and "timezone" not in line and "utc" not in line.lower()
         ]
         assert not naive_calls, f"Naive datetime.now() at lines: {naive_calls}"
+
+
+class TestNaiveDatetimeBackwardCompat:
+    """Old data with naive timestamps must not crash when compared to new aware timestamps."""
+
+    def test_cache_manager_handles_naive_stored_timestamps(self):
+        """Loading old cache entries with naive datetimes must not raise TypeError."""
+        from datetime import datetime, timedelta, timezone
+
+        # Simulate old naive timestamp (as would be read from cache_index.json)
+        naive_ts = datetime(2026, 1, 1, 12, 0, 0)  # no tzinfo
+        # After UTC migration, code compares with aware datetime
+        aware_now = datetime.now(timezone.utc)
+
+        # This is the critical comparison that would TypeError if not handled:
+        # datetime.now(utc) - naive_ts
+        # We need the code to handle this by treating naive as UTC
+        naive_as_utc = naive_ts.replace(tzinfo=timezone.utc)
+        diff = aware_now - naive_as_utc
+        assert isinstance(diff, timedelta)  # must not raise TypeError
 ```
 
 - [ ] **Step 2: Apply UTC changes**
@@ -624,10 +660,19 @@ def _build_evidence_snippets(module_sym_ids: set[str], index_products) -> list[s
 
 - [ ] **Step 4: Apply M8 — atomic fallback metadata write**
 
-In `codewiki/cli/adapters/doc_generator.py:253`, replace bare `open("w")` with:
+In `codewiki/cli/adapters/doc_generator.py:259`, the current code is:
 ```python
-file_manager.save_json(fallback_metadata, metadata_path)
+with open(metadata_path, "w") as f:
+    f.write(self.job.to_json())
 ```
+
+Replace with atomic write using `file_manager`:
+```python
+import json
+file_manager.save_json(json.loads(self.job.to_json()), str(metadata_path))
+```
+
+`self.job.to_json()` returns a JSON string; `json.loads()` converts it to a dict that `save_json` can serialize atomically with UTF-8 encoding.
 
 - [ ] **Step 5: Apply S1 — delete stray files**
 
@@ -691,8 +736,10 @@ skip_covered = true
 
 ```makefile
 test:
-	pytest tests/ --cov=codewiki --cov-report=term-missing -q
+	uv run python -m pytest tests/ --cov=codewiki --cov-report=term-missing -q
 ```
+
+Keep the existing `uv run` convention used throughout the Makefile.
 
 - [ ] **Step 3: Run and verify coverage collects data**
 
