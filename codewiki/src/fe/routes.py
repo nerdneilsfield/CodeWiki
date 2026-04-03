@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from dataclasses import asdict
 
@@ -25,7 +25,7 @@ from codewiki.src.utils import file_manager, module_doc_filename, find_module_do
 
 logger = logging.getLogger(__name__)
 
-_COMMIT_RE = re.compile(r"^[a-f0-9]{4,40}$")
+_COMMIT_RE = re.compile(r"^[a-fA-F0-9]{4,40}$")
 
 
 class WebRoutes:
@@ -35,13 +35,41 @@ class WebRoutes:
         self.background_worker = background_worker
         self.cache_manager = cache_manager
 
+    def _snapshot_jobs(self) -> dict[str, JobStatus]:
+        """Read job statuses via the worker snapshot API when available."""
+        if hasattr(self.background_worker, "snapshot_jobs"):
+            return self.background_worker.snapshot_jobs()
+
+        job_status = getattr(self.background_worker, "job_status", {})
+        return dict(job_status)
+
+    def _snapshot_job(self, job_id: str):
+        """Read a single job via the worker snapshot API when available."""
+        if hasattr(self.background_worker, "snapshot_job"):
+            return self.background_worker.snapshot_job(job_id)
+        if hasattr(self.background_worker, "get_job_status"):
+            return self.background_worker.get_job_status(job_id)
+
+        job_status = getattr(self.background_worker, "job_status", {})
+        return job_status.get(job_id)
+
+    def _set_job(self, job_id: str, job: JobStatus) -> None:
+        """Write job state through the worker API when available."""
+        if hasattr(self.background_worker, "set_job"):
+            self.background_worker.set_job(job_id, job)
+            return
+
+        job_status = getattr(self.background_worker, "job_status", None)
+        if isinstance(job_status, dict):
+            job_status[job_id] = job
+
     async def index_get(self, request: Request) -> HTMLResponse:
         """Main page with form for submitting GitHub repositories."""
         # Clean up old jobs before displaying
         # self.cleanup_old_jobs()
 
         # Get recent jobs (last 10)
-        all_jobs = self.background_worker.get_all_jobs()
+        all_jobs = self._snapshot_jobs()
         recent_jobs = sorted(all_jobs.values(), key=lambda x: x.created_at, reverse=True)[:100]
 
         context = {
@@ -65,7 +93,7 @@ class WebRoutes:
         message_type = None
 
         repo_url = repo_url.strip()
-        commit_id = commit_id.strip() if commit_id else ""
+        commit_id = commit_id.strip().lower() if commit_id else ""
 
         if not repo_url:
             message = "Please enter a GitHub repository URL"
@@ -76,7 +104,7 @@ class WebRoutes:
         elif commit_id and not _COMMIT_RE.match(commit_id):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid commit ID format (expected 4-40 lowercase hex characters)",
+                detail="Invalid commit ID format (expected 4-40 hex characters)",
             )
         else:
             # Normalize the repo URL for comparison
@@ -87,8 +115,10 @@ class WebRoutes:
             job_id = self._repo_full_name_to_job_id(repo_info["full_name"])
 
             # Check if already in queue, processing, or recently failed
-            existing_job = self.background_worker.get_job_status(job_id)
-            recent_cutoff = datetime.now() - timedelta(minutes=WebAppConfig.RETRY_COOLDOWN_MINUTES)
+            existing_job = self._snapshot_job(job_id)
+            recent_cutoff = datetime.now(timezone.utc) - timedelta(
+                minutes=WebAppConfig.RETRY_COOLDOWN_MINUTES
+            )
 
             if existing_job:
                 if existing_job.status in ["queued", "processing"]:
@@ -119,13 +149,14 @@ class WebRoutes:
                         job_id=job_id,
                         repo_url=normalized_repo_url,  # Use normalized URL
                         status="completed",
-                        created_at=datetime.now(),
-                        completed_at=datetime.now(),
+                        created_at=datetime.now(timezone.utc),
+                        completed_at=datetime.now(timezone.utc),
                         docs_path=cached_docs,
                         progress="Retrieved from cache",
                         commit_id=commit_id if commit_id else None,
                     )
-                    self.background_worker.job_status[job_id] = job
+                    self._set_job(job_id, job)
+                    self.background_worker.save_job_statuses()
                 else:
                     # Add to queue
                     try:
@@ -133,7 +164,7 @@ class WebRoutes:
                             job_id=job_id,
                             repo_url=normalized_repo_url,  # Use normalized URL
                             status="queued",
-                            created_at=datetime.now(),
+                            created_at=datetime.now(timezone.utc),
                             progress="Waiting in queue...",
                             commit_id=commit_id if commit_id else None,
                         )
@@ -152,7 +183,7 @@ class WebRoutes:
                         message_type = "error"
 
         # Get recent jobs (last 10)
-        all_jobs = self.background_worker.get_all_jobs()
+        all_jobs = self._snapshot_jobs()
         recent_jobs = sorted(all_jobs.values(), key=lambda x: x.created_at, reverse=True)
 
         context = {
@@ -167,7 +198,7 @@ class WebRoutes:
 
     async def get_job_status(self, job_id: str) -> JobStatusResponse:
         """API endpoint to get job status."""
-        job = self.background_worker.get_job_status(job_id)
+        job = self._snapshot_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 
@@ -175,7 +206,7 @@ class WebRoutes:
 
     async def view_docs(self, job_id: str) -> RedirectResponse:
         """View generated documentation."""
-        job = self.background_worker.get_job_status(job_id)
+        job = self._snapshot_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 
@@ -193,7 +224,7 @@ class WebRoutes:
         self, job_id: str, filename: str = "overview.md"
     ) -> HTMLResponse:
         """Serve generated documentation files."""
-        job = self.background_worker.get_job_status(job_id)
+        job = self._snapshot_job(job_id)
         docs_path = None
         repo_url = None
 
@@ -220,13 +251,13 @@ class WebRoutes:
                     job_id=job_id,
                     repo_url=potential_repo_url,
                     status="completed",
-                    created_at=datetime.now(),
-                    completed_at=datetime.now(),
+                    created_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(timezone.utc),
                     docs_path=cached_docs,
                     progress="Loaded from cache",
                     commit_id=None,  # No commit info available from cache
                 )
-                self.background_worker.job_status[job_id] = job
+                self._set_job(job_id, job)
                 self.background_worker.save_job_statuses()
             else:
                 raise HTTPException(status_code=404, detail="Documentation not found")
@@ -370,8 +401,8 @@ class WebRoutes:
 
     def cleanup_old_jobs(self):
         """Clean up old job status entries."""
-        cutoff = datetime.now() - timedelta(hours=WebAppConfig.JOB_CLEANUP_HOURS)
-        all_jobs = self.background_worker.get_all_jobs()
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=WebAppConfig.JOB_CLEANUP_HOURS)
+        all_jobs = self._snapshot_jobs()
         expired_jobs = [
             job_id
             for job_id, job in all_jobs.items()
@@ -379,5 +410,4 @@ class WebRoutes:
         ]
 
         for job_id in expired_jobs:
-            if job_id in self.background_worker.job_status:
-                del self.background_worker.job_status[job_id]
+            self.background_worker.delete_job(job_id)

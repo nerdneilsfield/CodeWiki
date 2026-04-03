@@ -96,7 +96,7 @@ def clone_repository(github_url: str) -> str:
                     capture_output=True,
                     text=True,
                 )
-            except:
+            except Exception:
                 pass
 
         subprocess.run(
@@ -152,7 +152,7 @@ def clone_repository(github_url: str) -> str:
                     capture_output=True,
                     text=True,
                 )
-            except:
+            except Exception:
                 pass
         return temp_dir
     except subprocess.TimeoutExpired:

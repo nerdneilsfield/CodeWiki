@@ -148,5 +148,13 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v -p no:cov -s"
+addopts = "-v -s"
 asyncio_mode = "strict"
+
+[tool.coverage.run]
+source = ["codewiki"]
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

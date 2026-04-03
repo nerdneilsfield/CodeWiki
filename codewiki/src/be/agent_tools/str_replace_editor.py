@@ -7,14 +7,12 @@ This tool is used to view the given source code and view/edit the documentation 
 import json
 import re
 import subprocess
-import sys
 import warnings
 from collections import defaultdict
 from pathlib import Path
 from typing import Annotated, List, Optional, Tuple, Literal, Union
 
 from pydantic import BeforeValidator
-import io
 
 import logging
 from tree_sitter import Query, QueryCursor
@@ -28,12 +26,6 @@ from pydantic_ai import RunContext, Tool
 
 from .deps import CodeWikiDeps
 from ..utils import validate_mermaid_diagrams
-
-
-# There are some super strange "ascii can't decode x" errors,
-# that can be solved with setting the default encoding for stdout
-# (note that python3.6 doesn't have the reconfigure method)
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 
 def _coerce_int_list(v):
@@ -198,8 +190,10 @@ def format_flake8_output(
     # print(f"New errors before filtering: {errors=}")
     lines = []
     if previous_errors_string:
-        assert replacement_window is not None
-        assert replacement_n_lines is not None
+        if replacement_window is None:
+            raise ValueError("replacement_window is required when previous_errors_string is set")
+        if replacement_n_lines is None:
+            raise ValueError("replacement_n_lines is required when previous_errors_string is set")
         previous_errors = [
             Flake8Error.from_line(line.strip())
             for line in previous_errors_string.split("\n")
@@ -289,8 +283,8 @@ class WindowExpander:
             suffix: Filename suffix
         """
         self.suffix = suffix
-        if self.suffix:
-            assert self.suffix.startswith(".")
+        if self.suffix and not self.suffix.startswith("."):
+            raise ValueError(f"suffix must start with '.', got {self.suffix!r}")
 
     def _find_breakpoints(
         self, lines: List[str], current_line: int, direction=1, max_added_lines: int = 30
@@ -306,8 +300,10 @@ class WindowExpander:
         Returns:
             1-based line number of breakpoint. This line is meant to still be included in the viewport.
         """
-        assert 1 <= current_line <= len(lines)
-        assert 0 <= max_added_lines
+        if not 1 <= current_line <= len(lines):
+            raise ValueError(f"current_line must be between 1 and {len(lines)}, got {current_line}")
+        if max_added_lines < 0:
+            raise ValueError(f"max_added_lines must be >= 0, got {max_added_lines}")
 
         # 1. Find line range that we want to search for breakpoints in
 
@@ -388,7 +384,8 @@ class WindowExpander:
             Both inclusive.
         """
         # print("Input:", start, stop)
-        assert 1 <= start <= stop <= len(lines), (start, stop, len(lines))
+        if not 1 <= start <= stop <= len(lines):
+            raise ValueError(f"invalid viewport ({start}, {stop}) for {len(lines)} lines")
         if max_added_lines <= 0:
             # Already at max range, no expansion
             return start, stop
@@ -397,11 +394,20 @@ class WindowExpander:
         )
         new_stop = self._find_breakpoints(lines, stop, direction=1, max_added_lines=max_added_lines)
         # print(f"Expanded window is {new_start} to {new_stop}")
-        assert new_start <= new_stop, (new_start, new_stop)
-        assert new_start <= start, (new_start, start)
-        assert start - new_start <= max_added_lines, (start, new_start)
-        assert new_stop >= stop, (new_stop, stop)
-        assert new_stop - stop <= max_added_lines, (new_stop, stop)
+        if new_start > new_stop:
+            raise ValueError(f"expanded viewport start {new_start} is after stop {new_stop}")
+        if new_start > start:
+            raise ValueError(f"expanded viewport start {new_start} exceeds original start {start}")
+        if start - new_start > max_added_lines:
+            raise ValueError(
+                f"expanded viewport start {new_start} exceeds max_added_lines {max_added_lines}"
+            )
+        if new_stop < stop:
+            raise ValueError(f"expanded viewport stop {new_stop} is before original stop {stop}")
+        if new_stop - stop > max_added_lines:
+            raise ValueError(
+                f"expanded viewport stop {new_stop} exceeds max_added_lines {max_added_lines}"
+            )
         return new_start, new_stop
 
 
@@ -853,7 +859,8 @@ async def str_replace_editor(
         return "Error: Either `path` or `file` parameter must be provided."
     if path is None:
         path = file
-    assert path is not None
+    if path is None:
+        return "Error: Either `path` or `file` parameter must be provided."
     target_path = path
 
     if working_dir == "docs":

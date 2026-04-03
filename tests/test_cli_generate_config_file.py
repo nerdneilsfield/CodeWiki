@@ -69,7 +69,10 @@ async def test_cli_backend_generation_consumes_generation_result(tmp_path):
                 "statistics": {
                     "total_components": 1,
                     "leaf_nodes": 1,
-                    "token_usage": {"total_input": 3, "total_output": 2},
+                    "token_usage": {
+                        "total_input_tokens": 3,
+                        "total_output_tokens": 2,
+                    },
                 }
             },
         )

@@ -531,7 +531,7 @@ def generate_command(
                 repo = git.Repo(repo_path)
                 if repo.remotes:
                     repo_url = repo.remotes.origin.url
-            except:
+            except Exception:
                 pass
 
         # Display instructions

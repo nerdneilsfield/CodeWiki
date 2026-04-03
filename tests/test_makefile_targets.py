@@ -39,7 +39,7 @@ def test_makefile_targets_expand_to_expected_commands():
         "format": "uv run ruff format .",
         "format-check": "uv run ruff format --check .",
         "typecheck": "uv run ty check",
-        "test": "uv run python -m pytest tests/ -q",
+        "test": "uv run python -m pytest tests/ --cov=codewiki --cov-report=term-missing -q",
         "hooks": "uv run pre-commit run --all-files",
     }
 

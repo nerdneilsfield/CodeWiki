@@ -5,6 +5,7 @@ GitHub repository processing utilities.
 
 import os
 import logging
+import re
 import subprocess
 from typing import Dict
 from urllib.parse import urlparse
@@ -12,6 +13,7 @@ from urllib.parse import urlparse
 from .config import WebAppConfig
 
 logger = logging.getLogger(__name__)
+_SAFE_COMMIT = re.compile(r"^[a-f0-9]{4,40}$")
 
 
 class GitHubRepoProcessor:
@@ -60,6 +62,10 @@ class GitHubRepoProcessor:
         try:
             # Ensure target directory exists
             os.makedirs(os.path.dirname(target_dir), exist_ok=True)
+            if commit_id:
+                commit_id = commit_id.strip().lower()
+                if not _SAFE_COMMIT.match(commit_id):
+                    raise ValueError(f"Invalid commit_id: {commit_id!r}")
 
             # If specific commit is requested, don't use shallow clone
             if commit_id:
@@ -108,6 +114,8 @@ class GitHubRepoProcessor:
                     return False
 
             return True
+        except ValueError:
+            raise
         except Exception as e:
             logger.error("Error cloning repository: %s", e)
             return False

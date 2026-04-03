@@ -5,17 +5,16 @@ Background worker for processing documentation generation jobs.
 
 import logging
 import os
-import json
 import queue
 import shutil
 import time
 import threading
 import asyncio
-from datetime import datetime
+import copy
+from datetime import datetime, timezone
 from pathlib import Path
 from queue import Queue
 from typing import Dict, Optional
-from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +43,7 @@ class BackgroundWorker:
         self.config_path = config_path
         self.running = False
         self.processing_queue = Queue(maxsize=WebAppConfig.QUEUE_SIZE)
+        self._job_lock = threading.Lock()
         self.job_status: Dict[str, JobStatus] = {}
         self.jobs_file = Path(WebAppConfig.CACHE_DIR) / "jobs.json"
         self.load_job_statuses()
@@ -62,23 +62,37 @@ class BackgroundWorker:
 
     def add_job(self, job_id: str, job: JobStatus) -> bool:
         """Add a job to the processing queue. Returns False if queue is full."""
-        self.job_status[job_id] = job
+        self.set_job(job_id, job)
         try:
             self.processing_queue.put(job_id, timeout=5)
             return True
         except queue.Full:
             logger.error("Queue is full, cannot add job %s", job_id)
-            job.status = "failed"
-            job.error_message = "Server is at capacity, please try again later"
+            with self._job_lock:
+                job.status = "failed"
+                job.error_message = "Server is at capacity, please try again later"
             return False
 
-    def get_job_status(self, job_id: str) -> Optional[JobStatus]:
-        """Get job status by ID."""
-        return self.job_status.get(job_id)
+    def snapshot_job(self, job_id: str) -> Optional[JobStatus]:
+        """Return a thread-safe copy of a single job, or None."""
+        with self._job_lock:
+            job = self.job_status.get(job_id)
+            return copy.copy(job) if job else None
 
-    def get_all_jobs(self) -> Dict[str, JobStatus]:
-        """Get all job statuses."""
-        return self.job_status
+    def snapshot_jobs(self) -> dict[str, JobStatus]:
+        """Return a thread-safe copy of all job statuses."""
+        with self._job_lock:
+            return {key: copy.copy(value) for key, value in self.job_status.items()}
+
+    def set_job(self, job_id: str, job: JobStatus) -> None:
+        """Thread-safe write of a job status entry."""
+        with self._job_lock:
+            self.job_status[job_id] = job
+
+    def delete_job(self, job_id: str) -> None:
+        """Thread-safe deletion of a job status entry."""
+        with self._job_lock:
+            self.job_status.pop(job_id, None)
 
     def load_job_statuses(self):
         """Load job statuses from disk."""
@@ -91,22 +105,29 @@ class BackgroundWorker:
             data = file_manager.load_json(str(self.jobs_file)) or {}
 
             for job_id, job_data in data.items():
-                # Only load completed jobs to avoid inconsistent state
-                if job_data.get("status") == "completed":
-                    self.job_status[job_id] = JobStatus(
-                        job_id=job_data["job_id"],
-                        repo_url=job_data["repo_url"],
-                        status=job_data["status"],
-                        created_at=datetime.fromisoformat(job_data["created_at"]),
-                        started_at=datetime.fromisoformat(job_data["started_at"])
-                        if job_data.get("started_at")
-                        else None,
-                        completed_at=datetime.fromisoformat(job_data["completed_at"])
-                        if job_data.get("completed_at")
-                        else None,
-                        error_message=job_data.get("error_message"),
-                        progress=job_data.get("progress", ""),
-                        docs_path=job_data.get("docs_path"),
+                if job_data.get("status") in {"completed", "failed"}:
+                    self.set_job(
+                        job_id,
+                        JobStatus(
+                            job_id=job_data["job_id"],
+                            repo_url=job_data["repo_url"],
+                            status=job_data["status"],
+                            created_at=self._parse_dt(job_data["created_at"]),
+                            started_at=self._parse_dt(job_data["started_at"])
+                            if job_data.get("started_at")
+                            else None,
+                            completed_at=self._parse_dt(job_data["completed_at"])
+                            if job_data.get("completed_at")
+                            else None,
+                            error_message=job_data.get("error_message"),
+                            progress=job_data.get("progress", ""),
+                            docs_path=job_data.get("docs_path"),
+                            main_model=job_data.get("main_model"),
+                            commit_id=job_data.get("commit_id"),
+                            generation_status=job_data.get("generation_status"),
+                            degradation_reasons=list(job_data.get("degradation_reasons") or []),
+                            module_summary=job_data.get("module_summary"),
+                        ),
                     )
             logger.info(
                 "Loaded %d completed jobs from disk",
@@ -131,14 +152,17 @@ class BackgroundWorker:
 
                     # Only add if job doesn't already exist
                     if job_id not in self.job_status:
-                        self.job_status[job_id] = JobStatus(
-                            job_id=job_id,
-                            repo_url=cache_entry.repo_url,
-                            status="completed",
-                            created_at=cache_entry.created_at,
-                            completed_at=cache_entry.created_at,
-                            docs_path=cache_entry.docs_path,
-                            progress="Reconstructed from cache",
+                        self.set_job(
+                            job_id,
+                            JobStatus(
+                                job_id=job_id,
+                                repo_url=cache_entry.repo_url,
+                                status="completed",
+                                created_at=cache_entry.created_at,
+                                completed_at=cache_entry.created_at,
+                                docs_path=cache_entry.docs_path,
+                                progress="Reconstructed from cache",
+                            ),
                         )
                         reconstructed_count += 1
                 except Exception as e:
@@ -157,8 +181,11 @@ class BackgroundWorker:
             # Ensure cache directory exists
             self.jobs_file.parent.mkdir(parents=True, exist_ok=True)
 
+            with self._job_lock:
+                jobs_snapshot = {job_id: copy.copy(job) for job_id, job in self.job_status.items()}
+
             data = {}
-            for job_id, job in self.job_status.items():
+            for job_id, job in jobs_snapshot.items():
                 data[job_id] = {
                     "job_id": job.job_id,
                     "repo_url": job.repo_url,
@@ -169,6 +196,11 @@ class BackgroundWorker:
                     "error_message": job.error_message,
                     "progress": job.progress,
                     "docs_path": job.docs_path,
+                    "main_model": job.main_model,
+                    "commit_id": job.commit_id,
+                    "generation_status": job.generation_status,
+                    "degradation_reasons": list(job.degradation_reasons),
+                    "module_summary": job.module_summary,
                 }
 
             file_manager.save_json(data, str(self.jobs_file))
@@ -202,68 +234,75 @@ class BackgroundWorker:
         except (FileNotFoundError, ValueError) as exc:
             raise RuntimeError(f"Failed to load config '{self.config_path}': {exc}") from exc
 
+    @staticmethod
+    def _parse_dt(raw_value: str) -> datetime:
+        dt = datetime.fromisoformat(raw_value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
     def _process_job(self, job_id: str):
         """Process a single documentation generation job."""
-        if job_id not in self.job_status:
-            return
+        with self._job_lock:
+            if job_id not in self.job_status:
+                return
+            job = self.job_status[job_id]
 
-        job = self.job_status[job_id]
         temp_repo_dir: str | None = None
 
         try:
-            # Update job status
-            job.status = "processing"
-            job.started_at = datetime.now()
-            job.progress = "Starting repository clone..."
+            with self._job_lock:
+                job.status = "processing"
+                job.started_at = datetime.now(timezone.utc)
+                job.progress = "Starting repository clone..."
 
-            # Check cache first
             cached_docs = self.cache_manager.get_cached_docs(job.repo_url, job.commit_id)
             if cached_docs and Path(cached_docs).exists():
-                job.status = "completed"
-                job.completed_at = datetime.now()
-                job.docs_path = cached_docs
-                job.progress = "Documentation retrieved from cache"
-
-                # Save job status to disk
-                self.save_job_statuses()
-
+                with self._job_lock:
+                    job.status = "completed"
+                    job.completed_at = datetime.now(timezone.utc)
+                    job.docs_path = cached_docs
+                    job.progress = "Documentation retrieved from cache"
                 logger.info("Job %s: using cached documentation", job_id)
                 return
 
-            # Clone repository
             repo_info = GitHubRepoProcessor.get_repo_info(job.repo_url)
-            # Use repo full name for temp directory (already URL-safe since job_id is URL-safe)
             temp_repo_dir = os.path.join(self.temp_dir, job_id)
 
-            job.progress = f"Cloning repository {repo_info['full_name']}..."
+            with self._job_lock:
+                job.progress = f"Cloning repository {repo_info['full_name']}..."
 
             if not GitHubRepoProcessor.clone_repository(
                 repo_info["clone_url"], temp_repo_dir, job.commit_id
             ):
                 raise Exception("Failed to clone repository")
 
-            # Generate documentation
-            job.progress = "Analyzing repository structure..."
+            with self._job_lock:
+                job.progress = "Analyzing repository structure..."
 
             docs_dir = os.path.join("output", "docs", f"{job_id}-docs")
             config = self._load_runtime_config(
                 repo_path=temp_repo_dir,
                 docs_dir=docs_dir,
             )
-            job.main_model = config.main_model
+            with self._job_lock:
+                job.main_model = config.main_model
+                job.progress = "Generating documentation..."
 
-            job.progress = "Generating documentation..."
-
-            # Generate documentation
             doc_generator = DocumentationGenerator(config, job.commit_id)
-
-            # Run the async documentation generation in a new event loop
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
                 result = loop.run_until_complete(doc_generator.run())
             finally:
                 loop.close()
+
+            with self._job_lock:
+                job.generation_status = result.status
+                job.degradation_reasons = list(result.warnings)
+                job.module_summary = (
+                    result.module_summary.to_dict() if result.module_summary else None
+                )
 
             if result.status == "failed":
                 raise RuntimeError("; ".join(result.warnings) or "documentation generation failed")
@@ -274,39 +313,35 @@ class BackgroundWorker:
                     "; ".join(result.warnings),
                 )
 
-            # Cache the results
             docs_path = os.path.abspath(config.docs_dir)
             self.cache_manager.add_to_cache(job.repo_url, docs_path, job.commit_id)
 
-            # Update job status
-            job.status = "completed"
-            job.completed_at = datetime.now()
-            job.docs_path = docs_path
-            job.progress = (
-                "Documentation generation completed with issues"
-                if result.status == "degraded"
-                else "Documentation generation completed"
-            )
-
-            # Save job status to disk
-            self.save_job_statuses()
+            with self._job_lock:
+                job.status = "completed"
+                job.completed_at = datetime.now(timezone.utc)
+                job.docs_path = docs_path
+                job.progress = (
+                    "Documentation generation completed with issues"
+                    if result.status == "degraded"
+                    else "Documentation generation completed"
+                )
 
             logger.info("Job %s: documentation generated successfully", job_id)
 
         except Exception as e:
-            # Update job status with error
-            job.status = "failed"
-            job.completed_at = datetime.now()
-            job.error_message = str(e)
-            job.progress = f"Failed: {str(e)}"
-
+            with self._job_lock:
+                job.status = "failed"
+                job.completed_at = datetime.now(timezone.utc)
+                job.error_message = str(e)
+                job.progress = f"Failed: {str(e)}"
+                job.generation_status = job.generation_status or "failed"
             logger.error("Job %s: failed with error: %s", job_id, e)
 
         finally:
-            # Cleanup temporary repository
             if temp_repo_dir and os.path.exists(temp_repo_dir):
                 try:
                     shutil.rmtree(temp_repo_dir)
                     logger.info("Cleaned up temp directory: %s", temp_repo_dir)
                 except Exception as e:
                     logger.error("Failed to cleanup temp directory %s: %s", temp_repo_dir, e)
+            self.save_job_statuses()

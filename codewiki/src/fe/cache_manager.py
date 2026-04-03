@@ -5,7 +5,8 @@ Cache management for documentation generation results.
 
 import hashlib
 import logging
-from datetime import datetime, timedelta
+import atexit
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -24,7 +25,16 @@ class CacheManager:
         self.cache_expiry_days = cache_expiry_days or WebAppConfig.CACHE_EXPIRY_DAYS
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_index: Dict[str, CacheEntry] = {}
+        self._dirty = False
         self.load_cache_index()
+        atexit.register(self.flush)
+
+    @staticmethod
+    def _parse_dt(raw_value: str) -> datetime:
+        dt = datetime.fromisoformat(raw_value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
 
     def load_cache_index(self):
         """Load cache index from disk."""
@@ -37,8 +47,8 @@ class CacheManager:
                         repo_url=value["repo_url"],
                         repo_url_hash=value["repo_url_hash"],
                         docs_path=value["docs_path"],
-                        created_at=datetime.fromisoformat(value["created_at"]),
-                        last_accessed=datetime.fromisoformat(value["last_accessed"]),
+                        created_at=self._parse_dt(value["created_at"]),
+                        last_accessed=self._parse_dt(value["last_accessed"]),
                     )
             except Exception as e:
                 logger.error("Error loading cache index: %s", e)
@@ -61,6 +71,12 @@ class CacheManager:
         except Exception as e:
             logger.error("Error saving cache index: %s", e)
 
+    def flush(self):
+        """Write cache index to disk if dirty."""
+        if self._dirty:
+            self.save_cache_index()
+            self._dirty = False
+
     def get_repo_hash(self, repo_url: str, commit_id: Optional[str] = None) -> str:
         """Generate hash for repository URL and optional commit ID.
 
@@ -79,10 +95,12 @@ class CacheManager:
             entry = self.cache_index[repo_hash]
 
             # Check if cache is still valid
-            if datetime.now() - entry.created_at < timedelta(days=self.cache_expiry_days):
+            if datetime.now(timezone.utc) - entry.created_at < timedelta(
+                days=self.cache_expiry_days
+            ):
                 # Update last accessed
-                entry.last_accessed = datetime.now()
-                self.save_cache_index()
+                entry.last_accessed = datetime.now(timezone.utc)
+                self._dirty = True
                 return entry.docs_path
             else:
                 # Cache expired, remove it
@@ -93,7 +111,7 @@ class CacheManager:
     def add_to_cache(self, repo_url: str, docs_path: str, commit_id: Optional[str] = None):
         """Add documentation to cache."""
         repo_hash = self.get_repo_hash(repo_url, commit_id)
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         self.cache_index[repo_hash] = CacheEntry(
             repo_url=repo_url,
@@ -103,19 +121,21 @@ class CacheManager:
             last_accessed=now,
         )
 
-        self.save_cache_index()
+        self._dirty = True
+        self.flush()
 
     def remove_from_cache(self, repo_url: str, commit_id: Optional[str] = None):
         """Remove documentation from cache."""
         repo_hash = self.get_repo_hash(repo_url, commit_id)
         if repo_hash in self.cache_index:
             del self.cache_index[repo_hash]
-            self.save_cache_index()
+            self._dirty = True
+            self.flush()
 
     def cleanup_expired_cache(self):
         """Remove expired cache entries."""
         expired_entries = []
-        cutoff = datetime.now() - timedelta(days=self.cache_expiry_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self.cache_expiry_days)
 
         for repo_hash, entry in self.cache_index.items():
             if entry.created_at < cutoff:
@@ -125,4 +145,5 @@ class CacheManager:
             del self.cache_index[repo_hash]
 
         if expired_entries:
-            self.save_cache_index()
+            self._dirty = True
+            self.flush()

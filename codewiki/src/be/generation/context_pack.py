@@ -263,16 +263,29 @@ def _classify_edges(module_sym_ids: set[str], index_products):
 
 
 def _build_evidence_snippets(module_sym_ids: set[str], index_products) -> list[str]:
-    """Extract file:line evidence references for module symbols."""
+    """Extract file:line evidence references for module symbols using EdgeIndex."""
     snippets = []
-    for edge in index_products.edges:
-        if edge.from_symbol not in module_sym_ids:
-            continue
-        for ref in edge.evidence_refs:
-            snippet = f"{ref.file_path}:{ref.start_line} ({edge.edge_type.value})"
-            snippets.append(snippet)
-            if len(snippets) >= 20:
-                return snippets
+    edge_index = getattr(index_products, "edge_index", None)
+    seen: set[tuple[str, int, str]] = set()
+    for symbol_id in module_sym_ids:
+        if edge_index is not None:
+            candidate_edges = edge_index.callees_of(symbol_id)
+        else:
+            candidate_edges = [
+                edge
+                for edge in index_products.edges
+                if edge.from_symbol == symbol_id or edge.to_symbol == symbol_id
+            ]
+        for edge in candidate_edges:
+            for ref in edge.evidence_refs:
+                key = (ref.file_path, ref.start_line, edge.edge_type.value)
+                if key in seen:
+                    continue
+                seen.add(key)
+                snippet = f"{ref.file_path}:{ref.start_line} ({edge.edge_type.value})"
+                snippets.append(snippet)
+                if len(snippets) >= 20:
+                    return snippets
     return snippets
 
 

@@ -3,8 +3,10 @@
 Template utilities for FastAPI applications using Jinja2.
 """
 
+from functools import lru_cache
+from typing import Any, Dict
+
 from jinja2 import Environment, BaseLoader, select_autoescape
-from typing import Dict, Any
 
 
 class StringTemplateLoader(BaseLoader):
@@ -15,6 +17,18 @@ class StringTemplateLoader(BaseLoader):
 
     def get_source(self, environment, template):
         return self.template_string, None, lambda: True
+
+
+@lru_cache(maxsize=16)
+def _compile_template(template_str: str):
+    """Compile a Jinja2 template string. Cached by template content."""
+    env = Environment(
+        loader=StringTemplateLoader(template_str),
+        autoescape=select_autoescape(["html", "xml"]),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    return env.get_template("")
 
 
 def render_template(template: str, context: Dict[str, Any]) -> str:
@@ -28,17 +42,7 @@ def render_template(template: str, context: Dict[str, Any]) -> str:
     Returns:
         Rendered HTML string
     """
-    # Create Jinja2 environment with string template
-    env = Environment(
-        loader=StringTemplateLoader(template),
-        autoescape=select_autoescape(["html", "xml"]),
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
-
-    # Get template and render
-    jinja_template = env.get_template("")
-    return jinja_template.render(**context)
+    return _compile_template(template).render(**context)
 
 
 def render_navigation(module_tree: Dict[str, Any], current_page: str = "") -> str:

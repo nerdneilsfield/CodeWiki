@@ -322,13 +322,14 @@ async def run_module_queue(
             error_message = None
             try:
                 progress.set_postfix_str(label, refresh=False)
-                task_t0 = asyncio.get_event_loop().time()
+                task_t0 = asyncio.get_running_loop().time()
                 task_models_used = ""
                 last_exc = None
                 for attempt in range(len(retry_delays) + 1):
                     if attempt > 0:
                         retried = True
-                        assert last_exc is not None
+                        if last_exc is None:
+                            raise RuntimeError("retry loop exited without capturing an exception")
                         delay = _retry_delay(attempt, last_exc)
                         logger.warning(
                             "  ↻ Retrying '%s'%s (attempt %s/%s) after: %s",
@@ -380,7 +381,7 @@ async def run_module_queue(
                 if last_exc is not None:
                     raise last_exc
 
-                task_elapsed = asyncio.get_event_loop().time() - task_t0
+                task_elapsed = asyncio.get_running_loop().time() - task_t0
                 model_suffix = f" (model: {task_models_used})" if task_models_used else ""
                 logger.info("✓ Task '%s' completed in %.1fs%s", label, task_elapsed, model_suffix)
 

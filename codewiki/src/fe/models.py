@@ -3,10 +3,10 @@
 Data models and classes for the CodeWiki web application.
 """
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
-from dataclasses import dataclass
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class RepositorySubmission(BaseModel):
@@ -29,6 +29,9 @@ class JobStatusResponse(BaseModel):
     docs_path: Optional[str] = None
     main_model: Optional[str] = None
     commit_id: Optional[str] = None
+    generation_status: Optional[str] = None
+    degradation_reasons: list[str] = Field(default_factory=list)
+    module_summary: Optional[dict] = None
 
 
 @dataclass
@@ -46,6 +49,9 @@ class JobStatus:
     docs_path: Optional[str] = None
     main_model: Optional[str] = None
     commit_id: Optional[str] = None
+    generation_status: Optional[str] = None
+    degradation_reasons: list[str] = field(default_factory=list)
+    module_summary: Optional[dict] = None
 
 
 @dataclass

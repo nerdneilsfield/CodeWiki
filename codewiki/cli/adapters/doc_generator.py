@@ -175,11 +175,13 @@ class CLIDocumentationGenerator:
         metadata = result.metadata or {}
         stats = metadata.get("statistics", {})
         token_usage = stats.get("token_usage", {})
+        total_input_tokens = token_usage.get("total_input_tokens", 0)
+        total_output_tokens = token_usage.get("total_output_tokens", 0)
 
         self.job.statistics.total_files_analyzed = int(stats.get("total_components", 0) or 0)
         self.job.statistics.leaf_nodes = int(stats.get("leaf_nodes", 0) or 0)
         self.job.statistics.total_tokens_used = int(
-            (token_usage.get("total_input", 0) or 0) + (token_usage.get("total_output", 0) or 0)
+            (total_input_tokens or 0) + (total_output_tokens or 0)
         )
 
         module_tree = file_manager.load_json(os.path.join(working_dir, MODULE_TREE_FILENAME)) or {}
@@ -252,9 +254,12 @@ class CLIDocumentationGenerator:
 
     def _finalize_job(self):
         """Finalize the job (metadata already created by backend)."""
+        from codewiki.src.utils import file_manager
+
         # Just verify metadata exists
         metadata_path = self.output_dir / "metadata.json"
         if not metadata_path.exists():
             # Create our own if backend didn't
-            with open(metadata_path, "w") as f:
-                f.write(self.job.to_json())
+            import json
+
+            file_manager.save_json(json.loads(self.job.to_json()), str(metadata_path))

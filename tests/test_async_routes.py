@@ -15,8 +15,14 @@ class _StubWorker:
         )
         self.job_status = {"job-1": self._job}
 
-    def get_job_status(self, job_id: str):
+    def snapshot_job(self, job_id: str):
         return self.job_status.get(job_id)
+
+    def snapshot_jobs(self):
+        return dict(self.job_status)
+
+    def set_job(self, job_id: str, job):
+        self.job_status[job_id] = job
 
     def save_job_statuses(self):
         return None
