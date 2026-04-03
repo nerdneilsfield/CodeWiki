@@ -12,6 +12,8 @@ from codewiki.src.be.generation.glossary import GlossaryEntry, filter_glossary
 
 logger = logging.getLogger(__name__)
 
+_GENERIC_PATH_TOKENS = {"src", "lib", "app", "pkg", "code"}
+
 
 def build_context_pack(
     module_components: list[str],
@@ -267,21 +269,50 @@ def _format_link_map(link_map: dict[str, str] | None) -> str:
 
 
 def _filter_link_map(link_map: dict[str, str], module_file_paths: set[str]) -> dict[str, str]:
-    """Filter link map to entries near the current module's directories.
+    """Filter link map to entries near the current module's files/directories.
 
-    Falls back to the full map if no proximity match is found.
+    Uses the link-map key as the primary signal. This works for path-shaped keys
+    and still gives title/path-token overlap a chance before falling back.
     """
     if not link_map or not module_file_paths:
         return link_map
 
-    module_dirs = {os.path.dirname(path).replace("\\", "/") for path in module_file_paths if path}
-    filtered: dict[str, str] = {}
-    for key, doc_path in link_map.items():
-        normalized_doc = doc_path.replace("\\", "/")
-        if any(module_dir and module_dir in normalized_doc for module_dir in module_dirs):
-            filtered[key] = doc_path
+    module_files = {path.replace("\\", "/").lower() for path in module_file_paths if path}
+    module_dirs = {os.path.dirname(path) for path in module_files if os.path.dirname(path)}
+    module_tokens = {token for path in module_files for token in _tokenize_pathish(path)}
 
-    return filtered or link_map
+    scored_entries: list[tuple[int, str, str]] = []
+    for key, doc_path in link_map.items():
+        key_norm = key.replace("\\", "/").lower()
+        score = 0
+
+        if key_norm in module_files:
+            score += 10
+        if any(module_dir and key_norm.startswith(module_dir + "/") for module_dir in module_dirs):
+            score += 6
+
+        key_tokens = _tokenize_pathish(key_norm)
+        score += len(module_tokens & key_tokens)
+
+        if score > 0:
+            scored_entries.append((score, key, doc_path))
+
+    if not scored_entries:
+        return link_map
+
+    scored_entries.sort(key=lambda item: (-item[0], item[1]))
+    return {key: doc_path for _, key, doc_path in scored_entries}
+
+
+def _tokenize_pathish(value: str) -> set[str]:
+    tokens: set[str] = set()
+    for chunk in value.replace("\\", "/").split("/"):
+        chunk = os.path.splitext(chunk)[0]
+        for token in chunk.replace("-", "_").replace(" ", "_").split("_"):
+            token = token.strip().lower()
+            if token and token not in _GENERIC_PATH_TOKENS:
+                tokens.add(token)
+    return tokens
 
 
 def format_context_pack_section(context_pack: dict | None) -> str:

@@ -320,6 +320,30 @@ def test_build_context_pack_link_map(module_components, components):
     assert "src/utils/helpers.py" in ctx
 
 
+def test_build_context_pack_filters_link_map_by_module_paths(
+    module_components, components, index_with_cards_and_edges
+):
+    from codewiki.src.be.generation.context_pack import build_context_pack
+
+    link_map = {
+        "src/auth/login.py": "docs/auth/login.md",
+        "src/utils/helpers.py": "docs/utils/helpers.md",
+    }
+
+    result = build_context_pack(
+        module_components=module_components,
+        components=components,
+        index_products=index_with_cards_and_edges,
+        link_map=link_map,
+    )
+
+    ctx = result["link_map_context"]
+    assert "src/auth/login.py" in ctx
+    assert "docs/auth/login.md" in ctx
+    assert "src/utils/helpers.py" not in ctx
+    assert "docs/utils/helpers.md" not in ctx
+
+
 # ---------------------------------------------------------------------------
 # Test 8: format_context_pack_section — None or empty input
 # ---------------------------------------------------------------------------
