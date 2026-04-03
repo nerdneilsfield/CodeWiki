@@ -437,6 +437,8 @@ class TestH8CommitIdCaseInsensitive:
                     assert "abcd1234" in args, f"Expected lowercase SHA in {args}"
                     assert "ABCD1234" not in args, "Uppercase SHA should have been lowered"
                     break
+            else:
+                pytest.fail("Expected git checkout call for commit checkout path")
 
     def test_invalid_commit_id_raises(self):
         from codewiki.src.fe.github_processor import GitHubRepoProcessor
@@ -535,7 +537,7 @@ class TestNoNaiveDatetime:
 
 
 class TestNaiveDatetimeBackwardCompat:
-    """Old cache data with naive timestamps must not crash after UTC migration."""
+    """Old cache/job data with naive timestamps must not crash after UTC migration."""
 
     def test_cache_manager_reads_naive_timestamps_without_error(self, tmp_path):
         """get_cached_docs + cleanup on old naive-timestamp cache must not raise TypeError."""
@@ -561,13 +563,44 @@ class TestNaiveDatetimeBackwardCompat:
         # These must not raise TypeError from aware vs naive comparison
         mgr.get_cached_docs("http://example.com/repo")
         mgr.cleanup_expired_cache()
+
+    def test_background_worker_loads_naive_job_timestamps_without_error(self, tmp_path, monkeypatch):
+        """Loading old jobs.json with naive timestamps must not raise TypeError later."""
+        import json
+        from codewiki.src.fe.background_worker import BackgroundWorker
+        from codewiki.src.fe.cache_manager import CacheManager
+
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        jobs_file = cache_dir / "jobs.json"
+        jobs_file.write_text(
+            json.dumps(
+                {
+                    "job-1": {
+                        "job_id": "job-1",
+                        "repo_url": "http://example.com/repo",
+                        "status": "completed",
+                        "created_at": "2026-01-01T12:00:00",
+                        "started_at": "2026-01-01T12:01:00",
+                        "completed_at": "2026-01-01T12:02:00",
+                        "error_message": None,
+                        "progress": "done",
+                        "docs_path": str(tmp_path / "docs"),
+                    }
+                }
+            )
+        )
+
+        monkeypatch.setattr("codewiki.src.fe.background_worker.WebAppConfig.CACHE_DIR", str(cache_dir))
+        worker = BackgroundWorker(cache_manager=CacheManager(cache_dir=str(cache_dir)))
+        assert worker.get_job_status("job-1") is not None
 ```
 
 - [ ] **Step 2: Apply UTC changes**
 
 In every file, replace `datetime.now()` with `datetime.now(timezone.utc)`. Add `from datetime import timezone` where missing.
 
-In `cache_manager.py`, for backward compat when loading old cache entries with naive datetimes:
+In `cache_manager.py` and `background_worker.py`, for backward compat when loading old persisted timestamps:
 ```python
 # When loading fromisoformat:
 dt = datetime.fromisoformat(raw_str)
