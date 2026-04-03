@@ -230,10 +230,12 @@ from dataclasses import dataclass, field
 
 No `__post_init__` needed — `field(default_factory=list)` handles the mutable default correctly.
 
-Also add to `JobStatusResponse`:
+Also add to `JobStatusResponse` (pydantic model — use `Field(default_factory=list)` for consistency):
 ```python
+from pydantic import Field
+
     generation_status: Optional[str] = None
-    degradation_reasons: list[str] = []
+    degradation_reasons: list[str] = Field(default_factory=list)
     module_summary: Optional[dict] = None
 ```
 
@@ -509,23 +511,30 @@ class TestNoNaiveDatetime:
 
 
 class TestNaiveDatetimeBackwardCompat:
-    """Old data with naive timestamps must not crash when compared to new aware timestamps."""
+    """Old cache data with naive timestamps must not crash after UTC migration."""
 
-    def test_cache_manager_handles_naive_stored_timestamps(self):
-        """Loading old cache entries with naive datetimes must not raise TypeError."""
-        from datetime import datetime, timedelta, timezone
+    def test_cache_manager_reads_naive_timestamps_without_error(self, tmp_path):
+        """get_cached_docs + cleanup on old naive-timestamp cache must not raise TypeError."""
+        import json
+        from codewiki.src.fe.cache_manager import CacheManager
 
-        # Simulate old naive timestamp (as would be read from cache_index.json)
-        naive_ts = datetime(2026, 1, 1, 12, 0, 0)  # no tzinfo
-        # After UTC migration, code compares with aware datetime
-        aware_now = datetime.now(timezone.utc)
+        # Write a fake cache_index.json with naive timestamps (no timezone info)
+        index_data = {
+            "abc123": {
+                "repo_url": "http://example.com/repo",
+                "docs_path": str(tmp_path / "docs"),
+                "created_at": "2026-01-01T12:00:00",  # naive — no +00:00
+                "last_accessed": "2026-01-01T12:00:00",
+            }
+        }
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "cache_index.json").write_text(json.dumps(index_data))
 
-        # This is the critical comparison that would TypeError if not handled:
-        # datetime.now(utc) - naive_ts
-        # We need the code to handle this by treating naive as UTC
-        naive_as_utc = naive_ts.replace(tzinfo=timezone.utc)
-        diff = aware_now - naive_as_utc
-        assert isinstance(diff, timedelta)  # must not raise TypeError
+        mgr = CacheManager(cache_dir=str(tmp_path))
+
+        # These must not raise TypeError from aware vs naive comparison
+        mgr.get_cached_docs("http://example.com/repo")
+        mgr.cleanup_expired_cache()
 ```
 
 - [ ] **Step 2: Apply UTC changes**
