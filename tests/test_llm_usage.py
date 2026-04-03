@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -52,6 +53,34 @@ class TestLlmUsageStats:
         d = stats.to_dict()
         assert d["total_input_tokens"] == 100
         assert d["by_model"]["gpt-4o"]["requests"] == 1
+
+    def test_record_is_thread_safe_under_concurrent_updates(self):
+        from codewiki.src.be.llm_usage import LLMUsageStats
+
+        stats = LLMUsageStats()
+        workers = 16
+        iterations = 2000
+
+        def _worker():
+            for _ in range(iterations):
+                stats.record("gpt-4o", input_tokens=1, output_tokens=2)
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            list(executor.map(lambda _i: _worker(), range(workers)))
+
+        expected_requests = workers * iterations
+        assert stats.to_dict() == {
+            "total_input_tokens": expected_requests,
+            "total_output_tokens": expected_requests * 2,
+            "total_requests": expected_requests,
+            "by_model": {
+                "gpt-4o": {
+                    "input": expected_requests,
+                    "output": expected_requests * 2,
+                    "requests": expected_requests,
+                }
+            },
+        }
 
 
 class TestCallLlmReturnsResult:
