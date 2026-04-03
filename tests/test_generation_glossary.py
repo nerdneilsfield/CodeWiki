@@ -212,6 +212,26 @@ class TestBuildGlossary:
             == "Normalizes edge cases, i.e. malformed input. (class, src/mod.py)"
         )
 
+    def test_build_glossary_preserves_additional_common_abbreviations(self):
+        """Common abbreviations like U.S./Dr./Fig. must not be treated as sentence ends."""
+        from codewiki.src.be.generation.glossary import build_glossary
+
+        sym = _make_symbol(
+            "AbbrevSet",
+            docstring=(
+                "Describes U.S. rollout by Dr. Smith; see Fig. 2 for context. "
+                "Further explanation follows."
+            ),
+        )
+        index_products = _FakeIndexProducts([sym])
+
+        result = build_glossary(index_products)
+
+        assert (
+            result["AbbrevSet"].definition
+            == "Describes U.S. rollout by Dr. Smith; see Fig. 2 for context. (class, src/mod.py)"
+        )
+
     def test_build_glossary_missing_symbol_table_attr(self):
         """Object without symbol_table attribute returns empty dict (defensive)."""
         from codewiki.src.be.generation.glossary import build_glossary

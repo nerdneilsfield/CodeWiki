@@ -277,8 +277,10 @@ def _filter_link_map(link_map: dict[str, str], module_file_paths: set[str]) -> d
     If nothing scores as relevant, return an empty subset rather than the full
     map so the context remains selective by default.
     """
-    if not link_map or not module_file_paths:
+    if not link_map:
         return link_map
+    if not module_file_paths:
+        return {}
 
     module_files = {path.replace("\\", "/").lower() for path in module_file_paths if path}
     module_dirs = {os.path.dirname(path) for path in module_files if os.path.dirname(path)}

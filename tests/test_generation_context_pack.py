@@ -365,6 +365,28 @@ def test_build_context_pack_does_not_fallback_to_full_link_map_when_irrelevant(
     assert result["link_map_context"] == ""
 
 
+def test_build_context_pack_pathless_module_does_not_emit_full_link_map():
+    from codewiki.src.be.generation.context_pack import build_context_pack
+
+    pathless_components = {
+        "comp_a": _MockNode(relative_path=""),
+        "comp_b": _MockNode(relative_path=""),
+    }
+    link_map = {
+        "CLI Transport": "cli_transport.md",
+        "Database Adapter": "database_adapter.md",
+    }
+
+    result = build_context_pack(
+        module_components=["comp_a", "comp_b"],
+        components=pathless_components,
+        index_products=_MockIndexProducts(cards=[], edges=[]),
+        link_map=link_map,
+    )
+
+    assert result["link_map_context"] == ""
+
+
 # ---------------------------------------------------------------------------
 # Test 8: format_context_pack_section — None or empty input
 # ---------------------------------------------------------------------------

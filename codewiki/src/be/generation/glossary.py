@@ -13,6 +13,14 @@ from codewiki.src.be.index.models import Visibility, ExportStatus
 _ABBREVIATIONS = {
     "e.g.": "e<DOT>g<DOT>",
     "i.e.": "i<DOT>e<DOT>",
+    "U.S.": "U<DOT>S<DOT>",
+    "U.K.": "U<DOT>K<DOT>",
+    "Dr.": "Dr<DOT>",
+    "Mr.": "Mr<DOT>",
+    "Mrs.": "Mrs<DOT>",
+    "Ms.": "Ms<DOT>",
+    "Prof.": "Prof<DOT>",
+    "Fig.": "Fig<DOT>",
 }
 
 
