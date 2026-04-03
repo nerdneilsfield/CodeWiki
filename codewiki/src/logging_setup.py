@@ -7,6 +7,7 @@ import sys
 from typing import cast
 
 import structlog
+from structlog.typing import Processor
 
 _THIRD_PARTY_LOGGERS = [
     "httpx",
@@ -50,21 +51,23 @@ class _CurrentStderrProxy:
         return self._target().fileno()
 
 
-def _shared_processors():
-    return [
+def _shared_processors(*, format_exc: bool) -> list[Processor]:
+    processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
     ]
+    if format_exc:
+        processors.append(structlog.processors.format_exc_info)
+    return processors
 
 
-def _configure_structlog() -> None:
+def _configure_structlog(*, format_exc: bool) -> None:
     structlog.configure(
-        processors=_shared_processors()
+        processors=_shared_processors(format_exc=format_exc)
         + [
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
@@ -78,7 +81,9 @@ def _configure_structlog() -> None:
 def _configure_root_handler(*, renderer, level: int, stream) -> None:
     formatter = structlog.stdlib.ProcessorFormatter(
         processor=renderer,
-        foreign_pre_chain=_shared_processors(),
+        foreign_pre_chain=_shared_processors(
+            format_exc=not isinstance(renderer, structlog.dev.ConsoleRenderer)
+        ),
     )
     root = logging.getLogger()
     root.setLevel(level)
@@ -102,7 +107,7 @@ def configure_cli_logging(verbose: bool = False) -> None:
     """Configure structlog for CLI usage with colored console output."""
     level = logging.DEBUG if verbose else logging.INFO
     renderer = structlog.dev.ConsoleRenderer(colors=True)
-    _configure_structlog()
+    _configure_structlog(format_exc=False)
     _configure_root_handler(renderer=renderer, level=level, stream=_CurrentStderrProxy())
 
     codewiki_logger = logging.getLogger("codewiki")
@@ -116,7 +121,7 @@ def configure_cli_logging(verbose: bool = False) -> None:
 def configure_web_logging() -> None:
     """Configure structlog for web/worker usage with JSON output."""
     renderer = structlog.processors.JSONRenderer()
-    _configure_structlog()
+    _configure_structlog(format_exc=True)
     _configure_root_handler(
         renderer=renderer,
         level=logging.INFO,

@@ -1,6 +1,7 @@
 import contextlib
 import io
 import logging
+import warnings
 
 
 class TestLoggingSetup:
@@ -42,3 +43,24 @@ class TestLoggingSetup:
             structlog.get_logger("codewiki.test").info("hello", key="value")
 
         assert "hello" in current_stderr.getvalue()
+
+    def test_configure_cli_logging_does_not_warn_on_exc_info(self):
+        import structlog
+
+        from codewiki.src.logging_setup import configure_cli_logging
+
+        configure_cli_logging(verbose=False)
+
+        current_stderr = io.StringIO()
+        with contextlib.redirect_stderr(current_stderr):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                try:
+                    raise RuntimeError("boom")
+                except RuntimeError:
+                    structlog.get_logger("codewiki.test").exception("oops")
+
+        assert "oops" in current_stderr.getvalue()
+        assert not any(
+            "Remove `format_exc_info` from your processor chain" in str(w.message) for w in caught
+        )
