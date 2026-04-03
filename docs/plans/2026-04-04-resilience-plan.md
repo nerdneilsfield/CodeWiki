@@ -903,6 +903,7 @@ git commit -m "feat(retry): add with_retry wrapper with exponential backoff and 
 - Modify: `codewiki/src/be/clustering/naming.py`
 - Modify: `codewiki/src/be/llm_services.py` (add stream param + restore streaming)
 - Modify: `codewiki/src/config_loader.py` (polymorphic model_list)
+- Modify: `codewiki/src/codewiki_config.py` (ProviderConfig.model_list accepts str|dict)
 - Create: `tests/test_streaming_config.py`
 
 - [ ] **Step 1: Write failing tests**
