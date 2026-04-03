@@ -6,6 +6,8 @@ from typing import Any, Dict, Iterable, Optional, cast
 import os
 import tomllib
 
+from codewiki.src.codewiki_config import CodeWikiConfig, ProviderConfig as RuntimeProviderConfig
+
 DEFAULT_MAX_TOKENS = 32_768
 DEFAULT_MAX_TOKEN_PER_MODULE = 36_369
 DEFAULT_MAX_TOKEN_PER_LEAF_MODULE = 16_000
@@ -349,3 +351,63 @@ def load_app_config(path: str | Path, resolve_secrets: bool = True) -> AppConfig
         app_config.resolve_model_ref(app_config.generation.long_context_model)
 
     return app_config
+
+
+def load_config(
+    path: str | Path,
+    repo_path: str,
+    overrides: RuntimeOverrides | None = None,
+    *,
+    context: str = "cli",
+    resolve_secrets: bool = True,
+) -> CodeWikiConfig:
+    """Load TOML config into the canonical CodeWikiConfig model."""
+    app_config = load_app_config(path, resolve_secrets=resolve_secrets)
+    runtime_config = app_config.to_runtime_config(repo_path, overrides)
+
+    providers = [
+        RuntimeProviderConfig.model_validate(
+            {
+                "name": provider.name,
+                "type": provider.type,
+                "api_keys": provider.api_keys,
+                "model_list": provider.model_list,
+                "extra_headers": provider.extra_headers,
+                "base_url": provider.base_url,
+                "endpoint": provider.endpoint,
+                "api_version": provider.api_version,
+                "deployment": provider.deployment,
+                "anthropic_version": provider.anthropic_version,
+                "project_id": provider.project_id,
+                "location": provider.location,
+                "credentials_path": provider.credentials_path,
+            }
+        )
+        for provider in app_config.providers
+    ]
+
+    return CodeWikiConfig(
+        repo_path=runtime_config.repo_path,
+        output_dir=runtime_config.output_dir,
+        dependency_graph_dir=runtime_config.dependency_graph_dir,
+        docs_dir=runtime_config.docs_dir,
+        context=cast(Any, context),
+        max_depth=runtime_config.max_depth,
+        llm_base_url=runtime_config.llm_base_url,
+        llm_api_key=runtime_config.llm_api_key,
+        main_model=runtime_config.main_model,
+        cluster_model=runtime_config.cluster_model,
+        fallback_model=runtime_config.fallback_model,
+        long_context_model=runtime_config.long_context_model,
+        long_context_threshold=runtime_config.long_context_threshold,
+        max_tokens=runtime_config.max_tokens,
+        max_token_per_module=runtime_config.max_token_per_module,
+        max_token_per_leaf_module=runtime_config.max_token_per_leaf_module,
+        max_concurrent=runtime_config.max_concurrent,
+        max_retries=runtime_config.max_retries,
+        output_language=runtime_config.output_language,
+        postprocess_strict=runtime_config.postprocess_strict,
+        postprocess_fix_links=runtime_config.postprocess_fix_links,
+        agent_instructions=runtime_config.agent_instructions,
+        providers=providers,
+    )
