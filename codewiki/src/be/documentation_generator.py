@@ -176,71 +176,57 @@ class DocumentationGenerator:
         self, components: Dict[str, Any], leaf_nodes: List[str]
     ) -> str:
         """Generate documentation for all modules using level-based concurrency."""
-        # Prepare output directory
         working_dir = os.path.abspath(self.config.docs_dir)
-        file_manager.ensure_directory(working_dir)
-        cleanup_legacy_internal_files(working_dir)
+        try:
+            # Prepare output directory
+            file_manager.ensure_directory(working_dir)
+            cleanup_legacy_internal_files(working_dir)
 
-        module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-        first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
-        state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
-        module_tree = file_manager.load_json(module_tree_path) or {}
-        first_module_tree = file_manager.load_json(first_module_tree_path) or {}
+            module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
+            first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
+            state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
+            module_tree = file_manager.load_json(module_tree_path) or {}
+            first_module_tree = file_manager.load_json(first_module_tree_path) or {}
 
-        if not module_tree:
-            # Small repo that fits in a single context — no parallelism needed
-            logger.info("Processing whole repo because repo can fit in the context window")
-            repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
-            final_module_tree, _ = await self.agent_orchestrator.process_module(
-                repo_name, components, leaf_nodes, [], working_dir
-            )
-
-            file_manager.save_json(final_module_tree, module_tree_path)
-
-            repo_overview_path = os.path.join(working_dir, module_doc_filename([repo_name]))
-            if os.path.exists(repo_overview_path):
-                os.rename(repo_overview_path, os.path.join(working_dir, OVERVIEW_FILENAME))
-
-            return working_dir
-
-        dedup_docs_directory(working_dir)
-
-        freeze_doc_filenames(module_tree)
-        freeze_doc_filenames(first_module_tree)
-        file_manager.save_json(module_tree, module_tree_path)
-        file_manager.save_json(first_module_tree, first_module_tree_path)
-
-        self._gen_state = self._gen_state or GenerationState.load(state_path)
-        self._state_mgr = self._state_mgr or GenerationStateManager(self._gen_state, state_path)
-        await self._state_mgr.update_metadata(self.commit_id or "", config_fingerprint(self.config))
-        planned_tasks = build_generation_tasks(
-            module_tree, self.config, existing_state=self._gen_state
-        )
-        if not self._gen_state.tasks:
-            try:
-                await self._state_mgr.bulk_add_tasks(planned_tasks)
-            except ValueError as exc:
-                logger.warning(
-                    "Skipping colliding planned tasks during initial ledger load: %s", exc
+            if not module_tree:
+                # Small repo that fits in a single context — no parallelism needed
+                logger.info("Processing whole repo because repo can fit in the context window")
+                repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
+                final_module_tree, _ = await self.agent_orchestrator.process_module(
+                    repo_name, components, leaf_nodes, [], working_dir
                 )
-                for task in planned_tasks:
-                    try:
-                        await self._state_mgr.add_task(task)
-                    except ValueError as item_exc:
-                        logger.warning(
-                            "Skipped task %s due to output_file collision: %s",
-                            task.doc_id,
-                            item_exc,
-                        )
-        else:
-            existing_ids = set(self._gen_state.tasks)
-            missing_tasks = [task for task in planned_tasks if task.doc_id not in existing_ids]
-            if missing_tasks:
+
+                file_manager.save_json(final_module_tree, module_tree_path)
+
+                repo_overview_path = os.path.join(working_dir, module_doc_filename([repo_name]))
+                if os.path.exists(repo_overview_path):
+                    os.rename(repo_overview_path, os.path.join(working_dir, OVERVIEW_FILENAME))
+
+                return working_dir
+
+            dedup_docs_directory(working_dir)
+
+            freeze_doc_filenames(module_tree)
+            freeze_doc_filenames(first_module_tree)
+            file_manager.save_json(module_tree, module_tree_path)
+            file_manager.save_json(first_module_tree, first_module_tree_path)
+
+            self._gen_state = self._gen_state or GenerationState.load(state_path)
+            self._state_mgr = self._state_mgr or GenerationStateManager(self._gen_state, state_path)
+            await self._state_mgr.update_metadata(
+                self.commit_id or "", config_fingerprint(self.config)
+            )
+            planned_tasks = build_generation_tasks(
+                module_tree, self.config, existing_state=self._gen_state
+            )
+            if not self._gen_state.tasks:
                 try:
-                    await self._state_mgr.bulk_add_tasks(missing_tasks)
+                    await self._state_mgr.bulk_add_tasks(planned_tasks)
                 except ValueError as exc:
-                    logger.warning("Skipping colliding missing tasks: %s", exc)
-                    for task in missing_tasks:
+                    logger.warning(
+                        "Skipping colliding planned tasks during initial ledger load: %s", exc
+                    )
+                    for task in planned_tasks:
                         try:
                             await self._state_mgr.add_task(task)
                         except ValueError as item_exc:
@@ -249,37 +235,57 @@ class DocumentationGenerator:
                                 task.doc_id,
                                 item_exc,
                             )
-            await self._state_mgr.mark_stale(
-                {task.doc_id: task.input_hash for task in planned_tasks}
+            else:
+                existing_ids = set(self._gen_state.tasks)
+                missing_tasks = [task for task in planned_tasks if task.doc_id not in existing_ids]
+                if missing_tasks:
+                    try:
+                        await self._state_mgr.bulk_add_tasks(missing_tasks)
+                    except ValueError as exc:
+                        logger.warning("Skipping colliding missing tasks: %s", exc)
+                        for task in missing_tasks:
+                            try:
+                                await self._state_mgr.add_task(task)
+                            except ValueError as item_exc:
+                                logger.warning(
+                                    "Skipped task %s due to output_file collision: %s",
+                                    task.doc_id,
+                                    item_exc,
+                                )
+                await self._state_mgr.mark_stale(
+                    {task.doc_id: task.input_hash for task in planned_tasks}
+                )
+            await self._state_mgr.promote_ready()
+
+            # ── Dynamic task-queue concurrent path ────────────────────────────
+            tree_manager = ModuleTreeManager(module_tree, module_tree_path)
+            max_concurrent = self.config.max_concurrent
+            max_retries = self.config.max_retries
+
+            graph_tree = await tree_manager.get_snapshot()
+            logger.info(
+                f"📊 Running queue on {len(graph_tree)} top-level modules (concurrency={max_concurrent})"
             )
-        await self._state_mgr.promote_ready()
+            await self._run_module_queue(
+                graph_tree,
+                components,
+                working_dir,
+                tree_manager,
+                desc="Generating docs",
+                include_root=False,
+            )
 
-        # ── Dynamic task-queue concurrent path ────────────────────────────
-        tree_manager = ModuleTreeManager(module_tree, module_tree_path)
-        max_concurrent = self.config.max_concurrent
-        max_retries = self.config.max_retries
+            # ── Fill any modules whose .md was not written ────────────────────
+            await self._fill_missing_module_docs(working_dir, components, tree_manager, max_retries)
 
-        graph_tree = await tree_manager.get_snapshot()
-        logger.info(
-            f"📊 Running queue on {len(graph_tree)} top-level modules (concurrency={max_concurrent})"
-        )
-        await self._run_module_queue(
-            graph_tree,
-            components,
-            working_dir,
-            tree_manager,
-            desc="Generating docs",
-            include_root=False,
-        )
+            # ── Generate repo-level overview after all modules are complete ───
+            logger.info("📚 Generating repository overview")
+            await self.generate_parent_module_docs([], working_dir, tree_manager)
 
-        # ── Fill any modules whose .md was not written ────────────────────
-        await self._fill_missing_module_docs(working_dir, components, tree_manager, max_retries)
-
-        # ── Generate repo-level overview after all modules are complete ───
-        logger.info("📚 Generating repository overview")
-        await self.generate_parent_module_docs([], working_dir, tree_manager)
-
-        return working_dir
+            return working_dir
+        finally:
+            if self._state_mgr is not None:
+                await self._state_mgr.flush()
 
     async def _run_module_queue(
         self,

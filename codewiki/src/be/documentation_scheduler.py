@@ -259,6 +259,8 @@ async def run_module_queue(
                             logger.info("🔓 Parent unblocked: %s", all_tasks[parent_key][1])
                         await work_queue.put(parent_key)
                         active_tasks += 1
+            if state_mgr:
+                await state_mgr.flush()
             done_queue.task_done()
         unresolved_keys = list(pending_count.keys())
         if unresolved_keys:

@@ -224,26 +224,39 @@ class GenerationStateManager:
         self._state = state
         self._persist_path = persist_path
         self._lock = asyncio.Lock()
+        self._dirty = False
 
     @property
     def state(self) -> GenerationState:
         return self._state
 
+    async def flush(self) -> None:
+        """Persist pending state changes when the ledger is dirty."""
+        async with self._lock:
+            if not self._dirty:
+                return
+            self._state._save(self._persist_path)
+            self._dirty = False
+
     async def add_task(self, task: DocTask) -> None:
         async with self._lock:
             self._state._add_task(task)
+            self._dirty = True
             self._state._save(self._persist_path)
+            self._dirty = False
 
     async def bulk_add_tasks(self, tasks: list[DocTask]) -> None:
         async with self._lock:
             for task in tasks:
                 self._state._add_task(task)
+            self._dirty = True
             self._state._save(self._persist_path)
+            self._dirty = False
 
     async def mark_running(self, doc_id: str) -> None:
         async with self._lock:
             self._state._update_task_status(doc_id, "running")
-            self._state._save(self._persist_path)
+            self._dirty = True
 
     async def mark_completed(
         self,
@@ -257,7 +270,7 @@ class GenerationStateManager:
             if task is None:
                 raise KeyError(f"Unknown doc_id: {doc_id}")
             task.mark_completed(content_hash=content_hash, model=model, input_hash=input_hash)
-            self._state._save(self._persist_path)
+            self._dirty = True
 
     async def mark_failed(self, doc_id: str, error: str) -> None:
         async with self._lock:
@@ -265,27 +278,29 @@ class GenerationStateManager:
             if task is None:
                 raise KeyError(f"Unknown doc_id: {doc_id}")
             task.mark_failed(error)
-            self._state._save(self._persist_path)
+            self._dirty = True
 
     async def register_discovered_task(self, task: DocTask) -> None:
         async with self._lock:
             self._state._register_discovered_task(task)
+            self._dirty = True
             self._state._save(self._persist_path)
+            self._dirty = False
 
     async def promote_ready(self) -> int:
         async with self._lock:
             count = self._state._promote_ready()
             if count:
-                self._state._save(self._persist_path)
+                self._dirty = True
             return count
 
     async def mark_stale(self, current_input_hashes: dict[str, str]) -> None:
         async with self._lock:
             self._state._mark_stale_tasks(current_input_hashes)
-            self._state._save(self._persist_path)
+            self._dirty = True
 
     async def update_metadata(self, repo_commit: str, config_fingerprint: str) -> None:
         async with self._lock:
             self._state.repo_commit = repo_commit
             self._state.config_fingerprint = config_fingerprint
-            self._state._save(self._persist_path)
+            self._dirty = True
