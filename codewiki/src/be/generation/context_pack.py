@@ -158,17 +158,27 @@ def _classify_edges(module_sym_ids: set[str], index_products):
     internal = []
     seen: set[tuple[str, str, str]] = set()
 
-    for edge in index_products.edges:
+    edge_index = getattr(index_products, "edge_index", None)
+
+    if edge_index is None:
+        candidate_edges = getattr(index_products, "edges", [])
+    else:
+        candidate_edges = []
+        for symbol_id in module_sym_ids:
+            candidate_edges.extend(edge_index.callees_of(symbol_id))
+            candidate_edges.extend(edge_index.callers_of(symbol_id))
+
+    for edge in candidate_edges:
         if not edge.to_symbol:
             continue
-
-        from_in = edge.from_symbol in module_sym_ids
-        to_in = edge.to_symbol in module_sym_ids
 
         edge_key = (edge.from_symbol, edge.to_symbol, edge.edge_type.value)
         if edge_key in seen:
             continue
         seen.add(edge_key)
+
+        from_in = edge.from_symbol in module_sym_ids
+        to_in = edge.to_symbol in module_sym_ids
 
         desc = f"{edge.from_symbol} --{edge.edge_type.value}--> {edge.to_symbol}"
         if edge.confidence:
