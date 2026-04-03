@@ -178,7 +178,7 @@ from codewiki.src.fe.models import JobStatus
 
 
 class TestH1SnapshotAPI:
-    def test_snapshot_jobs_returns_deep_copy(self):
+    def test_snapshot_jobs_returns_copied_objects(self):
         from codewiki.src.fe.background_worker import BackgroundWorker
         worker = BackgroundWorker.__new__(BackgroundWorker)
         worker.job_status = {
@@ -187,7 +187,7 @@ class TestH1SnapshotAPI:
         }
         worker._job_lock = threading.Lock()
         snap = worker.snapshot_jobs()
-        # Mutation on snapshot's JobStatus must not affect original
+        # Mutation on snapshot's JobStatus copy must not affect original
         snap["j1"].status = "mutated"
         assert worker.job_status["j1"].status == "completed"
 
@@ -248,12 +248,12 @@ import copy
 self._job_lock = threading.Lock()
 ```
 
-Add snapshot methods (must copy both dict AND JobStatus objects):
+Add snapshot methods (must copy both dict AND each JobStatus object):
 ```python
 import copy
 
     def snapshot_jobs(self) -> dict[str, JobStatus]:
-        """Return a thread-safe deep copy of all job statuses."""
+        """Return a thread-safe copy of all job statuses (each value is a copy.copy)."""
         with self._job_lock:
             return {k: copy.copy(v) for k, v in self.job_status.items()}
 
@@ -415,12 +415,36 @@ class TestH7NoForcedDebugLevel:
 
 
 class TestH8CommitIdCaseInsensitive:
-    def test_clone_repository_normalizes_commit_id(self):
-        # clone_repository is a @staticmethod on GitHubRepoProcessor
+    def test_uppercase_sha_is_lowered_before_checkout(self):
         from codewiki.src.fe.github_processor import GitHubRepoProcessor
-        source = inspect.getsource(GitHubRepoProcessor.clone_repository)
-        # Must normalize case before validation
-        assert ".lower()" in source or "a-fA-F" in source
+        from unittest.mock import patch, MagicMock
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            try:
+                GitHubRepoProcessor.clone_repository(
+                    "https://github.com/user/repo", "/tmp/target", "ABCD1234"
+                )
+            except Exception:
+                pass  # clone may fail for other reasons in test env
+
+            # Find the checkout call and verify commit_id was lowered
+            for call in mock_run.call_args_list:
+                args = call[0][0] if call[0] else call[1].get("args", [])
+                if "checkout" in args:
+                    assert "abcd1234" in args, f"Expected lowercase SHA in {args}"
+                    assert "ABCD1234" not in args, "Uppercase SHA should have been lowered"
+                    break
+
+    def test_invalid_commit_id_raises(self):
+        from codewiki.src.fe.github_processor import GitHubRepoProcessor
+
+        with pytest.raises(ValueError, match="[Ii]nvalid"):
+            GitHubRepoProcessor.clone_repository(
+                "https://github.com/user/repo", "/tmp/target", "--upload-pack=evil"
+            )
 ```
 
 - [ ] **Step 2: Apply H6**
