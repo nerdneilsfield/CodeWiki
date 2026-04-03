@@ -1,9 +1,4 @@
-from codewiki.src.be.pipeline import (
-    GenerationResult,
-    ModuleFailure,
-    ModuleSummary,
-    PipelineContext,
-)
+from codewiki.src.be.pipeline import GenerationResult, ModuleFailure, ModuleSummary, PipelineContext
 
 
 class TestModuleSummary:

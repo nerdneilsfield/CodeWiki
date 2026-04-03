@@ -1,4 +1,4 @@
-"""Pipeline framework and result models for documentation generation."""
+"""Pipeline primitives for documentation generation."""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ class GenerationResult:
 
 @dataclass
 class PipelineContext:
-    """Mutable state passed between pipeline stages."""
+    """Mutable context carried between pipeline stages."""
 
     config: Any
     working_dir: str = ""
@@ -85,8 +85,6 @@ class PipelineContext:
 
 
 class PipelineStage(Protocol):
-    """Protocol implemented by all generation stages."""
-
     name: str
     failure_policy: Literal["fail_fast", "degraded_ok"]
 
@@ -94,7 +92,7 @@ class PipelineStage(Protocol):
 
 
 class PipelineRunner:
-    """Execute pipeline stages in order with failure policy enforcement."""
+    """Execute pipeline stages in order and apply failure policy."""
 
     def __init__(self, stages: list[PipelineStage]):
         self._stages = stages
