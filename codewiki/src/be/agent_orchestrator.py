@@ -78,7 +78,7 @@ from codewiki.src.be.prompt_template import (
     format_overview_prompt,
 )
 from codewiki.src.be.generation.context_pack import build_context_pack, format_context_pack_section
-from codewiki.src.be.llm_usage import LLMUsageStats
+from codewiki.src.be.llm_usage import LLMUsageStats, record_agent_run_usage
 from codewiki.src.be.utils import is_complex_module, count_tokens, agent_progress_handler
 from codewiki.src.config import (
     Config,
@@ -362,16 +362,11 @@ class AgentOrchestrator:
                 if isinstance(msg, ModelResponse) and msg.model_name:
                     if msg.model_name not in model_names:
                         model_names.append(msg.model_name)
-                        if self.usage_stats is not None:
-                            self.usage_stats.record(
-                                msg.model_name,
-                                0,
-                                0,
-                                count_towards_totals=False,
-                            )
             run_usage = result.usage()
             if self.usage_stats is not None and run_usage:
-                self.usage_stats.add_totals(
+                record_agent_run_usage(
+                    self.usage_stats,
+                    model_names,
                     run_usage.input_tokens or 0,
                     run_usage.output_tokens or 0,
                     run_usage.requests or 0,

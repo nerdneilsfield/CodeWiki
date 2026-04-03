@@ -76,13 +76,16 @@ class TestLlmResponseGuard:
         from codewiki.src.be.llm_services import call_llm
 
         config = _make_config()
+        mock_response = MagicMock()
+        mock_response.content = []
+        mock_response.usage = MagicMock(input_tokens=0, output_tokens=0)
 
         with (
             patch(
                 "codewiki.src.be.llm_services._create_client_for_model",
                 return_value=(MagicMock(), "claude"),
             ),
-            patch("codewiki.src.be.llm_services._call_claude", return_value=""),
+            patch("codewiki.src.be.llm_services._call_claude", return_value=mock_response),
         ):
             with pytest.raises(ValueError, match="empty content"):
                 call_llm("test prompt", config)

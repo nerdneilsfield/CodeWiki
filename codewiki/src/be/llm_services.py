@@ -7,6 +7,7 @@ import time
 import logging
 import random
 from functools import lru_cache
+from typing import Any
 
 import httpx
 from anthropic import Anthropic
@@ -286,19 +287,13 @@ def _call_llm_streaming(
 
 def _call_claude(
     client: Anthropic, model: str, prompt: str, temperature: float, config: Config
-) -> str:
-    response = client.messages.create(
+) -> Any:
+    return client.messages.create(
         model=model,
         max_tokens=config.max_tokens,
         temperature=temperature,
         messages=[{"role": "user", "content": prompt}],
     )
-    parts = []
-    for block in response.content:
-        text = getattr(block, "text", None)
-        if text:
-            parts.append(text)
-    return "".join(parts)
 
 
 def call_llm(
@@ -359,7 +354,20 @@ def call_llm(
                 source="api",
             )
     elif provider_type == "claude":
-        content = _call_claude(client, resolved_model_name, prompt, temperature, config)
+        response = _call_claude(client, resolved_model_name, prompt, temperature, config)
+        parts = []
+        for block in response.content:
+            text = getattr(block, "text", None)
+            if text:
+                parts.append(text)
+        content = "".join(parts)
+        response_usage = getattr(response, "usage", None)
+        if response_usage is not None:
+            usage = LLMCallUsage(
+                input_tokens=getattr(response_usage, "input_tokens", 0) or 0,
+                output_tokens=getattr(response_usage, "output_tokens", 0) or 0,
+                source="api",
+            )
     else:
         raise ValueError(f"unsupported provider type: {provider_type}")
 

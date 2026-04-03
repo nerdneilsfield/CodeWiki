@@ -90,6 +90,36 @@ class TestCallLlmReturnsResult:
         assert result.usage is not None
         assert result.usage.input_tokens == 10
 
+    def test_call_llm_uses_anthropic_api_usage_when_available(self):
+        from codewiki.src.be.llm_services import call_llm
+
+        config = MagicMock()
+        config.main_model = "claude-test"
+        config.max_tokens = 100
+        config.long_context_model = None
+        config.long_context_threshold = 200_000
+        config.providers = None
+        config.llm_base_url = "http://localhost"
+        config.llm_api_key = "key"
+
+        response = MagicMock()
+        response.content = [MagicMock(text="claude response")]
+        response.usage = MagicMock(input_tokens=21, output_tokens=8)
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = response
+
+        with patch(
+            "codewiki.src.be.llm_services._create_client_for_model",
+            return_value=(mock_client, "claude"),
+        ):
+            result = call_llm("test", config)
+
+        assert result.content == "claude response"
+        assert result.usage is not None
+        assert result.usage.input_tokens == 21
+        assert result.usage.output_tokens == 8
+        assert result.usage.source == "api"
+
     def test_call_llm_no_retry_loop(self):
         """call_llm must raise on first failure, not retry."""
         from codewiki.src.be.llm_services import call_llm
@@ -114,3 +144,31 @@ class TestCallLlmReturnsResult:
                 call_llm("test", config)
 
         assert mock_client.chat.completions.create.call_count == 1
+
+
+class TestAgentUsageAccounting:
+    def test_single_model_agent_usage_attributes_totals_to_that_model(self):
+        from codewiki.src.be.llm_usage import LLMUsageStats, record_agent_run_usage
+
+        usage_stats = LLMUsageStats()
+        record_agent_run_usage(usage_stats, ["gpt-4o"], 30, 12, 1)
+
+        assert usage_stats.to_dict() == {
+            "total_input_tokens": 30,
+            "total_output_tokens": 12,
+            "total_requests": 1,
+            "by_model": {"gpt-4o": {"input": 30, "output": 12, "requests": 1}},
+        }
+
+    def test_multi_model_agent_usage_does_not_fabricate_by_model_tokens(self):
+        from codewiki.src.be.llm_usage import LLMUsageStats, record_agent_run_usage
+
+        usage_stats = LLMUsageStats()
+        record_agent_run_usage(usage_stats, ["gpt-4o", "glm-4p5"], 44, 18, 2)
+
+        assert usage_stats.to_dict() == {
+            "total_input_tokens": 44,
+            "total_output_tokens": 18,
+            "total_requests": 2,
+            "by_model": {},
+        }

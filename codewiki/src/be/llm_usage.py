@@ -68,3 +68,24 @@ class LLMUsageStats:
             "total_requests": self.total_requests,
             "by_model": dict(self.by_model),
         }
+
+
+def record_agent_run_usage(
+    stats: LLMUsageStats,
+    model_names: list[str],
+    input_tokens: int,
+    output_tokens: int,
+    requests: int,
+) -> None:
+    """Record agent usage without inventing per-model token splits."""
+
+    unique_models = list(dict.fromkeys(model_names))
+    if len(unique_models) == 1:
+        stats.record(
+            unique_models[0],
+            input_tokens,
+            output_tokens,
+            requests=requests,
+        )
+        return
+    stats.add_totals(input_tokens, output_tokens, requests)

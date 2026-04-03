@@ -10,6 +10,7 @@ import openai
 from codewiki.src.be.agent_tools.deps import CodeWikiDeps
 from codewiki.src.be.agent_tools.read_code_components import read_code_components_tool
 from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_tool
+from codewiki.src.be.llm_usage import record_agent_run_usage
 from codewiki.src.be.llm_services import select_agent_model
 from codewiki.src.be.prompt_template import (
     format_system_prompt,
@@ -305,16 +306,11 @@ async def generate_sub_module_documentation(
                     if isinstance(_msg, ModelResponse) and _msg.model_name:
                         if _msg.model_name not in _sub_models:
                             _sub_models.append(_msg.model_name)
-                            if ctx.deps.usage_stats is not None:
-                                ctx.deps.usage_stats.record(
-                                    _msg.model_name,
-                                    0,
-                                    0,
-                                    count_towards_totals=False,
-                                )
                 _sub_usage = _sub_result.usage()
                 if ctx.deps.usage_stats is not None and _sub_usage:
-                    ctx.deps.usage_stats.add_totals(
+                    record_agent_run_usage(
+                        ctx.deps.usage_stats,
+                        _sub_models,
                         _sub_usage.input_tokens or 0,
                         _sub_usage.output_tokens or 0,
                         _sub_usage.requests or 0,
