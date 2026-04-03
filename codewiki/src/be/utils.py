@@ -259,4 +259,4 @@ if __name__ == "__main__":
 
     test_file = "output/docs/SWE_agent-docs/agent_hooks.md"
     result = asyncio.run(validate_mermaid_diagrams(test_file, "agent_hooks.md"))
-    print(result)
+    logger.info(result)

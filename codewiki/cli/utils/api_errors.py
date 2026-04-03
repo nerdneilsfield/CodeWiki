@@ -2,10 +2,12 @@
 LLM API error handling utilities with fail-fast behavior.
 """
 
+import logging
 from typing import Optional
-import click
 
 from codewiki.cli.utils.errors import APIError
+
+logger = logging.getLogger(__name__)
 
 
 class APIErrorHandler:
@@ -44,8 +46,8 @@ class APIErrorHandler:
                 "LLM API authentication failed.\n\n"
                 "Your API key appears to be invalid or expired.\n\n"
                 "Troubleshooting:\n"
-                "  1. Verify your API key: codewiki config show\n"
-                "  2. Update your API key: codewiki config set --api-key <new-key>\n"
+                "  1. Verify your provider configuration: codewiki config show --config config.toml\n"
+                "  2. Ensure your env:VAR API key is exported in the shell running CodeWiki\n"
                 "  3. Check that your API key is active in your provider's dashboard"
             )
         elif "timeout" in error_message.lower():
@@ -64,7 +66,7 @@ class APIErrorHandler:
                 "Could not establish connection to the API.\n\n"
                 "Troubleshooting:\n"
                 "  1. Check your internet connection\n"
-                "  2. Verify the base URL: codewiki config show\n"
+                "  2. Verify the base URL in config.toml: codewiki config show --config config.toml\n"
                 "  3. Check if you're behind a proxy or firewall\n"
                 "  4. Try: curl -I <base-url> to test connectivity"
             )
@@ -92,18 +94,14 @@ class APIErrorHandler:
             error: The API error
             module_name: Optional module name for context
         """
-        click.echo()
-        click.secho("✗ LLM API Error", fg="red", bold=True)
-        click.echo()
+        logger.error("LLM API Error")
 
         if module_name:
-            click.echo(f"Module: {module_name}")
-            click.echo()
+            logger.error("Module: %s", module_name)
 
-        click.echo(error.message)
-        click.echo()
-        click.secho("Documentation generation stopped. No partial results saved.", fg="yellow")
-        click.echo()
+        for line in error.message.splitlines():
+            logger.error(line)
+        logger.warning("Documentation generation stopped. No partial results saved.")
 
 
 def wrap_api_call(func, *args, fail_fast: bool = True, context: Optional[str] = None, **kwargs):

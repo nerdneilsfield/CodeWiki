@@ -2,11 +2,14 @@
 Main CLI application for CodeWiki using Click framework.
 """
 
+import logging
 import sys
 import click
-from pathlib import Path
 
 from codewiki import __version__
+from codewiki.src.logging_setup import configure_cli_logging
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -26,8 +29,9 @@ def cli(ctx):
 @cli.command()
 def version():
     """Display version information."""
-    click.echo(f"CodeWiki CLI v{__version__}")
-    click.echo("Python-based documentation generator using AI analysis")
+    configure_cli_logging(verbose=False)
+    logger.info("CodeWiki CLI v%s", __version__)
+    logger.info("Python-based documentation generator using AI analysis")
 
 
 # Import commands
@@ -44,12 +48,13 @@ cli.add_command(build_static_command)
 def main():
     """Entry point for the CLI."""
     try:
+        configure_cli_logging(verbose=False)
         cli(obj={})
     except KeyboardInterrupt:
-        click.echo("\n\nInterrupted by user", err=True)
+        logger.warning("Interrupted by user")
         sys.exit(130)
     except Exception as e:
-        click.secho(f"\n✗ Unexpected error: {e}", fg="red", err=True)
+        logger.error("Unexpected error: %s", e)
         sys.exit(1)
 
 

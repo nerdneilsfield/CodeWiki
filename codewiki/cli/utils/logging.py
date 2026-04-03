@@ -1,84 +1,50 @@
-"""
-Logging utilities for CLI with colored output and progress tracking.
-"""
+"""Logging utilities for CLI output built on the shared structlog setup."""
 
-import sys
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Optional
-import click
+
+import structlog
 
 
 class CLILogger:
-    """Logger for CLI with support for verbose and normal modes."""
+    """Thin CLI facade over structlog with the existing call sites' API."""
 
-    def __init__(self, verbose: bool = False):
-        """
-        Initialize the logger.
-
-        Args:
-            verbose: Enable verbose output
-        """
+    def __init__(self, verbose: bool = False, name: str = "codewiki.cli"):
         self.verbose = verbose
         self.start_time = datetime.now()
+        self._logger = structlog.get_logger(name)
 
-    def debug(self, message: str):
-        """Log debug message (only in verbose mode)."""
+    def debug(self, message: str) -> None:
         if self.verbose:
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            click.secho(f"[{timestamp}] {message}", fg="cyan", dim=True)
+            self._logger.debug(message)
 
-    def info(self, message: str):
-        """Log info message."""
-        click.echo(message)
+    def info(self, message: str) -> None:
+        self._logger.info(message)
 
-    def success(self, message: str):
-        """Log success message in green."""
-        click.secho(f"✓ {message}", fg="green")
+    def success(self, message: str) -> None:
+        self._logger.info(f"SUCCESS {message}")
 
-    def warning(self, message: str):
-        """Log warning message in yellow."""
-        click.secho(f"⚠️  {message}", fg="yellow")
+    def warning(self, message: str) -> None:
+        self._logger.warning(f"WARNING {message}")
 
-    def error(self, message: str):
-        """Log error message in red."""
-        click.secho(f"✗ {message}", fg="red", err=True)
+    def error(self, message: str) -> None:
+        self._logger.error(f"ERROR {message}")
 
-    def step(self, message: str, step: Optional[int] = None, total: Optional[int] = None):
-        """
-        Log a processing step.
-
-        Args:
-            message: Step description
-            step: Current step number
-            total: Total number of steps
-        """
-        if step is not None and total is not None:
-            prefix = f"[{step}/{total}]"
-        else:
-            prefix = "→"
-
-        click.secho(f"{prefix} {message}", fg="blue", bold=True)
+    def step(self, message: str, step: int | None = None, total: int | None = None) -> None:
+        prefix = f"[{step}/{total}] " if step is not None and total is not None else ""
+        self._logger.info(f"{prefix}{message}")
 
     def elapsed_time(self) -> str:
-        """Get elapsed time since logger was created."""
         elapsed = datetime.now() - self.start_time
         minutes = int(elapsed.total_seconds() // 60)
         seconds = int(elapsed.total_seconds() % 60)
-
         if minutes > 0:
             return f"{minutes}m {seconds}s"
-        else:
-            return f"{seconds}s"
+        return f"{seconds}s"
 
 
-def create_logger(verbose: bool = False) -> CLILogger:
-    """
-    Create and return a CLI logger.
+def create_logger(verbose: bool = False, name: str = "codewiki.cli") -> CLILogger:
+    """Return a CLI logger facade backed by structlog."""
 
-    Args:
-        verbose: Enable verbose output
-
-    Returns:
-        Configured CLILogger instance
-    """
-    return CLILogger(verbose=verbose)
+    return CLILogger(verbose=verbose, name=name)

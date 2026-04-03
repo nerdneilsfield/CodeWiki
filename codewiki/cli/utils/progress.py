@@ -205,7 +205,13 @@ class ModuleProgressBar:
 
         if self.verbose:
             status = "✓ (cached)" if cached else "⟳ (generating)"
-            click.echo(f"  [{self.current_module}/{self.total_modules}] {module_name}... {status}")
+            logger.info(
+                "[%s/%s] %s... %s",
+                self.current_module,
+                self.total_modules,
+                module_name,
+                status,
+            )
         elif self.bar:
             self.bar.update(1)
 

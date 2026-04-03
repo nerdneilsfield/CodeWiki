@@ -2,9 +2,16 @@
 Post-generation instructions generator.
 """
 
+import logging
 from pathlib import Path
 from typing import Optional
-import click
+
+logger = logging.getLogger(__name__)
+
+
+def _emit_lines(*lines: str) -> None:
+    for line in lines:
+        logger.info(line)
 
 
 def compute_github_pages_url(repo_url: str, repo_name: str) -> str:
@@ -66,88 +73,73 @@ def display_post_generation_instructions(
         files_generated: List of generated files
         statistics: Generation statistics
     """
-    click.echo()
-    click.secho("✓ Documentation generated successfully!", fg="green", bold=True)
-    click.echo()
+    logger.info("Documentation generated successfully")
 
     # Output directory
-    click.secho("Output directory:", fg="cyan", bold=True)
-    click.echo(f"  {output_dir}")
-    click.echo()
+    _emit_lines("Output directory:", f"  {output_dir}")
 
     # Generated files
     if files_generated:
-        click.secho("Generated files:", fg="cyan", bold=True)
+        _emit_lines("Generated files:")
         for file in files_generated[:10]:  # Show first 10
-            click.echo(f"  - {file}")
+            _emit_lines(f"  - {file}")
         if len(files_generated) > 10:
-            click.echo(f"  ... and {len(files_generated) - 10} more")
-        click.echo()
+            _emit_lines(f"  ... and {len(files_generated) - 10} more")
 
     # Statistics
     if statistics:
-        click.secho("Statistics:", fg="cyan", bold=True)
+        _emit_lines("Statistics:")
         if "module_count" in statistics:
-            click.echo(f"  Total modules:     {statistics['module_count']}")
+            _emit_lines(f"  Total modules:     {statistics['module_count']}")
         if "total_files_analyzed" in statistics:
-            click.echo(f"  Files analyzed:    {statistics['total_files_analyzed']}")
+            _emit_lines(f"  Files analyzed:    {statistics['total_files_analyzed']}")
         if "generation_time" in statistics:
             minutes = int(statistics["generation_time"] // 60)
             seconds = int(statistics["generation_time"] % 60)
-            click.echo(f"  Generation time:   {minutes} minutes {seconds} seconds")
+            _emit_lines(f"  Generation time:   {minutes} minutes {seconds} seconds")
         # if 'total_tokens_used' in statistics:
         #     tokens = statistics['total_tokens_used']
-        #     click.echo(f"  Tokens used:       ~{tokens:,}")
-        click.echo()
+        #     _emit_lines(f"  Tokens used:       ~{tokens:,}")
 
     # Next steps
-    click.secho("Next steps:", fg="cyan", bold=True)
-    click.echo()
+    _emit_lines("Next steps:")
 
-    click.echo("1. Review the generated documentation:")
-    click.echo(f"   cat {output_dir}/overview.md")
+    _emit_lines("1. Review the generated documentation:", f"   cat {output_dir}/overview.md")
     if github_pages:
-        click.echo(f"   open {output_dir}/index.html  # View in browser")
-    click.echo()
+        _emit_lines(f"   open {output_dir}/index.html  # View in browser")
 
     if branch_name:
         # Git workflow with branch
-        click.echo("2. Push the documentation branch:")
-        click.secho(f"   git push origin {branch_name}", fg="yellow")
-        click.echo()
+        _emit_lines("2. Push the documentation branch:", f"   git push origin {branch_name}")
 
         if repo_url:
             pr_url = get_pr_creation_url(repo_url, branch_name)
-            click.echo("3. Create a Pull Request to merge documentation:")
-            click.secho(f"   {pr_url}", fg="blue")
-            click.echo()
+            _emit_lines("3. Create a Pull Request to merge documentation:", f"   {pr_url}")
 
-            click.echo("4. After merge, enable GitHub Pages:")
+            _emit_lines("4. After merge, enable GitHub Pages:")
         else:
-            click.echo("3. Enable GitHub Pages:")
+            _emit_lines("3. Enable GitHub Pages:")
     else:
         # Direct commit workflow
-        click.echo("2. Commit the documentation:")
-        click.secho("   git add docs/", fg="yellow")
-        click.secho('   git commit -m "Add generated documentation"', fg="yellow")
-        click.echo()
+        _emit_lines(
+            "2. Commit the documentation:",
+            "   git add docs/",
+            '   git commit -m "Add generated documentation"',
+        )
 
-        click.echo("3. Push to GitHub:")
-        click.secho("   git push origin main", fg="yellow")
-        click.echo()
+        _emit_lines("3. Push to GitHub:", "   git push origin main")
 
-        click.echo("4. Enable GitHub Pages:")
+        _emit_lines("4. Enable GitHub Pages:")
 
-    click.echo("   - Go to repository Settings → Pages")
-    click.echo("   - Source: Deploy from a branch")
-    click.echo("   - Branch: main, folder: /docs")
-    click.echo()
+    _emit_lines(
+        "   - Go to repository Settings → Pages",
+        "   - Source: Deploy from a branch",
+        "   - Branch: main, folder: /docs",
+    )
 
     if repo_url:
         github_pages_url = compute_github_pages_url(repo_url, repo_name)
-        click.echo("5. Your documentation will be available at:")
-        click.secho(f"   {github_pages_url}", fg="blue", bold=True)
-        click.echo()
+        _emit_lines("5. Your documentation will be available at:", f"   {github_pages_url}")
 
 
 def display_generation_summary(
@@ -162,15 +154,11 @@ def display_generation_summary(
         output_dir: Output directory if successful
     """
     if success:
-        click.echo()
-        click.secho("✓ Generation completed successfully!", fg="green", bold=True)
+        logger.info("Generation completed successfully")
         if output_dir:
-            click.echo(f"\nDocumentation saved to: {output_dir}")
-        click.echo()
+            logger.info("Documentation saved to: %s", output_dir)
     else:
-        click.echo()
-        click.secho("✗ Generation failed", fg="red", bold=True)
+        logger.error("Generation failed")
         if error_message:
-            click.echo()
-            click.echo(error_message)
-        click.echo()
+            for line in error_message.splitlines():
+                logger.error(line)

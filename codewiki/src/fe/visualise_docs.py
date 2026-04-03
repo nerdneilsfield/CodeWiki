@@ -14,6 +14,7 @@ Usage:
 import argparse
 import asyncio
 import html as html_mod
+import logging
 import os
 import re
 import sys
@@ -30,6 +31,9 @@ from .template_utils import render_template
 from .templates import DOCS_VIEW_TEMPLATE, prepare_docs_content
 from codewiki.src.utils import file_manager, module_doc_filename, find_module_doc
 from codewiki.src.be.postprocess.anchor import heading_to_slug
+from codewiki.src.logging_setup import configure_cli_logging
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Documentation Server",
@@ -67,7 +71,7 @@ def load_module_tree(docs_folder: Path) -> Optional[Dict]:
     """Load the module tree structure from module_tree.json."""
     tree_file = docs_folder / "module_tree.json"
     if not tree_file.exists():
-        print(f"Warning: module_tree.json not found in {docs_folder}")
+        logger.warning("module_tree.json not found in %s", docs_folder)
         return None
 
     try:
@@ -75,7 +79,7 @@ def load_module_tree(docs_folder: Path) -> Optional[Dict]:
         _attach_doc_filenames(tree, str(docs_folder))
         return tree
     except Exception as e:
-        print(f"Error loading module_tree.json: {e}")
+        logger.error("Error loading module_tree.json: %s", e)
         return None
 
 
@@ -328,21 +332,22 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Run the server in debug mode")
 
     args = parser.parse_args()
+    configure_cli_logging(verbose=args.debug)
 
     # Validate docs folder
     docs_folder = Path(args.docs_folder)
     if not docs_folder.exists():
-        print(f"Error: Documentation folder '{docs_folder}' does not exist")
+        logger.error("Documentation folder '%s' does not exist", docs_folder)
         sys.exit(1)
 
     if not docs_folder.is_dir():
-        print(f"Error: '{docs_folder}' is not a directory")
+        logger.error("'%s' is not a directory", docs_folder)
         sys.exit(1)
 
     # Check for overview.md
     overview_file = docs_folder / "overview.md"
     if not overview_file.exists():
-        print(f"Warning: overview.md not found in '{docs_folder}'")
+        logger.warning("overview.md not found in '%s'", docs_folder)
 
     # Set global variables and environment variable for uvicorn reload
     global DOCS_FOLDER, MODULE_TREE
@@ -354,16 +359,16 @@ def main():
 
     os.environ["DOCS_FOLDER"] = DOCS_FOLDER
 
-    print(f"📚 Starting documentation server...")
-    print(f"📁 Documentation folder: {DOCS_FOLDER}")
-    print(f"🌐 Server running at: http://{args.host}:{args.port}")
-    print(f"📖 Main page: overview.md")
+    logger.info("Starting documentation server")
+    logger.info("Documentation folder: %s", DOCS_FOLDER)
+    logger.info("Server running at: http://%s:%s", args.host, args.port)
+    logger.info("Main page: overview.md")
 
     if MODULE_TREE:
         modules_count = len(MODULE_TREE)
-        print(f"🗂️  Found {modules_count} main modules in module_tree.json")
+        logger.info("Found %d main modules in module_tree.json", modules_count)
 
-    print("\nPress Ctrl+C to stop the server")
+    logger.info("Press Ctrl+C to stop the server")
 
     try:
         import uvicorn
@@ -376,7 +381,7 @@ def main():
             log_level="debug" if args.debug else "info",
         )
     except KeyboardInterrupt:
-        print("\n👋 Server stopped")
+        logger.info("Server stopped")
 
 
 if __name__ == "__main__":

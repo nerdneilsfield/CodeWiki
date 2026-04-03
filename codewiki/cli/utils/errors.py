@@ -10,9 +10,11 @@ Exit Codes:
   5: File system error (permissions, disk space)
 """
 
+import logging
 import sys
-import click
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 # Exit codes
@@ -73,14 +75,13 @@ def handle_error(error: Exception, verbose: bool = False) -> int:
         Exit code for the error
     """
     if isinstance(error, CodeWikiError):
-        click.secho(f"\n✗ Error: {error.message}", fg="red", err=True)
+        logger.error(error.message)
         return error.exit_code
     else:
-        click.secho(f"\n✗ Unexpected error: {error}", fg="red", err=True)
         if verbose:
-            import traceback
-
-            click.echo(traceback.format_exc(), err=True)
+            logger.exception("Unexpected error", exc_info=error)
+        else:
+            logger.error("Unexpected error: %s", error)
         return EXIT_GENERAL_ERROR
 
 
@@ -93,21 +94,21 @@ def error_with_suggestion(message: str, suggestion: str, exit_code: int = EXIT_G
         suggestion: Suggested action to resolve the error
         exit_code: Exit code to use
     """
-    click.secho(f"\n✗ Error: {message}", fg="red", err=True)
-    click.echo(f"\n{suggestion}", err=True)
+    logger.error(message)
+    logger.info(suggestion)
     sys.exit(exit_code)
 
 
 def warning(message: str):
     """Display a warning message."""
-    click.secho(f"⚠️  {message}", fg="yellow")
+    logger.warning(message)
 
 
 def success(message: str):
     """Display a success message."""
-    click.secho(f"✓ {message}", fg="green")
+    logger.info(message, extra={"outcome": "success"})
 
 
 def info(message: str):
     """Display an info message."""
-    click.echo(message)
+    logger.info(message)
