@@ -42,3 +42,47 @@ def test_classify_edges_uses_edge_index_api():
     assert any("A" in edge and "B" in edge for edge in internal)
     assert any("B" in edge and "C" in edge for edge in boundary)
     assert not any("X" in edge for edge in boundary + internal)
+
+
+class _FlippingSymbolSet(set[str]):
+    """A set-like object whose iteration order alternates between calls."""
+
+    def __init__(self, values):
+        super().__init__(values)
+        self._forward = True
+
+    def __iter__(self):
+        items = sorted(super().__iter__())
+        if not self._forward:
+            items.reverse()
+        self._forward = not self._forward
+        return iter(items)
+
+
+def test_classify_edges_order_and_truncation_are_deterministic():
+    """Boundary/internal ordering must be stable even if module_sym_ids iteration flips."""
+    from codewiki.src.be.generation.context_pack import _classify_edges
+
+    edges = [
+        SymbolEdge(
+            from_symbol=f"S{i:02d}",
+            to_symbol=f"T{i:02d}",
+            edge_type=EdgeType.CALLS,
+        )
+        for i in range(20)
+    ]
+    edge_index = EdgeIndex(edges)
+    index_products = MagicMock()
+    index_products.edge_index = edge_index
+    index_products.edges = edges
+
+    module_syms = _FlippingSymbolSet({f"S{i:02d}" for i in range(20)})
+
+    boundary_first, internal_first = _classify_edges(module_syms, index_products)
+    boundary_second, internal_second = _classify_edges(module_syms, index_products)
+
+    expected = [f"S{i:02d} --calls--> T{i:02d} [medium]" for i in range(15)]
+    assert internal_first == []
+    assert internal_second == []
+    assert boundary_first == expected
+    assert boundary_second == expected

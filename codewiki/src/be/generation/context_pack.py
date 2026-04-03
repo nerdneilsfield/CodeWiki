@@ -168,6 +168,15 @@ def _classify_edges(module_sym_ids: set[str], index_products):
             candidate_edges.extend(edge_index.callees_of(symbol_id))
             candidate_edges.extend(edge_index.callers_of(symbol_id))
 
+    candidate_edges = sorted(
+        candidate_edges,
+        key=lambda edge: (
+            edge.from_symbol,
+            edge.to_symbol or "",
+            edge.edge_type.value,
+        ),
+    )
+
     for edge in candidate_edges:
         if not edge.to_symbol:
             continue
