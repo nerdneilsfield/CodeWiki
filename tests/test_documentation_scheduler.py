@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from codewiki.src.be.pipeline import ModuleSummary
 from codewiki.src.be.generation_state import DocTask, GenerationState, GenerationStateManager
 
 
@@ -161,6 +162,7 @@ async def test_fill_missing_module_docs_retries_only_missing_modules(tmp_path):
 
     async def run_module_queue(**kwargs):
         retried.append(kwargs["desc"])
+        return ModuleSummary()
 
     def module_doc_exists(_working_dir, module_path, _module_tree, _gen_state=None):
         return module_path != ["Parent", "ChildB"]
