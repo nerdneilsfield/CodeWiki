@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional, cast
 import os
@@ -54,90 +54,6 @@ class ResolvedModel:
     model_name: str
     provider: Optional[ProviderConfig] = None
     credential_source: Optional[str] = None
-
-
-@dataclass
-class RuntimeSection:
-    output_dir: str = "docs"
-    max_depth: int = MAX_DEPTH
-    max_concurrent: int = DEFAULT_MAX_CONCURRENT
-    max_retries: int = DEFAULT_MAX_RETRIES
-    output_language: str = "en"
-    postprocess_strict: bool = False
-
-
-@dataclass
-class TokensSection:
-    max_tokens: int = DEFAULT_MAX_TOKENS
-    max_token_per_module: int = DEFAULT_MAX_TOKEN_PER_MODULE
-    max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE
-    long_context_threshold: int = DEFAULT_LONG_CONTEXT_THRESHOLD
-
-
-@dataclass
-class GenerationSection:
-    main_model: str
-    cluster_model: str
-    fallback_models: list[str] = field(default_factory=list)
-    long_context_model: Optional[str] = None
-
-
-@dataclass
-class AgentSection:
-    include_patterns: Optional[list[str]] = None
-    exclude_patterns: Optional[list[str]] = None
-    focus_modules: Optional[list[str]] = None
-    doc_type: Optional[str] = None
-    custom_instructions: Optional[str] = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            key: value
-            for key, value in {
-                "include_patterns": self.include_patterns,
-                "exclude_patterns": self.exclude_patterns,
-                "focus_modules": self.focus_modules,
-                "doc_type": self.doc_type,
-                "custom_instructions": self.custom_instructions,
-            }.items()
-            if value not in (None, [], "")
-        }
-
-
-@dataclass
-class AppConfig:
-    """Transitional internal helper for un-migrated consumers.
-
-    New callers should use load_config() directly; this shim exists only until
-    Task 6 migrates the remaining import sites off the legacy shape.
-    """
-
-    runtime: RuntimeSection
-    tokens: TokensSection
-    generation: GenerationSection
-    agent: AgentSection
-    providers: list[ProviderConfig]
-
-    def resolve_model_ref(self, model_ref: str) -> ResolvedModel:
-        return resolve_model_ref(model_ref, self.providers)
-
-    def to_runtime_config(
-        self,
-        repo_path: str,
-        overrides: RuntimeOverrides | None = None,
-        *,
-        context: str = "cli",
-    ) -> CodeWikiConfig:
-        return _build_codewiki_config(
-            repo_path=repo_path,
-            runtime=self.runtime,
-            tokens=self.tokens,
-            generation=self.generation,
-            agent=self.agent,
-            providers=self.providers,
-            overrides=overrides or RuntimeOverrides(),
-            context=context,
-        )
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -283,25 +199,25 @@ def _validate_generation_models(
 def _build_codewiki_config(
     *,
     repo_path: str,
-    runtime: RuntimeSection,
-    tokens: TokensSection,
-    generation: GenerationSection,
-    agent: AgentSection,
+    data: dict[str, Any],
     providers: list[ProviderConfig],
     overrides: RuntimeOverrides,
     context: str,
 ) -> CodeWikiConfig:
-    docs_dir = str(overrides.output_dir or runtime.output_dir)
+    runtime = cast(dict[str, Any], data.get("runtime", {}))
+    tokens = cast(dict[str, Any], data.get("tokens", {}))
+    generation = cast(dict[str, Any], data.get("generation", {}))
+    docs_dir = str(overrides.output_dir or runtime.get("output_dir", "docs"))
     output_dir = os.path.join(docs_dir, "temp")
     dependency_graph_dir = os.path.join(output_dir, DEPENDENCY_GRAPHS_DIR)
     fallback_models = (
         overrides.fallback_models
         if overrides.fallback_models is not None
-        else generation.fallback_models
+        else list(cast(list[str], generation.get("fallback_models", [])))
     )
     agent_instructions = overrides.agent_instructions
     if agent_instructions is None:
-        agent_instructions = agent.to_dict() or None
+        agent_instructions = _resolve_agent_instructions(data, RuntimeOverrides()) or None
 
     return CodeWikiConfig(
         repo_path=repo_path,
@@ -309,14 +225,16 @@ def _build_codewiki_config(
         output_dir=output_dir,
         dependency_graph_dir=dependency_graph_dir,
         context=cast(Any, context),
-        max_depth=overrides.max_depth if overrides.max_depth is not None else runtime.max_depth,
+        max_depth=overrides.max_depth
+        if overrides.max_depth is not None
+        else int(runtime.get("max_depth", MAX_DEPTH)),
         main_model=overrides.main_model
         if overrides.main_model is not None
-        else generation.main_model,
+        else str(generation.get("main_model", "")),
         cluster_model=(
             overrides.cluster_model
             if overrides.cluster_model is not None
-            else generation.cluster_model
+            else str(generation.get("cluster_model", ""))
         ),
         fallback_model=",".join(str(item) for item in fallback_models)
         if fallback_models
@@ -324,41 +242,43 @@ def _build_codewiki_config(
         long_context_model=(
             overrides.long_context_model
             if overrides.long_context_model is not None
-            else generation.long_context_model
+            else cast(Optional[str], generation.get("long_context_model"))
         ),
         long_context_threshold=(
             overrides.long_context_threshold
             if overrides.long_context_threshold is not None
-            else tokens.long_context_threshold
+            else int(tokens.get("long_context_threshold", DEFAULT_LONG_CONTEXT_THRESHOLD))
         ),
-        max_tokens=overrides.max_tokens if overrides.max_tokens is not None else tokens.max_tokens,
+        max_tokens=overrides.max_tokens
+        if overrides.max_tokens is not None
+        else int(tokens.get("max_tokens", DEFAULT_MAX_TOKENS)),
         max_token_per_module=(
             overrides.max_token_per_module
             if overrides.max_token_per_module is not None
-            else tokens.max_token_per_module
+            else int(tokens.get("max_token_per_module", DEFAULT_MAX_TOKEN_PER_MODULE))
         ),
         max_token_per_leaf_module=(
             overrides.max_token_per_leaf_module
             if overrides.max_token_per_leaf_module is not None
-            else tokens.max_token_per_leaf_module
+            else int(tokens.get("max_token_per_leaf_module", DEFAULT_MAX_TOKEN_PER_LEAF_MODULE))
         ),
         max_concurrent=(
             overrides.max_concurrent
             if overrides.max_concurrent is not None
-            else runtime.max_concurrent
+            else int(runtime.get("max_concurrent", DEFAULT_MAX_CONCURRENT))
         ),
         max_retries=overrides.max_retries
         if overrides.max_retries is not None
-        else runtime.max_retries,
+        else int(runtime.get("max_retries", DEFAULT_MAX_RETRIES)),
         output_language=(
             overrides.output_language
             if overrides.output_language is not None
-            else runtime.output_language
+            else str(runtime.get("output_language", "en"))
         ),
         postprocess_strict=(
             overrides.postprocess_strict
             if overrides.postprocess_strict is not None
-            else runtime.postprocess_strict
+            else bool(runtime.get("postprocess_strict", False))
         ),
         agent_instructions=agent_instructions,
         providers=providers,
@@ -378,26 +298,23 @@ def load_config(
     data = _read_toml(config_path)
     overrides = overrides or RuntimeOverrides()
 
-    runtime = RuntimeSection(**cast(dict[str, Any], data.get("runtime", {})))
-    tokens = TokensSection(**cast(dict[str, Any], data.get("tokens", {})))
-    generation = GenerationSection(**cast(dict[str, Any], data.get("generation", {})))
-    agent = AgentSection(**cast(dict[str, Any], data.get("agent", {})))
     providers = _load_provider_configs(
         cast(Iterable[dict[str, Any]], data.get("providers", [])),
         resolve_secrets=resolve_secrets,
     )
 
-    main_model = str(overrides.main_model or generation.main_model)
-    cluster_model = str(overrides.cluster_model or generation.cluster_model)
+    generation = cast(dict[str, Any], data.get("generation", {}))
+    main_model = str(overrides.main_model or generation.get("main_model", ""))
+    cluster_model = str(overrides.cluster_model or generation.get("cluster_model", ""))
     fallback_models = list(
         overrides.fallback_models
         if overrides.fallback_models is not None
-        else generation.fallback_models
+        else cast(list[str], generation.get("fallback_models", []))
     )
     long_context_model = (
         overrides.long_context_model
         if overrides.long_context_model is not None
-        else generation.long_context_model
+        else cast(Optional[str], generation.get("long_context_model"))
     )
 
     _validate_generation_models(
@@ -410,42 +327,8 @@ def load_config(
 
     return _build_codewiki_config(
         repo_path=repo_path,
-        runtime=runtime,
-        tokens=tokens,
-        generation=generation,
-        agent=agent,
+        data=data,
         providers=providers,
         overrides=overrides,
         context=context,
-    )
-
-
-def load_app_config(path: str | Path, resolve_secrets: bool = True) -> AppConfig:
-    """Transitional shim for un-migrated callers.
-
-    New code should call load_config() directly.
-    """
-    config_path = Path(path)
-    data = _read_toml(config_path)
-    providers = _load_provider_configs(
-        cast(Iterable[dict[str, Any]], data.get("providers", [])),
-        resolve_secrets=resolve_secrets,
-    )
-    runtime = RuntimeSection(**cast(dict[str, Any], data.get("runtime", {})))
-    tokens = TokensSection(**cast(dict[str, Any], data.get("tokens", {})))
-    generation = GenerationSection(**cast(dict[str, Any], data.get("generation", {})))
-    agent = AgentSection(**cast(dict[str, Any], data.get("agent", {})))
-    _validate_generation_models(
-        main_model=generation.main_model,
-        cluster_model=generation.cluster_model,
-        fallback_models=generation.fallback_models,
-        long_context_model=generation.long_context_model,
-        providers=providers,
-    )
-    return AppConfig(
-        runtime=runtime,
-        tokens=tokens,
-        generation=generation,
-        agent=agent,
-        providers=providers,
     )

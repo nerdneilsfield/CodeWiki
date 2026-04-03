@@ -6,7 +6,6 @@ and provides CLI-specific functionality like progress reporting.
 """
 
 from pathlib import Path
-from typing import Dict, Any
 import time
 import asyncio
 import os
@@ -19,8 +18,7 @@ from codewiki.cli.utils.errors import APIError
 
 # Import backend modules
 from codewiki.src.be.documentation_generator import DocumentationGenerator
-from codewiki.src.config import Config as BackendConfig, set_cli_context
-from codewiki.src.config_loader import RuntimeOverrides
+from codewiki.src.codewiki_config import CodeWikiConfig
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +35,7 @@ class CLIDocumentationGenerator:
         self,
         repo_path: Path,
         output_dir: Path,
-        config: Dict[str, Any],
+        config: CodeWikiConfig,
         verbose: bool = False,
         generate_html: bool = False,
         generate_static: bool = False,
@@ -50,7 +48,7 @@ class CLIDocumentationGenerator:
         Args:
             repo_path: Repository path
             output_dir: Output directory
-            config: LLM configuration
+            config: Runtime configuration
             verbose: Enable verbose output
             generate_html: Whether to generate HTML viewer
             no_cache: Clear existing docs before generation
@@ -70,58 +68,14 @@ class CLIDocumentationGenerator:
         self.job.repository_path = str(repo_path)
         self.job.repository_name = repo_path.name
         self.job.output_directory = str(output_dir)
-        app_config = config.get("app_config")
-        if app_config is not None:
-            self.job.llm_config = LLMConfig(
-                main_model=app_config.generation.main_model,
-                cluster_model=app_config.generation.cluster_model,
-                base_url="multi-provider",
-            )
-        else:
-            self.job.llm_config = LLMConfig(
-                main_model=config.get("main_model", ""),
-                cluster_model=config.get("cluster_model", ""),
-                base_url=config.get("base_url", ""),
-            )
+        self.job.llm_config = LLMConfig(
+            main_model=config.main_model,
+            cluster_model=config.cluster_model,
+            base_url=config.llm_base_url or "multi-provider",
+        )
 
         # Configure backend logging
         self._configure_backend_logging()
-
-    def _build_backend_config(self) -> BackendConfig:
-        """Build backend runtime config from either legacy dict config or new AppConfig path."""
-        app_config = self.config.get("app_config")
-        if app_config is not None:
-            overrides = self.config.get("runtime_overrides") or RuntimeOverrides()
-            if overrides.output_dir is None:
-                overrides.output_dir = str(self.output_dir)
-            return app_config.to_runtime_config(
-                repo_path=str(self.repo_path),
-                overrides=overrides,
-            )
-
-        def _get_str(name: str, default: str = "") -> str:
-            value = self.config.get(name, default)
-            return value if isinstance(value, str) else default
-
-        return BackendConfig.from_cli(
-            repo_path=str(self.repo_path),
-            output_dir=str(self.output_dir),
-            llm_base_url=_get_str("base_url"),
-            llm_api_key=_get_str("api_key"),
-            main_model=_get_str("main_model"),
-            cluster_model=_get_str("cluster_model"),
-            fallback_model=_get_str("fallback_model", "glm-4p5"),
-            long_context_model=_get_str("long_context_model") or None,
-            long_context_threshold=self.config.get("long_context_threshold", 200000),
-            max_tokens=self.config.get("max_tokens", 32768),
-            max_token_per_module=self.config.get("max_token_per_module", 36369),
-            max_token_per_leaf_module=self.config.get("max_token_per_leaf_module", 16000),
-            max_depth=self.config.get("max_depth", 2),
-            max_concurrent=self.config.get("max_concurrent", 3),
-            max_retries=self.config.get("max_retries", 2),
-            output_language=self.config.get("output_language", "en"),
-            agent_instructions=self.config.get("agent_instructions"),
-        )
 
     def _configure_backend_logging(self):
         """Configure backend logger for CLI use with colored output."""
@@ -143,14 +97,8 @@ class CLIDocumentationGenerator:
         start_time = time.time()
 
         try:
-            # Set CLI context for backend
-            set_cli_context(True)
-
-            # Create backend config with CLI settings
-            backend_config = self._build_backend_config()
-
             # Run backend documentation generation
-            asyncio.run(self._run_backend_generation(backend_config))
+            asyncio.run(self._run_backend_generation(self.config))
 
             # Stage 4: HTML Generation (optional — pick one or both)
             if self.generate_html:
@@ -174,7 +122,7 @@ class CLIDocumentationGenerator:
             self.job.fail(str(e))
             raise
 
-    async def _run_backend_generation(self, backend_config: BackendConfig):
+    async def _run_backend_generation(self, backend_config: CodeWikiConfig):
         """Run the backend documentation generation with progress tracking."""
 
         # --no-cache: wipe generated markdown files and internal state so every

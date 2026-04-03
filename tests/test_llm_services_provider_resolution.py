@@ -1,23 +1,51 @@
+import importlib.util
+import sys
+import types
+import warnings
 from pathlib import Path
 from unittest.mock import patch
-import warnings
 
 import pytest
 
-from codewiki.src.config import Config
-from codewiki.src.config_loader import ProviderConfig, load_app_config
+
+def _ensure_namespace_packages():
+    root = Path(__file__).resolve().parents[1]
+    package_paths = {
+        "codewiki": root / "codewiki",
+        "codewiki.src": root / "codewiki" / "src",
+        "codewiki.src.be": root / "codewiki" / "src" / "be",
+    }
+    for name, path in package_paths.items():
+        module = sys.modules.get(name)
+        if module is None or not hasattr(module, "__path__"):
+            module = types.ModuleType(name)
+            module.__path__ = [str(path)]
+            sys.modules[name] = module
+
+
+def _load_module(module_name: str, relative_path: str):
+    _ensure_namespace_packages()
+    module_path = Path(relative_path)
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
 def runtime_config(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic-test")
-    app_config = load_app_config(Path("config.example.toml"))
-    return app_config.to_runtime_config(repo_path="/tmp/fake-repo")
+    _load_module("codewiki.src.codewiki_config", "codewiki/src/codewiki_config.py")
+    config_loader = _load_module("codewiki.src.config_loader", "codewiki/src/config_loader.py")
+    return config_loader.load_config(Path("config.example.toml"), repo_path="/tmp/fake-repo")
 
 
 def test_create_model_from_ref_uses_openai_chat_model_for_openai_provider(runtime_config):
-    from codewiki.src.be import llm_services
+    llm_services = _load_module("codewiki.src.be.llm_services", "codewiki/src/be/llm_services.py")
 
     sentinel_provider = object()
     sentinel_model = object()
@@ -37,7 +65,7 @@ def test_create_model_from_ref_uses_openai_chat_model_for_openai_provider(runtim
 
 
 def test_create_model_from_ref_uses_anthropic_model_for_claude_provider(runtime_config):
-    from codewiki.src.be import llm_services
+    llm_services = _load_module("codewiki.src.be.llm_services", "codewiki/src/be/llm_services.py")
 
     sentinel_provider = object()
     sentinel_model = object()
@@ -59,10 +87,12 @@ def test_create_model_from_ref_uses_anthropic_model_for_claude_provider(runtime_
 
 
 def test_create_model_from_ref_rejects_unsupported_provider_type(runtime_config):
-    from codewiki.src.be import llm_services
+    llm_services = _load_module("codewiki.src.be.llm_services", "codewiki/src/be/llm_services.py")
 
     runtime_config.providers.append(
-        ProviderConfig(
+        _load_module(
+            "codewiki.src.codewiki_config", "codewiki/src/codewiki_config.py"
+        ).ProviderConfig(
             name="bad", type="unsupported", model_list=["x"], api_keys=[], extra_headers={}
         )
     )
@@ -72,7 +102,7 @@ def test_create_model_from_ref_rejects_unsupported_provider_type(runtime_config)
 
 
 def test_create_fallback_models_supports_cross_provider_chain(runtime_config):
-    from codewiki.src.be import llm_services
+    llm_services = _load_module("codewiki.src.be.llm_services", "codewiki/src/be/llm_services.py")
 
     runtime_config.main_model = "openai/gpt-4o-mini"
     runtime_config.fallback_model = "claude/claude-sonnet-4-5-20250929,openai/gpt-4.1"
@@ -95,13 +125,16 @@ def test_create_fallback_models_supports_cross_provider_chain(runtime_config):
 
 
 def test_model_factories_do_not_emit_openai_model_deprecation_warnings():
-    from codewiki.src.be import llm_services
+    llm_services = _load_module("codewiki.src.be.llm_services", "codewiki/src/be/llm_services.py")
+    codewiki_config_mod = _load_module(
+        "codewiki.src.codewiki_config", "codewiki/src/codewiki_config.py"
+    )
 
-    config = Config(
+    config = codewiki_config_mod.CodeWikiConfig(
         repo_path="/tmp/fake-repo",
+        docs_dir="/tmp/docs",
         output_dir="/tmp/output",
         dependency_graph_dir="/tmp/graphs",
-        docs_dir="/tmp/docs",
         max_depth=2,
         llm_base_url="http://localhost:4000/",
         llm_api_key="sk-test",

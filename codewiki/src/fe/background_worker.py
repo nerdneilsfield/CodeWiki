@@ -20,7 +20,7 @@ from dataclasses import asdict
 logger = logging.getLogger(__name__)
 
 from codewiki.src.be.documentation_generator import DocumentationGenerator
-from codewiki.src.config_loader import RuntimeOverrides, load_app_config
+from codewiki.src.config_loader import RuntimeOverrides, load_config
 from codewiki.src.logging_setup import configure_web_logging
 from .models import JobStatus
 from .cache_manager import CacheManager
@@ -188,22 +188,19 @@ class BackgroundWorker:
                 logger.error("Worker error: %s", e)
                 time.sleep(1)
 
-    def _load_app_config(self):
-        """Load AppConfig from self.config_path, raising RuntimeError on failure."""
+    def _load_runtime_config(self, *, repo_path: str, docs_dir: str):
+        """Load CodeWikiConfig from self.config_path, raising RuntimeError on failure."""
         if not self.config_path:
             raise RuntimeError("BackgroundWorker requires config_path for generation")
         try:
-            return load_app_config(Path(self.config_path))
+            return load_config(
+                Path(self.config_path),
+                repo_path=repo_path,
+                overrides=RuntimeOverrides(output_dir=docs_dir),
+                context="web",
+            )
         except (FileNotFoundError, ValueError) as exc:
             raise RuntimeError(f"Failed to load config '{self.config_path}': {exc}") from exc
-
-    def _build_runtime_config(self, temp_repo_dir: str, docs_dir: str, app_config=None):
-        if app_config is None:
-            app_config = self._load_app_config()
-        return app_config.to_runtime_config(
-            repo_path=temp_repo_dir,
-            overrides=RuntimeOverrides(output_dir=docs_dir),
-        )
 
     def _process_job(self, job_id: str):
         """Process a single documentation generation job."""
@@ -218,10 +215,6 @@ class BackgroundWorker:
             job.status = "processing"
             job.started_at = datetime.now()
             job.progress = "Starting repository clone..."
-
-            # Load app config once — used for both model metadata and runtime config.
-            app_config = self._load_app_config()
-            job.main_model = app_config.generation.main_model
 
             # Check cache first
             cached_docs = self.cache_manager.get_cached_docs(job.repo_url, job.commit_id)
@@ -252,11 +245,12 @@ class BackgroundWorker:
             # Generate documentation
             job.progress = "Analyzing repository structure..."
 
-            # Create runtime config for documentation generation from TOML
             docs_dir = os.path.join("output", "docs", f"{job_id}-docs")
-            config = self._build_runtime_config(
-                temp_repo_dir=temp_repo_dir, docs_dir=docs_dir, app_config=app_config
+            config = self._load_runtime_config(
+                repo_path=temp_repo_dir,
+                docs_dir=docs_dir,
             )
+            job.main_model = config.main_model
 
             job.progress = "Generating documentation..."
 

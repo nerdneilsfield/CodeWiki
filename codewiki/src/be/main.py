@@ -27,7 +27,7 @@ from codewiki.src.be.documentation_generator import DocumentationGenerator
 from codewiki.src.config import (
     Config,
 )
-from codewiki.src.config_loader import load_app_config
+from codewiki.src.config_loader import load_config
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -43,10 +43,9 @@ def parse_arguments() -> argparse.Namespace:
 
 def _build_runtime_config_from_args(args: argparse.Namespace):
     try:
-        app_config = load_app_config(Path(args.config))
+        return load_config(Path(args.config), repo_path=args.repo_path, context="cli")
     except (FileNotFoundError, ValueError) as exc:
         raise RuntimeError(f"Failed to load config '{args.config}': {exc}") from exc
-    return app_config.to_runtime_config(args.repo_path)
 
 
 async def main() -> None:

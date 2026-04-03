@@ -1,8 +1,11 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from codewiki.src.be.pipeline import GenerationResult
+from codewiki.src.codewiki_config import CodeWikiConfig
 
-def test_background_worker_build_runtime_config_uses_app_config(tmp_path):
+
+def test_background_worker_load_runtime_config_uses_toml(tmp_path):
     from codewiki.src.fe.background_worker import BackgroundWorker
 
     config_path = tmp_path / "codewiki.toml"
@@ -10,46 +13,35 @@ def test_background_worker_build_runtime_config_uses_app_config(tmp_path):
         "[runtime]\noutput_dir='docs'\n[generation]\nmain_model='openai/gpt-4o-mini'\ncluster_model='openai/gpt-4o-mini'\n[[providers]]\nname='openai'\ntype='openai_compatible'\nmodel_list=['gpt-4o-mini']\napi_keys=[]\n",
         encoding="utf-8",
     )
-
-    app_config = MagicMock()
-    sentinel_runtime = object()
-    app_config.to_runtime_config.return_value = sentinel_runtime
-
-    worker = BackgroundWorker(cache_manager=MagicMock(), config_path=str(config_path))
-
-    # Pass pre-loaded app_config — load_app_config should NOT be called again.
-    with patch("codewiki.src.fe.background_worker.load_app_config") as mock_load:
-        result = worker._build_runtime_config(
-            temp_repo_dir="/tmp/repo", docs_dir="/tmp/docs", app_config=app_config
-        )
-
-    assert result is sentinel_runtime
-    mock_load.assert_not_called()
-
-
-def test_background_worker_build_runtime_config_loads_when_no_app_config(tmp_path):
-    """When app_config is not passed, _build_runtime_config falls back to loading it."""
-    from codewiki.src.fe.background_worker import BackgroundWorker
-
-    config_path = tmp_path / "codewiki.toml"
-    config_path.write_text(
-        "[runtime]\noutput_dir='docs'\n[generation]\nmain_model='openai/gpt-4o-mini'\ncluster_model='openai/gpt-4o-mini'\n[[providers]]\nname='openai'\ntype='openai_compatible'\nmodel_list=['gpt-4o-mini']\napi_keys=[]\n",
-        encoding="utf-8",
-    )
-
-    app_config = MagicMock()
-    sentinel_runtime = object()
-    app_config.to_runtime_config.return_value = sentinel_runtime
 
     worker = BackgroundWorker(cache_manager=MagicMock(), config_path=str(config_path))
 
     with patch(
-        "codewiki.src.fe.background_worker.load_app_config", return_value=app_config
+        "codewiki.src.fe.background_worker.load_config",
+        return_value=CodeWikiConfig(
+            repo_path="/tmp/repo",
+            docs_dir="/tmp/docs",
+            main_model="openai/gpt-4o-mini",
+            cluster_model="openai/gpt-4o-mini",
+        ),
     ) as mock_load:
-        result = worker._build_runtime_config(temp_repo_dir="/tmp/repo", docs_dir="/tmp/docs")
+        result = worker._load_runtime_config(repo_path="/tmp/repo", docs_dir="/tmp/docs")
 
-    assert result is sentinel_runtime
-    mock_load.assert_called_once_with(Path(config_path))
+    assert isinstance(result, CodeWikiConfig)
+    mock_load.assert_called_once()
+
+
+def test_background_worker_load_runtime_config_raises_without_config_path(tmp_path):
+    from codewiki.src.fe.background_worker import BackgroundWorker
+
+    worker = BackgroundWorker(cache_manager=MagicMock(), config_path=None)
+
+    try:
+        worker._load_runtime_config(repo_path="/tmp/repo", docs_dir="/tmp/docs")
+    except RuntimeError as exc:
+        assert "config_path" in str(exc)
+    else:
+        raise AssertionError("Expected RuntimeError when config_path is missing")
 
 
 def test_process_job_sets_main_model_from_toml(tmp_path):
@@ -66,10 +58,12 @@ def test_process_job_sets_main_model_from_toml(tmp_path):
         encoding="utf-8",
     )
 
-    app_config = MagicMock()
-    app_config.generation.main_model = "openai/gpt-4o-mini"
-    runtime_config = MagicMock(docs_dir=str(tmp_path / "docs"))
-    app_config.to_runtime_config.return_value = runtime_config
+    runtime_config = CodeWikiConfig(
+        repo_path=str(tmp_path / "repo"),
+        docs_dir=str(tmp_path / "docs"),
+        main_model="openai/gpt-4o-mini",
+        cluster_model="openai/gpt-4o-mini",
+    )
 
     cache_manager = MagicMock()
     cache_manager.get_cached_docs.return_value = None  # force full generation path
@@ -85,7 +79,7 @@ def test_process_job_sets_main_model_from_toml(tmp_path):
     worker.job_status["test-job"] = job
 
     with (
-        patch("codewiki.src.fe.background_worker.load_app_config", return_value=app_config),
+        patch("codewiki.src.fe.background_worker.load_config", return_value=runtime_config),
         patch("codewiki.src.fe.background_worker.GitHubRepoProcessor") as mock_gh,
         patch("codewiki.src.fe.background_worker.DocumentationGenerator") as mock_gen_cls,
     ):
@@ -95,9 +89,10 @@ def test_process_job_sets_main_model_from_toml(tmp_path):
         }
         mock_gh.clone_repository.return_value = True
         mock_gen = mock_gen_cls.return_value
+        mock_gen.run.return_value = GenerationResult(status="complete")
 
         fake_loop = MagicMock()
-        fake_loop.run_until_complete = MagicMock(return_value=None)
+        fake_loop.run_until_complete = MagicMock(return_value=GenerationResult(status="complete"))
         with (
             patch("asyncio.new_event_loop", return_value=fake_loop),
             patch("asyncio.set_event_loop"),

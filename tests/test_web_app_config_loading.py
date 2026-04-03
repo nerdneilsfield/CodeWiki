@@ -2,14 +2,16 @@
 Tests for web app / background worker config-path threading (Task 5).
 
 Behaviour under test:
-- BackgroundWorker accepts config_path and passes it through to load_app_config
+- BackgroundWorker accepts config_path and preserves it for later config loading
 - WebAppConfig.CONFIG_PATH reads CODEWIKI_CONFIG env var at import time
 - web_app module-level BackgroundWorker is initialised with WebAppConfig.CONFIG_PATH
 - web_app main() propagates --config arg to both the env var and the worker
 """
 
-import importlib
+import importlib.util
 import os
+import sys
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -26,6 +28,43 @@ MINIMAL_TOML = (
 )
 
 
+def _ensure_namespace_packages():
+    root = Path(__file__).resolve().parents[1]
+    package_paths = {
+        "codewiki": root / "codewiki",
+        "codewiki.src": root / "codewiki" / "src",
+        "codewiki.src.fe": root / "codewiki" / "src" / "fe",
+        "codewiki.src.be": root / "codewiki" / "src" / "be",
+    }
+    for name, path in package_paths.items():
+        module = sys.modules.get(name)
+        if module is None or not hasattr(module, "__path__"):
+            module = types.ModuleType(name)
+            module.__path__ = [str(path)]
+            sys.modules[name] = module
+    if "codewiki.src.utils" not in sys.modules:
+        util_spec = importlib.util.spec_from_file_location(
+            "codewiki.src.utils", root / "codewiki" / "src" / "utils.py"
+        )
+        assert util_spec is not None
+        assert util_spec.loader is not None
+        util_mod = importlib.util.module_from_spec(util_spec)
+        sys.modules["codewiki.src.utils"] = util_mod
+        util_spec.loader.exec_module(util_mod)
+
+
+def _load_module(module_name: str, relative_path: str):
+    _ensure_namespace_packages()
+    module_path = Path(relative_path)
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 # ── WebAppConfig ──────────────────────────────────────────────────────────────
 
 
@@ -36,10 +75,7 @@ def test_webapp_config_reads_config_path_from_env(monkeypatch, tmp_path):
 
     monkeypatch.setenv("CODEWIKI_CONFIG", str(toml_path))
 
-    # Force re-evaluation — the class attr is set at module import so we reload.
-    import codewiki.src.fe.config as cfg_mod
-
-    importlib.reload(cfg_mod)
+    cfg_mod = _load_module("codewiki.src.fe.config", "codewiki/src/fe/config.py")
 
     assert cfg_mod.WebAppConfig.CONFIG_PATH == str(toml_path)
 
@@ -47,9 +83,7 @@ def test_webapp_config_reads_config_path_from_env(monkeypatch, tmp_path):
 def test_webapp_config_config_path_is_none_when_env_unset(monkeypatch):
     monkeypatch.delenv("CODEWIKI_CONFIG", raising=False)
 
-    import codewiki.src.fe.config as cfg_mod
-
-    importlib.reload(cfg_mod)
+    cfg_mod = _load_module("codewiki.src.fe.config", "codewiki/src/fe/config.py")
 
     assert cfg_mod.WebAppConfig.CONFIG_PATH is None
 
@@ -58,47 +92,26 @@ def test_webapp_config_config_path_is_none_when_env_unset(monkeypatch):
 
 
 def test_background_worker_stores_config_path(tmp_path):
-    from codewiki.src.fe.background_worker import BackgroundWorker
+    background_worker_mod = _load_module(
+        "codewiki.src.fe.background_worker", "codewiki/src/fe/background_worker.py"
+    )
 
     toml_path = tmp_path / "codewiki.toml"
     toml_path.write_text(MINIMAL_TOML)
 
-    worker = BackgroundWorker(cache_manager=MagicMock(), config_path=str(toml_path))
+    worker = background_worker_mod.BackgroundWorker(
+        cache_manager=MagicMock(), config_path=str(toml_path)
+    )
     assert worker.config_path == str(toml_path)
 
 
 def test_background_worker_config_path_defaults_to_none():
-    from codewiki.src.fe.background_worker import BackgroundWorker
+    background_worker_mod = _load_module(
+        "codewiki.src.fe.background_worker", "codewiki/src/fe/background_worker.py"
+    )
 
-    worker = BackgroundWorker(cache_manager=MagicMock())
+    worker = background_worker_mod.BackgroundWorker(cache_manager=MagicMock())
     assert worker.config_path is None
-
-
-def test_background_worker_load_app_config_raises_without_config_path():
-    from codewiki.src.fe.background_worker import BackgroundWorker
-
-    worker = BackgroundWorker(cache_manager=MagicMock(), config_path=None)
-
-    with pytest.raises(RuntimeError, match="config_path"):
-        worker._load_app_config()
-
-
-def test_background_worker_load_app_config_delegates_to_loader(tmp_path):
-    from codewiki.src.fe.background_worker import BackgroundWorker
-
-    toml_path = tmp_path / "codewiki.toml"
-    toml_path.write_text(MINIMAL_TOML)
-
-    sentinel = MagicMock()
-    worker = BackgroundWorker(cache_manager=MagicMock(), config_path=str(toml_path))
-
-    with patch(
-        "codewiki.src.fe.background_worker.load_app_config", return_value=sentinel
-    ) as mock_load:
-        result = worker._load_app_config()
-
-    assert result is sentinel
-    mock_load.assert_called_once_with(Path(toml_path))
 
 
 # ── web_app module wiring ─────────────────────────────────────────────────────
@@ -111,12 +124,8 @@ def test_web_app_background_worker_receives_config_path_from_env(monkeypatch, tm
 
     monkeypatch.setenv("CODEWIKI_CONFIG", str(toml_path))
 
-    # Reload modules so module-level code re-runs with the new env var.
-    import codewiki.src.fe.config as cfg_mod
-    import codewiki.src.fe.web_app as web_mod
-
-    importlib.reload(cfg_mod)
-    importlib.reload(web_mod)
+    _load_module("codewiki.src.fe.config", "codewiki/src/fe/config.py")
+    web_mod = _load_module("codewiki.src.fe.web_app", "codewiki/src/fe/web_app.py")
 
     assert web_mod.background_worker.config_path == str(toml_path)
 
@@ -128,9 +137,7 @@ def test_web_app_main_propagates_config_arg_to_worker_and_env(monkeypatch, tmp_p
 
     monkeypatch.delenv("CODEWIKI_CONFIG", raising=False)
 
-    import codewiki.src.fe.web_app as web_mod
-
-    importlib.reload(web_mod)
+    web_mod = _load_module("codewiki.src.fe.web_app", "codewiki/src/fe/web_app.py")
 
     # Patch uvicorn.run so main() doesn't actually start a server.
     with (

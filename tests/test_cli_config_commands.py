@@ -1,19 +1,18 @@
 """
 Tests for the config subcommands:
   - config init  (create TOML template)
-  - config show  (TOML path and legacy fallback)
-  - config validate (TOML path and legacy fallback)
-  - config set   (deprecated — shows warning)
-  - config agent (deprecated — shows warning)
+  - config show  (TOML path only)
+  - config validate (TOML path only)
+  - config set   (TOML editing)
+  - config agent (TOML editing)
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from click.testing import CliRunner
 
-from codewiki.cli.commands.config import config_group, _LEGACY_WARNING, _TOML_TEMPLATE
+from codewiki.cli.commands.config import config_group, _TOML_TEMPLATE
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -190,13 +189,16 @@ def test_config_validate_check_secrets_passes_when_env_set(tmp_path, monkeypatch
 def test_config_validate_toml_success(tmp_path):
     config_file = _write_toml(tmp_path)
 
-    sentinel = MagicMock()
-    sentinel.generation.main_model = "openai/gpt-4o-mini"
-    sentinel.generation.cluster_model = "openai/gpt-4o-mini"
-    sentinel.generation.fallback_models = []
-    sentinel.providers = []
+    from codewiki.src.codewiki_config import CodeWikiConfig
 
-    with patch("codewiki.src.config_loader.load_app_config", return_value=sentinel):
+    sentinel = CodeWikiConfig(
+        repo_path="/tmp/repo",
+        docs_dir="docs",
+        main_model="openai/gpt-4o-mini",
+        cluster_model="openai/gpt-4o-mini",
+    )
+
+    with patch("codewiki.cli.commands.config.load_config", return_value=sentinel):
         result = _runner().invoke(config_group, ["validate", "--config", str(config_file)])
 
     assert result.exit_code == 0
@@ -206,16 +208,23 @@ def test_config_validate_toml_success(tmp_path):
 def test_config_validate_toml_verbose(tmp_path):
     config_file = _write_toml(tmp_path)
 
-    sentinel = MagicMock()
-    sentinel.generation.main_model = "openai/gpt-4o-mini"
-    sentinel.generation.cluster_model = "openai/gpt-4o-mini"
-    sentinel.generation.fallback_models = ["openai/gpt-4o-mini"]
-    p = MagicMock()
-    p.name = "openai"
-    p.type = "openai_compatible"
-    sentinel.providers = [p]
+    from codewiki.src.codewiki_config import CodeWikiConfig, ProviderConfig
 
-    with patch("codewiki.src.config_loader.load_app_config", return_value=sentinel):
+    sentinel = CodeWikiConfig(
+        repo_path="/tmp/repo",
+        docs_dir="docs",
+        main_model="openai/gpt-4o-mini",
+        cluster_model="openai/gpt-4o-mini",
+        providers=[
+            ProviderConfig(
+                name="openai",
+                type="openai_compatible",
+                model_list=["gpt-4o-mini"],
+            )
+        ],
+    )
+
+    with patch("codewiki.cli.commands.config.load_config", return_value=sentinel):
         result = _runner().invoke(
             config_group, ["validate", "--config", str(config_file), "--verbose"]
         )
@@ -227,54 +236,38 @@ def test_config_validate_toml_verbose(tmp_path):
 def test_config_validate_toml_load_failure(tmp_path):
     config_file = _write_toml(tmp_path)
 
-    with patch("codewiki.src.config_loader.load_app_config", side_effect=ValueError("bad ref")):
+    with patch("codewiki.cli.commands.config.load_config", side_effect=ValueError("bad ref")):
         result = _runner().invoke(config_group, ["validate", "--config", str(config_file)])
 
     assert result.exit_code != 0
-
-
-def test_config_validate_legacy_path_invoked_when_no_config():
-    """Without --config, the legacy validation path is taken."""
-    from codewiki.cli.commands import config as mod
-
-    with (
-        patch.object(mod, "_validate_legacy") as mock_legacy,
-        patch.object(mod, "_validate_toml") as mock_toml,
-    ):
-        _runner().invoke(config_group, ["validate"])
-
-    mock_legacy.assert_called_once()
-    mock_toml.assert_not_called()
 
 
 # ── config show ───────────────────────────────────────────────────────────────
 
 
 def _make_show_sentinel():
-    sentinel = MagicMock()
-    sentinel.generation.main_model = "openai/gpt-4o-mini"
-    sentinel.generation.cluster_model = "openai/gpt-4o-mini"
-    sentinel.generation.fallback_models = []
-    sentinel.generation.long_context_model = None
-    sentinel.runtime.output_dir = "docs"
-    sentinel.runtime.max_depth = 2
-    sentinel.runtime.max_concurrent = 3
-    sentinel.runtime.max_retries = 2
-    sentinel.runtime.output_language = "en"
-    sentinel.runtime.postprocess_strict = False
-    sentinel.tokens.max_tokens = 32768
-    sentinel.tokens.max_token_per_module = 36369
-    sentinel.tokens.max_token_per_leaf_module = 16000
-    sentinel.tokens.long_context_threshold = 200000
-    sentinel.providers = []
-    sentinel.agent.to_dict.return_value = {}
-    return sentinel
+    from codewiki.src.codewiki_config import CodeWikiConfig, ProviderConfig
+
+    return CodeWikiConfig(
+        repo_path="/tmp/repo",
+        docs_dir="docs",
+        output_dir="docs/temp",
+        main_model="openai/gpt-4o-mini",
+        cluster_model="openai/gpt-4o-mini",
+        providers=[
+            ProviderConfig(
+                name="openai",
+                type="openai_compatible",
+                model_list=["gpt-4o-mini"],
+            )
+        ],
+    )
 
 
 def test_config_show_toml_reads_config_file(tmp_path):
     config_file = _write_toml(tmp_path)
 
-    with patch("codewiki.src.config_loader.load_app_config", return_value=_make_show_sentinel()):
+    with patch("codewiki.cli.commands.config.load_config", return_value=_make_show_sentinel()):
         result = _runner().invoke(config_group, ["show", "--config", str(config_file)])
 
     assert result.exit_code == 0
@@ -286,66 +279,9 @@ def test_config_show_toml_json_output(tmp_path):
 
     config_file = _write_toml(tmp_path)
 
-    with patch("codewiki.src.config_loader.load_app_config", return_value=_make_show_sentinel()):
+    with patch("codewiki.cli.commands.config.load_config", return_value=_make_show_sentinel()):
         result = _runner().invoke(config_group, ["show", "--config", str(config_file), "--json"])
 
     assert result.exit_code == 0
     parsed = json.loads(result.output)
     assert parsed["generation"]["main_model"] == "openai/gpt-4o-mini"
-
-
-def test_config_show_falls_back_to_legacy_without_config():
-    """Without --config, _show_legacy is called, not _show_toml."""
-    from codewiki.cli.commands import config as mod
-
-    with (
-        patch.object(mod, "_show_legacy") as mock_legacy,
-        patch.object(mod, "_show_toml") as mock_toml,
-    ):
-        _runner().invoke(config_group, ["show"])
-
-    mock_legacy.assert_called_once()
-    mock_toml.assert_not_called()
-
-
-# ── config set (deprecated) ───────────────────────────────────────────────────
-
-
-def test_config_set_shows_deprecation_warning():
-    result = _runner().invoke(config_group, ["set", "--help"])
-    assert "[Deprecated]" in result.output
-
-
-def test_config_set_emits_legacy_warning_on_invocation():
-    """Running config set (with or without args) prints the legacy warning."""
-    result = _runner().invoke(config_group, ["set"])
-    # Warning goes to stderr; CliRunner mixes stdout+stderr by default
-    assert "deprecated" in result.output.lower() or "deprecated" in (result.output + "").lower()
-
-
-def test_config_set_warning_contains_config_init_hint():
-    result = _runner().invoke(config_group, ["set"])
-    assert "config init" in result.output
-
-
-# ── config agent (deprecated) ─────────────────────────────────────────────────
-
-
-def test_config_agent_shows_deprecation_warning():
-    result = _runner().invoke(config_group, ["agent", "--help"])
-    assert "[Deprecated]" in result.output
-
-
-def test_config_agent_emits_legacy_warning_on_invocation():
-    from codewiki.cli.commands import config as mod
-
-    mock_manager = MagicMock()
-    mock_manager.load.return_value = True
-    mock_manager.get_config.return_value = MagicMock(
-        agent_instructions=MagicMock(is_empty=MagicMock(return_value=True))
-    )
-
-    with patch.object(mod, "ConfigManager", return_value=mock_manager):
-        result = _runner().invoke(config_group, ["agent"])
-
-    assert "deprecated" in result.output.lower()

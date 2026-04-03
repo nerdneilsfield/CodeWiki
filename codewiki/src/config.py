@@ -1,7 +1,16 @@
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
-import argparse
+"""Shared runtime constants for CodeWiki.
+
+This module intentionally no longer owns the runtime config model.
+Import `CodeWikiConfig` from `codewiki.src.codewiki_config` for the canonical
+configuration object. `Config` is kept here as a compatibility alias while
+callers are migrated.
+"""
+
+from __future__ import annotations
+
 import os
+
+from codewiki.src.codewiki_config import CodeWikiConfig as Config
 
 # Constants
 OUTPUT_BASE_DIR = "output"
@@ -14,195 +23,12 @@ GENERATION_STATE_FILENAME = "generation_state.json"
 INTERNAL_SUBDIR = ".codewiki"
 postprocess_fix_links = True
 MAX_DEPTH = 2
-# Default max token settings
 DEFAULT_MAX_TOKENS = 32_768
 DEFAULT_MAX_TOKEN_PER_MODULE = 36_369
 DEFAULT_MAX_TOKEN_PER_LEAF_MODULE = 16_000
 DEFAULT_MAX_CONCURRENT = 3
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_LONG_CONTEXT_THRESHOLD = 200_000
-
-# CLI context detection
-_CLI_CONTEXT = False
-
-
-def set_cli_context(enabled: bool = True):
-    """Set whether we're running in CLI context (vs web app)."""
-    global _CLI_CONTEXT
-    _CLI_CONTEXT = enabled
-
-
-def is_cli_context() -> bool:
-    """Check if running in CLI context."""
-    return _CLI_CONTEXT
-
-
-@dataclass
-class Config:
-    """Configuration class for CodeWiki."""
-
-    repo_path: str
-    output_dir: str
-    dependency_graph_dir: str
-    docs_dir: str
-    max_depth: int
-    # LLM configuration
-    llm_base_url: str = ""
-    llm_api_key: str = ""
-    main_model: str = ""
-    cluster_model: str = ""
-    fallback_model: str = "glm-4p5"
-    long_context_model: Optional[str] = None
-    long_context_threshold: int = DEFAULT_LONG_CONTEXT_THRESHOLD
-    # Max token settings
-    max_tokens: int = DEFAULT_MAX_TOKENS
-    max_token_per_module: int = DEFAULT_MAX_TOKEN_PER_MODULE
-    max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE
-    # Concurrency
-    max_concurrent: int = DEFAULT_MAX_CONCURRENT
-    max_retries: int = DEFAULT_MAX_RETRIES
-    # Output language for generated documentation (e.g. "en", "zh", "ja")
-    output_language: str = "en"
-    # When True, lint failures (mermaid/math/link) block the build
-    postprocess_strict: bool = False
-    # When True, postprocess tries to fix broken internal links before validation
-    postprocess_fix_links: bool = True
-    # Agent instructions for customization
-    agent_instructions: Optional[Dict[str, Any]] = None
-    # Multi-provider registry for the TOML-based config system
-    providers: Optional[List[Any]] = None
-
-    @property
-    def include_patterns(self) -> Optional[List[str]]:
-        """Get file include patterns from agent instructions."""
-        if self.agent_instructions:
-            return self.agent_instructions.get("include_patterns")
-        return None
-
-    @property
-    def exclude_patterns(self) -> Optional[List[str]]:
-        """Get file exclude patterns from agent instructions."""
-        if self.agent_instructions:
-            return self.agent_instructions.get("exclude_patterns")
-        return None
-
-    @property
-    def focus_modules(self) -> Optional[List[str]]:
-        """Get focus modules from agent instructions."""
-        if self.agent_instructions:
-            return self.agent_instructions.get("focus_modules")
-        return None
-
-    @property
-    def doc_type(self) -> Optional[str]:
-        """Get documentation type from agent instructions."""
-        if self.agent_instructions:
-            return self.agent_instructions.get("doc_type")
-        return None
-
-    @property
-    def custom_instructions(self) -> Optional[str]:
-        """Get custom instructions from agent instructions."""
-        if self.agent_instructions:
-            return self.agent_instructions.get("custom_instructions")
-        return None
-
-    def get_prompt_addition(self) -> str:
-        """Generate prompt additions based on agent instructions."""
-        if not self.agent_instructions:
-            return ""
-
-        additions = []
-
-        if self.doc_type:
-            doc_type_instructions = {
-                "api": "Focus on API documentation: endpoints, parameters, return types, and usage examples.",
-                "architecture": "Focus on architecture documentation: system design, component relationships, and data flow.",
-                "user-guide": "Focus on user guide documentation: how to use features, step-by-step tutorials.",
-                "developer": "Focus on developer documentation: code structure, contribution guidelines, and implementation details.",
-            }
-            if self.doc_type.lower() in doc_type_instructions:
-                additions.append(doc_type_instructions[self.doc_type.lower()])
-            else:
-                additions.append(f"Focus on generating {self.doc_type} documentation.")
-
-        if self.focus_modules:
-            additions.append(
-                f"Pay special attention to and provide more detailed documentation for these modules: {', '.join(self.focus_modules)}"
-            )
-
-        if self.custom_instructions:
-            additions.append(f"Additional instructions: {self.custom_instructions}")
-
-        return "\n".join(additions) if additions else ""
-
-    @classmethod
-    def from_args(cls, args: argparse.Namespace) -> "Config":
-        """Create configuration from parsed arguments."""
-        repo_name = os.path.basename(os.path.normpath(args.repo_path))
-        sanitized_repo_name = "".join(c if c.isalnum() else "_" for c in repo_name)
-
-        return cls(
-            repo_path=args.repo_path,
-            output_dir=OUTPUT_BASE_DIR,
-            dependency_graph_dir=os.path.join(OUTPUT_BASE_DIR, DEPENDENCY_GRAPHS_DIR),
-            docs_dir=os.path.join(OUTPUT_BASE_DIR, DOCS_DIR, f"{sanitized_repo_name}-docs"),
-            max_depth=MAX_DEPTH,
-            llm_base_url="",
-            llm_api_key="",
-            main_model="",
-            cluster_model="",
-            fallback_model="glm-4p5",
-        )
-
-    @classmethod
-    def from_cli(
-        cls,
-        repo_path: str,
-        output_dir: str,
-        llm_base_url: str,
-        llm_api_key: str,
-        main_model: str,
-        cluster_model: str,
-        fallback_model: str = "glm-4p5",
-        long_context_model: Optional[str] = None,
-        long_context_threshold: int = DEFAULT_LONG_CONTEXT_THRESHOLD,
-        max_tokens: int = DEFAULT_MAX_TOKENS,
-        max_token_per_module: int = DEFAULT_MAX_TOKEN_PER_MODULE,
-        max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE,
-        max_depth: int = MAX_DEPTH,
-        max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-        max_retries: int = DEFAULT_MAX_RETRIES,
-        output_language: str = "en",
-        agent_instructions: Optional[Dict[str, Any]] = None,
-    ) -> "Config":
-        """
-        Create configuration for CLI context.
-        """
-        repo_name = os.path.basename(os.path.normpath(repo_path))
-        base_output_dir = os.path.join(output_dir, "temp")
-
-        return cls(
-            repo_path=repo_path,
-            output_dir=base_output_dir,
-            dependency_graph_dir=os.path.join(base_output_dir, DEPENDENCY_GRAPHS_DIR),
-            docs_dir=output_dir,
-            max_depth=max_depth,
-            llm_base_url=llm_base_url,
-            llm_api_key=llm_api_key,
-            main_model=main_model,
-            cluster_model=cluster_model,
-            fallback_model=fallback_model,
-            long_context_model=long_context_model,
-            long_context_threshold=long_context_threshold,
-            max_tokens=max_tokens,
-            max_token_per_module=max_token_per_module,
-            max_token_per_leaf_module=max_token_per_leaf_module,
-            max_concurrent=max_concurrent,
-            max_retries=max_retries,
-            output_language=output_language,
-            agent_instructions=agent_instructions,
-        )
 
 
 def internal_file_path(working_dir: str, filename: str) -> str:
