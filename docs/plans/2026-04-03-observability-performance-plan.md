@@ -713,15 +713,15 @@ In CLI adapter `doc_generator.py`: move `create_documentation_metadata()` from l
 ```
 ```
 
-- [ ] **Step 3: Run tests**
+- [ ] **Step 4: Run tests**
 
 Run: `pytest tests/test_usage_stats_wiring.py -v`
 Expected: PASS
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add codewiki/src/be/documentation_generator.py codewiki/src/be/agent_orchestrator.py codewiki/src/be/agent_tools/generate_sub_module_documentations.py codewiki/cli/adapters/doc_generator.py tests/test_usage_stats_wiring.py
+git add codewiki/src/be/documentation_generator.py codewiki/src/be/agent_orchestrator.py codewiki/src/be/agent_tools/generate_sub_module_documentations.py codewiki/src/be/guide_generator.py codewiki/src/be/docs_fixer.py codewiki/src/be/cluster_modules.py codewiki/src/be/clustering/naming.py codewiki/cli/adapters/doc_generator.py tests/test_usage_stats_wiring.py
 git commit -m "feat(usage): wire LLMUsageStats into generation pipeline and metadata"
 ```
 
