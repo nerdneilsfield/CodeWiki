@@ -6,6 +6,7 @@ import warnings
 import pytest
 
 from codewiki.src.be.generation_state import DocTask, GenerationState
+from codewiki.src.be.llm_usage import LLMCallResult, LLMCallUsage, LLMUsageStats
 from codewiki.src.config import Config
 
 
@@ -184,3 +185,39 @@ async def test_generate_parent_module_docs_marks_completed_after_write(tmp_path)
     assert state.get_task("overview:root").status == "completed"
     deprecations = [w for w in captured if issubclass(w.category, DeprecationWarning)]
     assert deprecations == []
+
+
+@pytest.mark.asyncio
+async def test_generate_parent_module_docs_records_usage_stats(tmp_path):
+    from codewiki.src.be.documentation_overview import OverviewContext, generate_parent_module_docs
+
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    tree = {"CLI Transport": {"module_id": "mod-cli", "children": {}}}
+    usage_stats = LLMUsageStats()
+
+    async def _call_llm(_prompt, _config, usage_stats=None):
+        assert usage_stats is usage_stats_obj
+        return LLMCallResult(
+            content="<OVERVIEW>\nGenerated content\n</OVERVIEW>",
+            usage=LLMCallUsage(input_tokens=11, output_tokens=7),
+            model="test/main",
+        )
+
+    usage_stats_obj = usage_stats
+    ctx = OverviewContext(
+        config=_make_config(tmp_path),
+        module_tree=tree,
+        working_dir=str(docs_dir),
+        usage_stats=usage_stats,
+        call_llm=_call_llm,
+    )
+
+    await generate_parent_module_docs(ctx, [])
+
+    assert usage_stats.to_dict() == {
+        "total_input_tokens": 11,
+        "total_output_tokens": 7,
+        "total_requests": 1,
+        "by_model": {"test/main": {"input": 11, "output": 7, "requests": 1}},
+    }

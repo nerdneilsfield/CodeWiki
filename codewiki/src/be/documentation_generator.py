@@ -363,6 +363,7 @@ class DocumentationGenerator:
                 state_mgr=self._state_mgr,
                 tree_manager=tree_manager,
                 call_llm=call_llm,
+                usage_stats=self.usage_stats,
             ),
             module_path,
         )

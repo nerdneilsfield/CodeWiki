@@ -251,7 +251,12 @@ class CLIDocumentationGenerator:
                 # No cache (or empty cache from a previous failed/small run): re-cluster
                 if self.verbose:
                     self.progress_tracker.update_stage(0.5, "Clustering modules with LLM...")
-                module_tree = cluster_modules(leaf_nodes, components, backend_config)
+                module_tree = cluster_modules(
+                    leaf_nodes,
+                    components,
+                    backend_config,
+                    usage_stats=doc_generator.usage_stats,
+                )
                 if module_tree:
                     file_manager.save_json(module_tree, first_module_tree_path)
 

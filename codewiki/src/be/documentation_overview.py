@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from codewiki.src.be.documentation_tree_utils import hash_mapping
 from codewiki.src.be.generation_state import GenerationState, GenerationStateManager
+from codewiki.src.be.llm_usage import LLMCallResult, LLMUsageStats
 from codewiki.src.be.module_tree_manager import ModuleTreeManager
 from codewiki.src.be.prompt_template import format_overview_prompt
 from codewiki.src.config import Config, MODULE_TREE_FILENAME, OVERVIEW_FILENAME
@@ -28,6 +29,7 @@ class OverviewContext:
     state_mgr: Optional[GenerationStateManager] = None
     tree_manager: Optional[ModuleTreeManager] = None
     call_llm: Any = None
+    usage_stats: Optional[LLMUsageStats] = None
 
 
 def strip_tree_for_overview(tree: Dict[str, Any]) -> Dict[str, Any]:
@@ -228,11 +230,26 @@ async def generate_parent_module_docs(
         if llm_callable is None:
             from codewiki.src.be.llm_services import call_llm as llm_callable
 
+        llm_kwargs: dict[str, Any] = {}
+        try:
+            if "usage_stats" in inspect.signature(llm_callable).parameters:
+                llm_kwargs["usage_stats"] = ctx.usage_stats
+        except (TypeError, ValueError):
+            pass
+
         if inspect.iscoroutinefunction(llm_callable):
-            parent_docs = await llm_callable(prompt, config)
+            parent_docs = await llm_callable(prompt, config, **llm_kwargs)
         else:
-            parent_docs = await asyncio.to_thread(llm_callable, prompt, config)
-        if hasattr(parent_docs, "content"):
+            parent_docs = await asyncio.to_thread(llm_callable, prompt, config, **llm_kwargs)
+        if isinstance(parent_docs, LLMCallResult):
+            if ctx.usage_stats is not None and parent_docs.usage is not None:
+                ctx.usage_stats.record(
+                    parent_docs.model or config.main_model,
+                    parent_docs.usage.input_tokens,
+                    parent_docs.usage.output_tokens,
+                )
+            parent_docs = parent_docs.content
+        elif hasattr(parent_docs, "content"):
             parent_docs = parent_docs.content
 
         if "<OVERVIEW>" in parent_docs and "</OVERVIEW>" in parent_docs:

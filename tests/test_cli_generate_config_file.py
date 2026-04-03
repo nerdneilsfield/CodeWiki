@@ -112,3 +112,66 @@ def test_generate_command_uses_new_config_loading_path(tmp_path):
 
     assert result.exit_code == 0
     mock_load.assert_called_once_with(str(config_path))
+
+
+@pytest.mark.asyncio
+async def test_cli_backend_generation_forwards_usage_stats_to_cluster_modules(tmp_path):
+    from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    output_dir = tmp_path / "docs"
+    output_dir.mkdir()
+
+    adapter = CLIDocumentationGenerator(
+        repo_path=repo_dir,
+        output_dir=output_dir,
+        config={
+            "main_model": "test/main",
+            "cluster_model": "test/cluster",
+            "base_url": "http://localhost",
+            "api_key": "x",
+        },
+    )
+    backend_config = adapter._build_backend_config()
+
+    fake_doc_generator = MagicMock()
+    fake_doc_generator.graph_builder.build_dependency_graph.return_value = (
+        {"comp": {"file_path": "a.py"}},
+        ["comp"],
+    )
+    fake_doc_generator.usage_stats = object()
+    fake_doc_generator.generate_module_documentation = MagicMock()
+    fake_doc_generator.create_documentation_metadata = MagicMock()
+
+    async def _fake_generate_module_documentation(*_args, **_kwargs):
+        return None
+
+    fake_doc_generator.generate_module_documentation.side_effect = (
+        _fake_generate_module_documentation
+    )
+
+    async def _fake_guide_run():
+        return None
+
+    guide_generator = MagicMock()
+    guide_generator.run.side_effect = _fake_guide_run
+
+    with (
+        patch(
+            "codewiki.cli.adapters.doc_generator.DocumentationGenerator",
+            return_value=fake_doc_generator,
+        ),
+        patch("codewiki.src.be.cluster_modules.cluster_modules") as mock_cluster_modules,
+        patch("codewiki.src.utils.file_manager.load_json", return_value=None),
+        patch("codewiki.src.utils.file_manager.ensure_directory"),
+        patch("codewiki.src.utils.file_manager.save_json"),
+        patch("codewiki.src.be.guide_generator.GuideGenerator", return_value=guide_generator),
+        patch("os.path.exists", return_value=False),
+        patch("os.listdir", return_value=[]),
+    ):
+        mock_cluster_modules.return_value = {"Root": {"children": {}, "components": ["comp"]}}
+        await adapter._run_backend_generation(backend_config)
+
+    _, kwargs = mock_cluster_modules.call_args
+    assert kwargs["usage_stats"] is fake_doc_generator.usage_stats
