@@ -196,15 +196,13 @@ async def test_generate_parent_module_docs_records_usage_stats(tmp_path):
     tree = {"CLI Transport": {"module_id": "mod-cli", "children": {}}}
     usage_stats = LLMUsageStats()
 
-    async def _call_llm(_prompt, _config, usage_stats=None):
-        assert usage_stats is usage_stats_obj
+    async def _call_llm(_prompt, _config):
         return LLMCallResult(
             content="<OVERVIEW>\nGenerated content\n</OVERVIEW>",
             usage=LLMCallUsage(input_tokens=11, output_tokens=7),
             model="test/main",
         )
 
-    usage_stats_obj = usage_stats
     ctx = OverviewContext(
         config=_make_config(tmp_path),
         module_tree=tree,

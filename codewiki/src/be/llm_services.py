@@ -225,35 +225,6 @@ def _create_client_for_model(config: Config, model: str):
     raise ValueError(f"unsupported provider type: {provider_type}")
 
 
-def _is_cf_timeout(exc: Exception) -> bool:
-    msg = str(exc)
-    return (
-        "524" in msg
-        or "A timeout occurred" in msg
-        or "cloudflare" in msg.lower()
-        or "stream disconnected" in msg.lower()
-        or "stream closed before" in msg.lower()
-    )
-
-
-def _call_llm_streaming(
-    client: OpenAI, model: str, prompt: str, temperature: float, config: Config
-) -> str:
-    chunks: list[str] = []
-    with client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-        max_tokens=config.max_tokens,
-        stream=True,
-    ) as stream:
-        for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                chunks.append(delta)
-    return "".join(chunks)
-
-
 def _call_claude(
     client: Anthropic, model: str, prompt: str, temperature: float, config: Config
 ) -> Any:

@@ -61,16 +61,13 @@ class TestLlmResponseGuard:
         mock_client = MagicMock()
         mock_client.chat.completions.create.side_effect = Exception("cloudflare timeout")
 
-        with (
-            patch(
-                "codewiki.src.be.llm_services._create_client_for_model",
-                return_value=(mock_client, "openai_compatible"),
-            ),
-            patch("codewiki.src.be.llm_services._call_llm_streaming") as mock_streaming,
+        with patch(
+            "codewiki.src.be.llm_services._create_client_for_model",
+            return_value=(mock_client, "openai_compatible"),
         ):
             with pytest.raises(Exception, match="cloudflare timeout"):
                 call_llm("test prompt", config)
-        mock_streaming.assert_not_called()
+        mock_client.chat.completions.create.assert_called_once()
 
     def test_empty_claude_content_raises_value_error(self):
         from codewiki.src.be.llm_services import call_llm

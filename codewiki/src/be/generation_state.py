@@ -150,7 +150,8 @@ class GenerationState:
                 setattr(task, key, value)
         task.updated_at = _utcnow()
 
-    def _mark_stale_tasks(self, current_input_hashes: dict[str, str]) -> None:
+    def _mark_stale_tasks(self, current_input_hashes: dict[str, str]) -> int:
+        changed = 0
         for doc_id, current_hash in current_input_hashes.items():
             task = self.tasks.get(doc_id)
             if task and task.is_stale(current_hash):
@@ -158,6 +159,8 @@ class GenerationState:
                 task.input_hash = current_hash
                 task.updated_at = _utcnow()
                 logger.info("Task %s marked stale (input changed)", doc_id)
+                changed += 1
+        return changed
 
     def _save(self, path: str) -> None:
         data = {
@@ -290,8 +293,9 @@ class GenerationStateManager:
 
     async def mark_stale(self, current_input_hashes: dict[str, str]) -> None:
         async with self._lock:
-            self._state._mark_stale_tasks(current_input_hashes)
-            self._dirty = True
+            changed = self._state._mark_stale_tasks(current_input_hashes)
+            if changed:
+                self._dirty = True
 
     async def update_metadata(self, repo_commit: str, config_fingerprint: str) -> None:
         async with self._lock:

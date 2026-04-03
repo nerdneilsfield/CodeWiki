@@ -20,7 +20,12 @@ _THIRD_PARTY_LOGGERS = [
 
 
 class _CurrentStderrProxy:
-    """Resolve stderr at emit time so pytest stream capture doesn't go stale."""
+    """Resolve stderr at emit time so pytest capture swaps don't go stale.
+
+    Logging handlers can outlive pytest's temporary stderr objects. Looking up
+    the active stream lazily keeps later log records pointed at the current
+    capture target instead of a closed file object.
+    """
 
     def _target(self):
         stream = sys.stderr
@@ -57,7 +62,7 @@ def _shared_processors():
     ]
 
 
-def _configure_structlog(*, renderer) -> None:
+def _configure_structlog() -> None:
     structlog.configure(
         processors=_shared_processors()
         + [
@@ -97,7 +102,7 @@ def configure_cli_logging(verbose: bool = False) -> None:
     """Configure structlog for CLI usage with colored console output."""
     level = logging.DEBUG if verbose else logging.INFO
     renderer = structlog.dev.ConsoleRenderer(colors=True)
-    _configure_structlog(renderer=renderer)
+    _configure_structlog()
     _configure_root_handler(renderer=renderer, level=level, stream=_CurrentStderrProxy())
 
     codewiki_logger = logging.getLogger("codewiki")
@@ -111,7 +116,7 @@ def configure_cli_logging(verbose: bool = False) -> None:
 def configure_web_logging() -> None:
     """Configure structlog for web/worker usage with JSON output."""
     renderer = structlog.processors.JSONRenderer()
-    _configure_structlog(renderer=renderer)
+    _configure_structlog()
     _configure_root_handler(
         renderer=renderer,
         level=logging.INFO,

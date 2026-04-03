@@ -279,6 +279,18 @@ def test_generation_state_manager_updates_metadata(tmp_path):
     assert state.config_fingerprint == "cfg-456"
 
 
+def test_generation_state_manager_mark_stale_noop_does_not_dirty(tmp_path):
+    state = GenerationState()
+    manager = GenerationStateManager(state, str(tmp_path / GENERATION_STATE_FILENAME))
+
+    async def _run():
+        await manager.mark_stale({"missing": "new"})
+
+    asyncio.run(_run())
+
+    assert manager._dirty is False
+
+
 def test_generation_state_manager_registers_discovered_tasks_as_planned(tmp_path):
     state = GenerationState()
     manager = GenerationStateManager(state, str(tmp_path / GENERATION_STATE_FILENAME))

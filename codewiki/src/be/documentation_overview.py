@@ -230,17 +230,10 @@ async def generate_parent_module_docs(
         if llm_callable is None:
             from codewiki.src.be.llm_services import call_llm as llm_callable
 
-        llm_kwargs: dict[str, Any] = {}
-        try:
-            if "usage_stats" in inspect.signature(llm_callable).parameters:
-                llm_kwargs["usage_stats"] = ctx.usage_stats
-        except (TypeError, ValueError):
-            pass
-
         if inspect.iscoroutinefunction(llm_callable):
-            parent_docs = await llm_callable(prompt, config, **llm_kwargs)
+            parent_docs = await llm_callable(prompt, config)
         else:
-            parent_docs = await asyncio.to_thread(llm_callable, prompt, config, **llm_kwargs)
+            parent_docs = await asyncio.to_thread(llm_callable, prompt, config)
         if isinstance(parent_docs, LLMCallResult):
             if ctx.usage_stats is not None and parent_docs.usage is not None:
                 ctx.usage_stats.record(
