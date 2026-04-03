@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, cast
+from typing import Any, Iterable, Optional, cast
 import os
 import tomllib
 
-from codewiki.src.codewiki_config import CodeWikiConfig, ProviderConfig as RuntimeProviderConfig
+from codewiki.src.codewiki_config import CodeWikiConfig, ProviderConfig
 
 DEFAULT_MAX_TOKENS = 32_768
 DEFAULT_MAX_TOKEN_PER_MODULE = 36_369
@@ -30,20 +30,30 @@ _DEFAULT_PROVIDER_NAMES = {
 
 
 @dataclass
-class ProviderConfig:
-    name: str
-    type: str
-    api_keys: list[Any] = field(default_factory=list)
-    model_list: list[str] = field(default_factory=list)
-    extra_headers: Dict[str, str] = field(default_factory=dict)
-    base_url: Optional[str] = None
-    endpoint: Optional[str] = None
-    api_version: Optional[str] = None
-    deployment: Optional[str] = None
-    anthropic_version: Optional[str] = None
-    project_id: Optional[str] = None
-    location: Optional[str] = None
-    credentials_path: Optional[str] = None
+class RuntimeOverrides:
+    output_dir: Optional[str] = None
+    max_depth: Optional[int] = None
+    max_tokens: Optional[int] = None
+    max_token_per_module: Optional[int] = None
+    max_token_per_leaf_module: Optional[int] = None
+    max_concurrent: Optional[int] = None
+    max_retries: Optional[int] = None
+    output_language: Optional[str] = None
+    postprocess_strict: Optional[bool] = None
+    main_model: Optional[str] = None
+    cluster_model: Optional[str] = None
+    fallback_models: Optional[list[str]] = None
+    long_context_model: Optional[str] = None
+    long_context_threshold: Optional[int] = None
+    agent_instructions: Optional[dict[str, Any]] = None
+
+
+@dataclass
+class ResolvedModel:
+    provider_name: str
+    model_name: str
+    provider: Optional[ProviderConfig] = None
+    credential_source: Optional[str] = None
 
 
 @dataclass
@@ -80,7 +90,7 @@ class AgentSection:
     doc_type: Optional[str] = None
     custom_instructions: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             key: value
             for key, value in {
@@ -95,142 +105,42 @@ class AgentSection:
 
 
 @dataclass
-class RuntimeOverrides:
-    output_dir: Optional[str] = None
-    max_depth: Optional[int] = None
-    max_tokens: Optional[int] = None
-    max_token_per_module: Optional[int] = None
-    max_token_per_leaf_module: Optional[int] = None
-    max_concurrent: Optional[int] = None
-    max_retries: Optional[int] = None
-    output_language: Optional[str] = None
-    postprocess_strict: Optional[bool] = None
-    main_model: Optional[str] = None
-    cluster_model: Optional[str] = None
-    fallback_models: Optional[list[str]] = None
-    long_context_model: Optional[str] = None
-    long_context_threshold: Optional[int] = None
-    agent_instructions: Optional[Dict[str, Any]] = None
-
-
-@dataclass
-class ResolvedModel:
-    provider_name: str
-    model_name: str
-    provider: Optional[ProviderConfig] = None
-    credential_source: Optional[str] = None
-
-
-@dataclass
 class AppConfig:
+    """Transitional internal helper for un-migrated consumers.
+
+    New callers should use load_config() directly; this shim exists only until
+    Task 6 migrates the remaining import sites off the legacy shape.
+    """
+
     runtime: RuntimeSection
     tokens: TokensSection
     generation: GenerationSection
     agent: AgentSection
     providers: list[ProviderConfig]
 
-    def get_provider(self, name: str) -> ProviderConfig:
-        for provider in self.providers:
-            if provider.name == name:
-                return provider
-        raise ValueError(f"Unknown provider: {name}")
-
     def resolve_model_ref(self, model_ref: str) -> ResolvedModel:
         return resolve_model_ref(model_ref, self.providers)
 
-    def to_runtime_config(self, repo_path: str, overrides: RuntimeOverrides | None = None):
-        from codewiki.src.config import Config
-
-        overrides = overrides or RuntimeOverrides()
-        runtime = self.runtime
-        tokens = self.tokens
-        generation = self.generation
-
-        output_dir = (
-            overrides.output_dir if overrides.output_dir is not None else runtime.output_dir
-        )
-        base_output_dir = os.path.join(output_dir, "temp")
-        docs_dir = output_dir
-        dependency_graph_dir = os.path.join(base_output_dir, DEPENDENCY_GRAPHS_DIR)
-        output_root = base_output_dir
-
-        main_model = (
-            overrides.main_model if overrides.main_model is not None else generation.main_model
-        )
-        cluster_model = (
-            overrides.cluster_model
-            if overrides.cluster_model is not None
-            else generation.cluster_model
-        )
-        fallback_models = (
-            overrides.fallback_models
-            if overrides.fallback_models is not None
-            else generation.fallback_models
-        )
-        long_context_model = (
-            overrides.long_context_model
-            if overrides.long_context_model is not None
-            else generation.long_context_model
-        )
-
-        return Config(
+    def to_runtime_config(
+        self,
+        repo_path: str,
+        overrides: RuntimeOverrides | None = None,
+        *,
+        context: str = "cli",
+    ) -> CodeWikiConfig:
+        return _build_codewiki_config(
             repo_path=repo_path,
-            output_dir=output_root,
-            dependency_graph_dir=dependency_graph_dir,
-            docs_dir=docs_dir,
-            max_depth=(
-                overrides.max_depth if overrides.max_depth is not None else runtime.max_depth
-            ),
-            main_model=main_model,
-            cluster_model=cluster_model,
-            fallback_model=",".join(fallback_models),
-            long_context_model=long_context_model,
-            long_context_threshold=(
-                overrides.long_context_threshold
-                if overrides.long_context_threshold is not None
-                else tokens.long_context_threshold
-            ),
-            max_tokens=(
-                overrides.max_tokens if overrides.max_tokens is not None else tokens.max_tokens
-            ),
-            max_token_per_module=(
-                overrides.max_token_per_module
-                if overrides.max_token_per_module is not None
-                else tokens.max_token_per_module
-            ),
-            max_token_per_leaf_module=(
-                overrides.max_token_per_leaf_module
-                if overrides.max_token_per_leaf_module is not None
-                else tokens.max_token_per_leaf_module
-            ),
-            max_concurrent=(
-                overrides.max_concurrent
-                if overrides.max_concurrent is not None
-                else runtime.max_concurrent
-            ),
-            max_retries=(
-                overrides.max_retries if overrides.max_retries is not None else runtime.max_retries
-            ),
-            output_language=(
-                overrides.output_language
-                if overrides.output_language is not None
-                else runtime.output_language
-            ),
-            postprocess_strict=(
-                overrides.postprocess_strict
-                if overrides.postprocess_strict is not None
-                else runtime.postprocess_strict
-            ),
-            agent_instructions=(
-                overrides.agent_instructions
-                if overrides.agent_instructions is not None
-                else (self.agent.to_dict() or None)
-            ),
+            runtime=self.runtime,
+            tokens=self.tokens,
+            generation=self.generation,
+            agent=self.agent,
             providers=self.providers,
+            overrides=overrides or RuntimeOverrides(),
+            context=context,
         )
 
 
-def _read_toml(path: Path) -> Dict[str, Any]:
+def _read_toml(path: Path) -> dict[str, Any]:
     with path.open("rb") as f:
         return tomllib.load(f)
 
@@ -243,6 +153,45 @@ def _resolve_env_ref(value: Any) -> Any:
             raise ValueError(f"Environment variable not set: {env_name}")
         return resolved
     return value
+
+
+def _load_provider_configs(
+    provider_entries: Iterable[dict[str, Any]], *, resolve_secrets: bool
+) -> list[ProviderConfig]:
+    _resolve = _resolve_env_ref if resolve_secrets else (lambda v: v)
+    providers: list[ProviderConfig] = []
+    for provider_data in provider_entries:
+        providers.append(
+            ProviderConfig.model_validate(
+                {
+                    "name": str(provider_data.get("name", "")),
+                    "type": str(provider_data.get("type", "")),
+                    "api_keys": [_resolve(v) for v in list(provider_data.get("api_keys", []))],
+                    "model_list": [
+                        str(model)
+                        for model in cast(
+                            Iterable[Any],
+                            provider_data.get("model_list", provider_data.get("models", [])),
+                        )
+                    ],
+                    "extra_headers": {
+                        str(key): str(value)
+                        for key, value in cast(
+                            dict[Any, Any], provider_data.get("extra_headers", {})
+                        ).items()
+                    },
+                    "base_url": provider_data.get("base_url"),
+                    "endpoint": provider_data.get("endpoint"),
+                    "api_version": provider_data.get("api_version"),
+                    "deployment": provider_data.get("deployment"),
+                    "anthropic_version": provider_data.get("anthropic_version"),
+                    "project_id": provider_data.get("project_id"),
+                    "location": provider_data.get("location"),
+                    "credentials_path": provider_data.get("credentials_path"),
+                }
+            )
+        )
+    return providers
 
 
 def resolve_model_ref(
@@ -285,72 +234,135 @@ def resolve_model_ref(
     )
 
 
-def load_app_config(path: str | Path, resolve_secrets: bool = True) -> AppConfig:
-    """Load and validate a TOML config file.
+def _resolve_runtime_section(
+    data: dict[str, Any], overrides: RuntimeOverrides
+) -> tuple[str, str, str]:
+    runtime = cast(dict[str, Any], data.get("runtime", {}))
+    docs_dir = str(overrides.output_dir or runtime.get("output_dir", "docs"))
+    output_dir = os.path.join(docs_dir, "temp")
+    dependency_graph_dir = os.path.join(output_dir, DEPENDENCY_GRAPHS_DIR)
+    return docs_dir, output_dir, dependency_graph_dir
 
-    Args:
-        path: Path to the TOML file.
-        resolve_secrets: When True (default), ``env:VAR`` references in
-            ``api_keys`` are resolved at load time and an error is raised for
-            missing variables.  Pass ``False`` for read-only operations such as
-            ``config show`` and ``config validate`` that must work without the
-            secrets being present in the environment.
-    """
-    config_path = Path(path)
-    data = _read_toml(config_path)
 
-    runtime = RuntimeSection(**data.get("runtime", {}))
-    tokens = TokensSection(**data.get("tokens", {}))
-    generation = GenerationSection(**data.get("generation", {}))
-    agent = AgentSection(**data.get("agent", {}))
+def _resolve_agent_instructions(
+    data: dict[str, Any], overrides: RuntimeOverrides
+) -> dict[str, Any] | None:
+    agent = cast(dict[str, Any], data.get("agent", {}))
+    merged = {
+        key: value
+        for key, value in {
+            "include_patterns": agent.get("include_patterns"),
+            "exclude_patterns": agent.get("exclude_patterns"),
+            "focus_modules": agent.get("focus_modules"),
+            "doc_type": agent.get("doc_type"),
+            "custom_instructions": agent.get("custom_instructions"),
+        }.items()
+        if value not in (None, [], "")
+    }
+    if overrides.agent_instructions is not None:
+        merged = {**merged, **overrides.agent_instructions}
+    return merged or None
 
-    _resolve = _resolve_env_ref if resolve_secrets else (lambda v: v)
 
-    providers = []
-    for provider_data in data.get("providers", []):
-        provider_dict = cast(dict[str, Any], provider_data)
-        api_keys = list(provider_dict.get("api_keys", []))
-        model_list = [
-            str(model) for model in cast(Iterable[Any], provider_dict.get("model_list", []))
-        ]
-        extra_headers = {
-            str(key): str(value)
-            for key, value in cast(dict[Any, Any], provider_dict.get("extra_headers", {})).items()
-        }
-        providers.append(
-            ProviderConfig(
-                name=str(provider_dict.get("name", "")),
-                type=str(provider_dict.get("type", "")),
-                api_keys=[_resolve(v) for v in api_keys],
-                model_list=model_list,
-                extra_headers=extra_headers,
-                base_url=cast(Optional[str], provider_dict.get("base_url")),
-                endpoint=cast(Optional[str], provider_dict.get("endpoint")),
-                api_version=cast(Optional[str], provider_dict.get("api_version")),
-                deployment=cast(Optional[str], provider_dict.get("deployment")),
-                anthropic_version=cast(Optional[str], provider_dict.get("anthropic_version")),
-                project_id=cast(Optional[str], provider_dict.get("project_id")),
-                location=cast(Optional[str], provider_dict.get("location")),
-                credentials_path=cast(Optional[str], provider_dict.get("credentials_path")),
-            )
-        )
+def _validate_generation_models(
+    *,
+    main_model: str,
+    cluster_model: str,
+    fallback_models: list[str],
+    long_context_model: str | None,
+    providers: list[ProviderConfig],
+) -> None:
+    resolve_model_ref(main_model, providers)
+    resolve_model_ref(cluster_model, providers)
+    for ref in fallback_models:
+        resolve_model_ref(ref, providers)
+    if long_context_model:
+        resolve_model_ref(long_context_model, providers)
 
-    app_config = AppConfig(
-        runtime=runtime,
-        tokens=tokens,
-        generation=generation,
-        agent=agent,
+
+def _build_codewiki_config(
+    *,
+    repo_path: str,
+    runtime: RuntimeSection,
+    tokens: TokensSection,
+    generation: GenerationSection,
+    agent: AgentSection,
+    providers: list[ProviderConfig],
+    overrides: RuntimeOverrides,
+    context: str,
+) -> CodeWikiConfig:
+    docs_dir = str(overrides.output_dir or runtime.output_dir)
+    output_dir = os.path.join(docs_dir, "temp")
+    dependency_graph_dir = os.path.join(output_dir, DEPENDENCY_GRAPHS_DIR)
+    fallback_models = (
+        overrides.fallback_models
+        if overrides.fallback_models is not None
+        else generation.fallback_models
+    )
+    agent_instructions = overrides.agent_instructions
+    if agent_instructions is None:
+        agent_instructions = agent.to_dict() or None
+
+    return CodeWikiConfig(
+        repo_path=repo_path,
+        docs_dir=docs_dir,
+        output_dir=output_dir,
+        dependency_graph_dir=dependency_graph_dir,
+        context=cast(Any, context),
+        max_depth=overrides.max_depth if overrides.max_depth is not None else runtime.max_depth,
+        main_model=overrides.main_model
+        if overrides.main_model is not None
+        else generation.main_model,
+        cluster_model=(
+            overrides.cluster_model
+            if overrides.cluster_model is not None
+            else generation.cluster_model
+        ),
+        fallback_model=",".join(str(item) for item in fallback_models)
+        if fallback_models
+        else "glm-4p5",
+        long_context_model=(
+            overrides.long_context_model
+            if overrides.long_context_model is not None
+            else generation.long_context_model
+        ),
+        long_context_threshold=(
+            overrides.long_context_threshold
+            if overrides.long_context_threshold is not None
+            else tokens.long_context_threshold
+        ),
+        max_tokens=overrides.max_tokens if overrides.max_tokens is not None else tokens.max_tokens,
+        max_token_per_module=(
+            overrides.max_token_per_module
+            if overrides.max_token_per_module is not None
+            else tokens.max_token_per_module
+        ),
+        max_token_per_leaf_module=(
+            overrides.max_token_per_leaf_module
+            if overrides.max_token_per_leaf_module is not None
+            else tokens.max_token_per_leaf_module
+        ),
+        max_concurrent=(
+            overrides.max_concurrent
+            if overrides.max_concurrent is not None
+            else runtime.max_concurrent
+        ),
+        max_retries=overrides.max_retries
+        if overrides.max_retries is not None
+        else runtime.max_retries,
+        output_language=(
+            overrides.output_language
+            if overrides.output_language is not None
+            else runtime.output_language
+        ),
+        postprocess_strict=(
+            overrides.postprocess_strict
+            if overrides.postprocess_strict is not None
+            else runtime.postprocess_strict
+        ),
+        agent_instructions=agent_instructions,
         providers=providers,
     )
-
-    app_config.resolve_model_ref(app_config.generation.main_model)
-    app_config.resolve_model_ref(app_config.generation.cluster_model)
-    for ref in app_config.generation.fallback_models:
-        app_config.resolve_model_ref(ref)
-    if app_config.generation.long_context_model:
-        app_config.resolve_model_ref(app_config.generation.long_context_model)
-
-    return app_config
 
 
 def load_config(
@@ -361,53 +373,79 @@ def load_config(
     context: str = "cli",
     resolve_secrets: bool = True,
 ) -> CodeWikiConfig:
-    """Load TOML config into the canonical CodeWikiConfig model."""
-    app_config = load_app_config(path, resolve_secrets=resolve_secrets)
-    runtime_config = app_config.to_runtime_config(repo_path, overrides)
+    """Load and validate a TOML config file into CodeWikiConfig."""
+    config_path = Path(path)
+    data = _read_toml(config_path)
+    overrides = overrides or RuntimeOverrides()
 
-    providers = [
-        RuntimeProviderConfig.model_validate(
-            {
-                "name": provider.name,
-                "type": provider.type,
-                "api_keys": provider.api_keys,
-                "model_list": provider.model_list,
-                "extra_headers": provider.extra_headers,
-                "base_url": provider.base_url,
-                "endpoint": provider.endpoint,
-                "api_version": provider.api_version,
-                "deployment": provider.deployment,
-                "anthropic_version": provider.anthropic_version,
-                "project_id": provider.project_id,
-                "location": provider.location,
-                "credentials_path": provider.credentials_path,
-            }
-        )
-        for provider in app_config.providers
-    ]
+    runtime = RuntimeSection(**cast(dict[str, Any], data.get("runtime", {})))
+    tokens = TokensSection(**cast(dict[str, Any], data.get("tokens", {})))
+    generation = GenerationSection(**cast(dict[str, Any], data.get("generation", {})))
+    agent = AgentSection(**cast(dict[str, Any], data.get("agent", {})))
+    providers = _load_provider_configs(
+        cast(Iterable[dict[str, Any]], data.get("providers", [])),
+        resolve_secrets=resolve_secrets,
+    )
 
-    return CodeWikiConfig(
-        repo_path=runtime_config.repo_path,
-        output_dir=runtime_config.output_dir,
-        dependency_graph_dir=runtime_config.dependency_graph_dir,
-        docs_dir=runtime_config.docs_dir,
-        context=cast(Any, context),
-        max_depth=runtime_config.max_depth,
-        llm_base_url=runtime_config.llm_base_url,
-        llm_api_key=runtime_config.llm_api_key,
-        main_model=runtime_config.main_model,
-        cluster_model=runtime_config.cluster_model,
-        fallback_model=runtime_config.fallback_model,
-        long_context_model=runtime_config.long_context_model,
-        long_context_threshold=runtime_config.long_context_threshold,
-        max_tokens=runtime_config.max_tokens,
-        max_token_per_module=runtime_config.max_token_per_module,
-        max_token_per_leaf_module=runtime_config.max_token_per_leaf_module,
-        max_concurrent=runtime_config.max_concurrent,
-        max_retries=runtime_config.max_retries,
-        output_language=runtime_config.output_language,
-        postprocess_strict=runtime_config.postprocess_strict,
-        postprocess_fix_links=runtime_config.postprocess_fix_links,
-        agent_instructions=runtime_config.agent_instructions,
+    main_model = str(overrides.main_model or generation.main_model)
+    cluster_model = str(overrides.cluster_model or generation.cluster_model)
+    fallback_models = list(
+        overrides.fallback_models
+        if overrides.fallback_models is not None
+        else generation.fallback_models
+    )
+    long_context_model = (
+        overrides.long_context_model
+        if overrides.long_context_model is not None
+        else generation.long_context_model
+    )
+
+    _validate_generation_models(
+        main_model=main_model,
+        cluster_model=cluster_model,
+        fallback_models=[str(item) for item in fallback_models],
+        long_context_model=long_context_model,
+        providers=providers,
+    )
+
+    return _build_codewiki_config(
+        repo_path=repo_path,
+        runtime=runtime,
+        tokens=tokens,
+        generation=generation,
+        agent=agent,
+        providers=providers,
+        overrides=overrides,
+        context=context,
+    )
+
+
+def load_app_config(path: str | Path, resolve_secrets: bool = True) -> AppConfig:
+    """Transitional shim for un-migrated callers.
+
+    New code should call load_config() directly.
+    """
+    config_path = Path(path)
+    data = _read_toml(config_path)
+    providers = _load_provider_configs(
+        cast(Iterable[dict[str, Any]], data.get("providers", [])),
+        resolve_secrets=resolve_secrets,
+    )
+    runtime = RuntimeSection(**cast(dict[str, Any], data.get("runtime", {})))
+    tokens = TokensSection(**cast(dict[str, Any], data.get("tokens", {})))
+    generation = GenerationSection(**cast(dict[str, Any], data.get("generation", {})))
+    agent = AgentSection(**cast(dict[str, Any], data.get("agent", {})))
+    _validate_generation_models(
+        main_model=generation.main_model,
+        cluster_model=generation.cluster_model,
+        fallback_models=generation.fallback_models,
+        long_context_model=generation.long_context_model,
+        providers=providers,
+    )
+    return AppConfig(
+        runtime=runtime,
+        tokens=tokens,
+        generation=generation,
+        agent=agent,
         providers=providers,
     )
