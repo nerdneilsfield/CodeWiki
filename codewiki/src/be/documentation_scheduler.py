@@ -210,7 +210,7 @@ async def run_module_queue(
                                 else doc_id_for_path(graph_tree, all_tasks[parent_key][0])
                             )
                             parent_task = gen_state.get_task(parent_doc_id)
-                            if parent_task and parent_task.status == "completed":
+                            if parent_task:
                                 if parent_key == ROOT_KEY:
                                     parent_components: list[str] = []
                                     child_keys = [
@@ -246,8 +246,13 @@ async def run_module_queue(
                                         "v7",
                                     ]
                                 )
-                                if new_hash != parent_task.input_hash:
+                                if (
+                                    parent_task.status == "completed"
+                                    and new_hash != parent_task.input_hash
+                                ):
                                     await state_mgr.mark_stale({parent_doc_id: new_hash})
+                                elif parent_task.status != "completed":
+                                    parent_task.input_hash = new_hash
                         if parent_key == ROOT_KEY:
                             logger.info("🔓 All top-level modules done — enqueueing root overview")
                         else:
