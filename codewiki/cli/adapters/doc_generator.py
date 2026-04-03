@@ -161,6 +161,9 @@ class CLIDocumentationGenerator:
         if result.status == "failed":
             raise APIError("; ".join(result.warnings) or "Documentation generation failed")
 
+        if result.status == "cancelled":
+            raise APIError("Generation cancelled by user")
+
         if result.status == "degraded":
             logger.warning("Generation completed with issues:")
             for warning in result.warnings:

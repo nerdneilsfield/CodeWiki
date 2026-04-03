@@ -6,6 +6,8 @@ import logging
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Protocol
 
+from codewiki.src.be.errors import CancellationError
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,7 +51,7 @@ class ModuleSummary:
 
 @dataclass
 class GenerationResult:
-    status: Literal["complete", "degraded", "failed"] = "complete"
+    status: Literal["complete", "degraded", "failed", "cancelled"] = "complete"
     warnings: list[str] = field(default_factory=list)
     module_summary: ModuleSummary = field(default_factory=ModuleSummary)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -88,6 +90,7 @@ class PipelineContext:
     graph_builder: Any = None
     agent_orchestrator: Any = None
     generator: Any = None
+    cancel_token: Any = None
     commit_id: str = ""
     result: GenerationResult = field(default_factory=GenerationResult)
 
@@ -108,9 +111,17 @@ class PipelineRunner:
     async def execute(self, ctx: PipelineContext) -> GenerationResult:
         for stage in self._stages:
             try:
+                if ctx.cancel_token and ctx.cancel_token.is_cancelled:
+                    ctx.result.status = "cancelled"
+                    logger.info("⏹ Pipeline cancelled before stage %s", stage.name)
+                    break
                 logger.info("▶ Stage: %s", stage.name)
                 await stage.execute(ctx)
                 logger.info("✓ Stage: %s complete", stage.name)
+            except CancellationError:
+                ctx.result.status = "cancelled"
+                logger.info("⏹ Pipeline cancelled")
+                break
             except Exception as exc:
                 message = f"{stage.name} failed: {exc}"
                 if stage.failure_policy == "fail_fast":

@@ -12,7 +12,7 @@ from pathlib import Path
 from dataclasses import asdict
 
 from fastapi import Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .models import JobStatus, JobStatusResponse
 from .github_processor import GitHubRepoProcessor
@@ -203,6 +203,12 @@ class WebRoutes:
             raise HTTPException(status_code=404, detail="Job not found")
 
         return JobStatusResponse(**asdict(job))
+
+    async def cancel_job(self, job_id: str) -> JSONResponse:
+        """Request cancellation for an active background job."""
+        if self.background_worker.cancel_job(job_id):
+            return JSONResponse({"status": "cancelling"})
+        raise HTTPException(status_code=404, detail="Job not found or not running")
 
     async def view_docs(self, job_id: str) -> RedirectResponse:
         """View generated documentation."""

@@ -12,6 +12,7 @@ from networkx.algorithms.community import louvain_communities
 
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_retry import with_retry_sync
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.utils import count_tokens
 from codewiki.src.codewiki_config import CodeWikiConfig
@@ -511,7 +512,7 @@ def cluster_modules(
         current_module_name,
         graph_clusters_hint=graph_hint,
     )
-    response = call_llm(prompt, config, model=config.cluster_model)
+    response = with_retry_sync(call_llm, prompt, config, model=config.cluster_model, max_retries=1)
     if usage_stats and response.usage:
         usage_stats.record(
             response.model,

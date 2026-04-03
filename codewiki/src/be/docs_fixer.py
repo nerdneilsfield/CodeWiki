@@ -29,6 +29,7 @@ from pathlib import Path
 import mdformat
 
 from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_retry import with_retry_sync
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.postprocess.lint_report import LintError, LintReport
 from codewiki.src.codewiki_config import CodeWikiConfig
@@ -197,7 +198,7 @@ def _llm_repair_math(
         formula=content.strip(),
     )
     try:
-        result = call_llm(prompt, config, temperature=0.0)
+        result = with_retry_sync(call_llm, prompt, config, temperature=0.0, max_retries=1)
         if usage_stats and result.usage:
             usage_stats.record(
                 result.model,
@@ -403,7 +404,7 @@ def _llm_repair(
         diagram=content.strip(),
     )
     try:
-        result = call_llm(prompt, config, temperature=0.0)
+        result = with_retry_sync(call_llm, prompt, config, temperature=0.0, max_retries=1)
         if usage_stats and result.usage:
             usage_stats.record(
                 result.model,

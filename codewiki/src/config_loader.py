@@ -54,6 +54,7 @@ class ResolvedModel:
     model_name: str
     provider: Optional[ProviderConfig] = None
     credential_source: Optional[str] = None
+    stream: bool = False
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -77,36 +78,54 @@ def _load_provider_configs(
     _resolve = _resolve_env_ref if resolve_secrets else (lambda v: v)
     providers: list[ProviderConfig] = []
     for provider_data in provider_entries:
-        providers.append(
-            ProviderConfig.model_validate(
-                {
-                    "name": str(provider_data.get("name", "")),
-                    "type": str(provider_data.get("type", "")),
-                    "api_keys": [_resolve(v) for v in list(provider_data.get("api_keys", []))],
-                    "model_list": [
-                        str(model)
-                        for model in cast(
-                            Iterable[Any],
-                            provider_data.get("model_list", provider_data.get("models", [])),
-                        )
-                    ],
-                    "extra_headers": {
-                        str(key): str(value)
-                        for key, value in cast(
-                            dict[Any, Any], provider_data.get("extra_headers", {})
-                        ).items()
-                    },
-                    "base_url": provider_data.get("base_url"),
-                    "endpoint": provider_data.get("endpoint"),
-                    "api_version": provider_data.get("api_version"),
-                    "deployment": provider_data.get("deployment"),
-                    "anthropic_version": provider_data.get("anthropic_version"),
-                    "project_id": provider_data.get("project_id"),
-                    "location": provider_data.get("location"),
-                    "credentials_path": provider_data.get("credentials_path"),
-                }
-            )
+        raw_model_list = cast(
+            Iterable[Any],
+            provider_data.get("model_list", provider_data.get("models", [])),
         )
+        normalized_model_list: list[str | dict[str, Any]] = []
+        model_stream: dict[str, bool] = {}
+        for item in raw_model_list:
+            if isinstance(item, str):
+                normalized_model_list.append(item)
+                model_stream[item] = False
+                continue
+            if isinstance(item, dict):
+                model_name = str(item.get("name", "")).strip()
+                if not model_name:
+                    continue
+                stream = bool(item.get("stream", False))
+                normalized_model_list.append({"name": model_name, "stream": stream})
+                model_stream[model_name] = stream
+                continue
+            normalized_name = str(item)
+            normalized_model_list.append(normalized_name)
+            model_stream[normalized_name] = False
+
+        provider = ProviderConfig.model_validate(
+            {
+                "name": str(provider_data.get("name", "")),
+                "type": str(provider_data.get("type", "")),
+                "api_keys": [_resolve(v) for v in list(provider_data.get("api_keys", []))],
+                "model_list": normalized_model_list,
+                "extra_headers": {
+                    str(key): str(value)
+                    for key, value in cast(
+                        dict[Any, Any], provider_data.get("extra_headers", {})
+                    ).items()
+                },
+                "base_url": provider_data.get("base_url"),
+                "endpoint": provider_data.get("endpoint"),
+                "api_version": provider_data.get("api_version"),
+                "deployment": provider_data.get("deployment"),
+                "anthropic_version": provider_data.get("anthropic_version"),
+                "project_id": provider_data.get("project_id"),
+                "location": provider_data.get("location"),
+                "credentials_path": provider_data.get("credentials_path"),
+            }
+        )
+        provider._model_stream = model_stream
+        provider.model_list = list(model_stream.keys())
+        providers.append(provider)
     return providers
 
 
@@ -147,6 +166,7 @@ def resolve_model_ref(
         model_name=model_name,
         provider=provider,
         credential_source=credential_source,
+        stream=provider._model_stream.get(model_name, False),
     )
 
 

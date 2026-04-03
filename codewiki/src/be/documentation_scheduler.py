@@ -11,6 +11,7 @@ import openai
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from tqdm import tqdm
 
+from codewiki.src.be.errors import ErrorCategory, LLMError
 from codewiki.src.be.pipeline import ModuleFailure, ModuleSkip, ModuleSummary
 from codewiki.src.be.documentation_tree_utils import stable_hash
 from codewiki.src.utils import doc_id_for_path
@@ -124,6 +125,7 @@ async def run_module_queue(
     gen_state=None,
     state_mgr=None,
     progress_factory: Callable[..., Any] = tqdm,
+    cancel_token=None,
 ) -> ModuleSummary:
     ROOT_KEY = "__root__"
     max_concurrent = config.max_concurrent
@@ -197,6 +199,12 @@ async def run_module_queue(
         return False
 
     def _retry_delay(attempt: int, exc: Exception) -> int:
+        if isinstance(exc, LLMError):
+            if exc.category == ErrorCategory.RESOURCE_EXHAUSTED:
+                return 0
+            if not exc.is_retryable:
+                return 0
+            return retry_delays[attempt - 1]
         is_model_quality = isinstance(exc, UnexpectedModelBehavior) or (
             isinstance(exc, openai.APIStatusError) and exc.status_code == 400
         )
@@ -208,6 +216,9 @@ async def run_module_queue(
         active_tasks = leaf_count
         while active_tasks > 0:
             key, success, retried, error = await done_queue.get()
+            if cancel_token and cancel_token.is_cancelled:
+                logger.info("⏹ Scheduler cancelled — stopping work queue")
+                break
             active_tasks -= 1
             progress.update(1)
             if key != ROOT_KEY:

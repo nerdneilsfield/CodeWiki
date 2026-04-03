@@ -5,6 +5,7 @@ from collections import Counter
 from typing import Any
 
 from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_retry import with_retry_sync
 from codewiki.src.be.llm_usage import LLMUsageStats
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ def _name_clusters_with_llm(
     prompt = _build_naming_prompt(clusters, component_file_map, components)
 
     try:
-        raw = call_llm(prompt, config, model=config.cluster_model)
+        raw = with_retry_sync(call_llm, prompt, config, model=config.cluster_model, max_retries=1)
         if usage_stats and raw.usage:
             usage_stats.record(
                 raw.model,

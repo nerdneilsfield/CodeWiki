@@ -17,11 +17,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from codewiki.src.be.dependency_analyzer.utils.security import assert_safe_path
+from codewiki.src.be.cancellation import CancellationToken
+from codewiki.src.be.errors import LLMError
 from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_retry import with_retry
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.repo_docs_collector import RepoDocsCollector, DocsBundle
 from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.config import internal_file_path
+from codewiki.src.config_loader import resolve_model_ref
 from codewiki.src.utils import file_manager
 
 logger = logging.getLogger(__name__)
@@ -100,6 +104,7 @@ class GuideGenerator:
         module_tree: Dict[str, Any],
         working_dir: str,
         usage_stats: LLMUsageStats | None = None,
+        cancel_token: CancellationToken | None = None,
     ):
         self.config = config
         self.components = components
@@ -109,6 +114,7 @@ class GuideGenerator:
         self.docs_bundle: Optional[DocsBundle] = None
         self.cache = self._load_cache()
         self.usage_stats = usage_stats
+        self.cancel_token = cancel_token
 
     # ── Cache management ──────────────────────────────────────────────
 
@@ -176,6 +182,14 @@ class GuideGenerator:
         assert_safe_path(Path(self.working_dir), Path(out))
         return out
 
+    def _model_supports_stream(self, model_ref: str) -> bool:
+        if not self.config.providers:
+            return False
+        try:
+            return resolve_model_ref(model_ref, self.config.providers).stream
+        except Exception:
+            return False
+
     def _should_regenerate(
         self, guide_type: str, input_files: List[str], extra_salt: str = ""
     ) -> bool:
@@ -221,6 +235,9 @@ class GuideGenerator:
         """
         from codewiki.src.be.utils import count_tokens
 
+        if self.cancel_token:
+            self.cancel_token.check()
+
         prompt_tokens = count_tokens(prompt)
 
         # Pre-select: skip straight to long-context model for oversized prompts
@@ -230,8 +247,17 @@ class GuideGenerator:
                 f"(prompt {prompt_tokens} tokens > threshold {self.config.long_context_threshold})"
             )
             async with self._semaphore:
-                result = await asyncio.to_thread(
-                    call_llm, prompt, self.config, model=self.config.long_context_model
+                result = await with_retry(
+                    asyncio.to_thread,
+                    call_llm,
+                    prompt,
+                    self.config,
+                    model=self.config.long_context_model,
+                    max_retries=2,
+                    cancel_token=self.cancel_token,
+                    on_timeout_use_stream=self._model_supports_stream(
+                        self.config.long_context_model
+                    ),
                 )
                 if self.usage_stats and result.usage:
                     self.usage_stats.record(
@@ -252,8 +278,17 @@ class GuideGenerator:
         for model_name in models:
             try:
                 async with self._semaphore:
-                    result = await asyncio.to_thread(
-                        call_llm, prompt, self.config, model=model_name
+                    if self.cancel_token:
+                        self.cancel_token.check()
+                    result = await with_retry(
+                        asyncio.to_thread,
+                        call_llm,
+                        prompt,
+                        self.config,
+                        model=model_name,
+                        max_retries=2,
+                        cancel_token=self.cancel_token,
+                        on_timeout_use_stream=self._model_supports_stream(model_name),
                     )
                     if self.usage_stats and result.usage:
                         self.usage_stats.record(
@@ -262,6 +297,12 @@ class GuideGenerator:
                             result.usage.output_tokens,
                         )
                     return result.content
+            except LLMError as e:
+                logger.warning(f"Guide LLM call failed with model {model_name}: {e}")
+                last_exc = e
+                if not e.is_retryable:
+                    continue
+                raise
             except Exception as e:
                 logger.warning(f"Guide LLM call failed with model {model_name}: {e}")
                 last_exc = e

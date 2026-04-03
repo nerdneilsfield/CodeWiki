@@ -72,6 +72,12 @@ async def get_job_status(job_id: str):
     return await web_routes.get_job_status(job_id)
 
 
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """API endpoint to request job cancellation."""
+    return await web_routes.cancel_job(job_id)
+
+
 @app.get("/docs/{job_id}")
 async def view_docs(job_id: str):
     """View generated documentation."""

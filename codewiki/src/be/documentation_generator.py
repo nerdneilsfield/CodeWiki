@@ -51,6 +51,7 @@ from codewiki.src.be.documentation_scheduler import (
     run_module_queue as run_module_queue_impl,
 )
 from codewiki.src.be.llm_usage import LLMUsageStats
+from codewiki.src.be.cancellation import CancellationToken
 from codewiki.src.be.pipeline import (
     GenerationResult,
     ModuleSummary,
@@ -62,9 +63,15 @@ from codewiki.src.be.pipeline import (
 class DocumentationGenerator:
     """Main documentation generation orchestrator."""
 
-    def __init__(self, config: CodeWikiConfig, commit_id: str | None = None):
+    def __init__(
+        self,
+        config: CodeWikiConfig,
+        commit_id: str | None = None,
+        cancel_token: CancellationToken | None = None,
+    ):
         self.config = config
         self.commit_id = commit_id
+        self.cancel_token = cancel_token
         self.graph_builder = DependencyGraphBuilder(config)
         self.usage_stats = LLMUsageStats()
         self.agent_orchestrator = AgentOrchestrator(config, usage_stats=self.usage_stats)
@@ -329,6 +336,7 @@ class DocumentationGenerator:
             gen_state=self._gen_state,
             state_mgr=self._state_mgr,
             progress_factory=tqdm,
+            cancel_token=getattr(self, "cancel_token", None),
         )
 
     async def _fill_missing_module_docs(
@@ -401,6 +409,7 @@ class DocumentationGenerator:
             graph_builder=self.graph_builder,
             agent_orchestrator=self.agent_orchestrator,
             generator=self,
+            cancel_token=getattr(self, "cancel_token", None),
             commit_id=self.commit_id or "",
         )
 
@@ -613,6 +622,7 @@ class DocumentationGenerator:
             module_tree=ctx.module_tree,
             working_dir=ctx.working_dir,
             usage_stats=self.usage_stats,
+            cancel_token=ctx.cancel_token,
         )
         await guide_gen.run()
 

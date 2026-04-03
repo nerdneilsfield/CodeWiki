@@ -40,7 +40,7 @@ class JobStatus:
 
     job_id: str
     repo_url: str
-    status: str  # 'queued', 'processing', 'completed', 'failed'
+    status: str  # 'queued', 'processing', 'completed', 'failed', 'cancelled'
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

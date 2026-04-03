@@ -16,6 +16,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from codewiki.src.be.errors import CancellationError, classify_llm_exception
 from codewiki.src.be.llm_usage import LLMCallResult, LLMCallUsage
 from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.config_loader import resolve_model_ref
@@ -236,98 +237,138 @@ def _call_claude(
     )
 
 
+def _call_llm_streaming(
+    client: OpenAI,
+    model: str,
+    prompt: str,
+    temperature: float,
+    config: CodeWikiConfig,
+) -> str:
+    stream = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        max_tokens=config.max_tokens,
+        stream=True,
+    )
+    parts: list[str] = []
+    for chunk in stream:
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            continue
+        delta = getattr(choices[0], "delta", None)
+        text = getattr(delta, "content", None)
+        if text:
+            parts.append(text)
+    return "".join(parts)
+
+
 def call_llm(
     prompt: str,
     config: CodeWikiConfig,
     model: str | None = None,
     temperature: float = 0.0,
+    stream: bool = False,
 ) -> "LLMCallResult":
     from codewiki.src.be.utils import count_tokens
 
-    if model is None:
-        model = config.main_model
+    try:
+        if model is None:
+            model = config.main_model
 
-    prompt_tokens = count_tokens(prompt)
-    if (
-        config.long_context_model
-        and prompt_tokens > config.long_context_threshold
-        and model == config.main_model
-    ):
-        _logger.info(
-            f"Switching model: {model} → {config.long_context_model} "
-            f"(prompt {prompt_tokens} tokens > threshold {config.long_context_threshold})"
-        )
-        model = config.long_context_model
-
-    _logger.debug(
-        f"call_llm: model={model}, prompt_tokens={prompt_tokens}, temperature={temperature}"
-    )
-
-    client, provider_type = _create_client_for_model(config, model)
-    if _has_provider_registry(config):
-        _, resolved_model_name = _get_provider_config(config, model)
-    else:
-        resolved_model_name = model
-
-    t0 = time.time()
-    usage = None
-
-    if provider_type in {"openai_compatible", "azure_openai"}:
-        response = client.chat.completions.create(
-            model=resolved_model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=config.max_tokens,
-        )
-        if not response.choices:
-            raise ValueError(f"LLM returned empty choices (model={resolved_model_name})")
-        content = response.choices[0].message.content
-        if content is None:
-            raise ValueError(
-                f"LLM returned null content (model={resolved_model_name}, "
-                f"finish_reason={response.choices[0].finish_reason!r})"
+        prompt_tokens = count_tokens(prompt)
+        if (
+            config.long_context_model
+            and prompt_tokens > config.long_context_threshold
+            and model == config.main_model
+        ):
+            _logger.info(
+                f"Switching model: {model} → {config.long_context_model} "
+                f"(prompt {prompt_tokens} tokens > threshold {config.long_context_threshold})"
             )
-        if response.usage:
+            model = config.long_context_model
+
+        _logger.debug(
+            f"call_llm: model={model}, prompt_tokens={prompt_tokens}, temperature={temperature}"
+        )
+
+        client, provider_type = _create_client_for_model(config, model)
+        resolved_stream = False
+        if _has_provider_registry(config):
+            resolved = resolve_model_ref(model, config.providers)
+            resolved_model_name = resolved.model_name
+            resolved_stream = resolved.stream
+        else:
+            resolved_model_name = model
+
+        t0 = time.time()
+        usage = None
+
+        if provider_type in {"openai_compatible", "azure_openai"}:
+            if stream and resolved_stream:
+                content = _call_llm_streaming(
+                    client, resolved_model_name, prompt, temperature, config
+                )
+            else:
+                response = client.chat.completions.create(
+                    model=resolved_model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    max_tokens=config.max_tokens,
+                )
+                if not response.choices:
+                    raise ValueError(f"LLM returned empty choices (model={resolved_model_name})")
+                content = response.choices[0].message.content
+                if content is None:
+                    raise ValueError(
+                        f"LLM returned null content (model={resolved_model_name}, "
+                        f"finish_reason={response.choices[0].finish_reason!r})"
+                    )
+                if response.usage:
+                    usage = LLMCallUsage(
+                        input_tokens=response.usage.prompt_tokens or 0,
+                        output_tokens=response.usage.completion_tokens or 0,
+                        source="api",
+                    )
+        elif provider_type == "claude":
+            response = _call_claude(client, resolved_model_name, prompt, temperature, config)
+            parts = []
+            for block in response.content:
+                text = getattr(block, "text", None)
+                if text:
+                    parts.append(text)
+            content = "".join(parts)
+            response_usage = getattr(response, "usage", None)
+            if response_usage is not None:
+                usage = LLMCallUsage(
+                    input_tokens=getattr(response_usage, "input_tokens", 0) or 0,
+                    output_tokens=getattr(response_usage, "output_tokens", 0) or 0,
+                    source="api",
+                )
+        else:
+            raise ValueError(f"unsupported provider type: {provider_type}")
+
+        if not content:
+            raise ValueError(f"LLM returned empty content (model={resolved_model_name})")
+
+        if usage is None:
             usage = LLMCallUsage(
-                input_tokens=response.usage.prompt_tokens or 0,
-                output_tokens=response.usage.completion_tokens or 0,
-                source="api",
+                input_tokens=count_tokens(prompt),
+                output_tokens=count_tokens(content),
+                source="estimated",
             )
-    elif provider_type == "claude":
-        response = _call_claude(client, resolved_model_name, prompt, temperature, config)
-        parts = []
-        for block in response.content:
-            text = getattr(block, "text", None)
-            if text:
-                parts.append(text)
-        content = "".join(parts)
-        response_usage = getattr(response, "usage", None)
-        if response_usage is not None:
-            usage = LLMCallUsage(
-                input_tokens=getattr(response_usage, "input_tokens", 0) or 0,
-                output_tokens=getattr(response_usage, "output_tokens", 0) or 0,
-                source="api",
-            )
-    else:
-        raise ValueError(f"unsupported provider type: {provider_type}")
 
-    if not content:
-        raise ValueError(f"LLM returned empty content (model={resolved_model_name})")
-
-    if usage is None:
-        usage = LLMCallUsage(
-            input_tokens=count_tokens(prompt),
-            output_tokens=count_tokens(content),
-            source="estimated",
+        elapsed = time.time() - t0
+        _logger.debug(
+            "call_llm: model=%s, elapsed=%.1fs, input_tokens=%s, output_tokens=%s, source=%s",
+            model,
+            elapsed,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.source,
         )
-
-    elapsed = time.time() - t0
-    _logger.debug(
-        "call_llm: model=%s, elapsed=%.1fs, input_tokens=%s, output_tokens=%s, source=%s",
-        model,
-        elapsed,
-        usage.input_tokens,
-        usage.output_tokens,
-        usage.source,
-    )
-    return LLMCallResult(content=content, usage=usage, model=resolved_model_name)
+        return LLMCallResult(content=content, usage=usage, model=resolved_model_name)
+    except CancellationError:
+        raise
+    except Exception as exc:
+        raise classify_llm_exception(exc) from exc

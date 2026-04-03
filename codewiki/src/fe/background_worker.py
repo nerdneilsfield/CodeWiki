@@ -19,6 +19,8 @@ from typing import Dict, Optional
 logger = logging.getLogger(__name__)
 
 from codewiki.src.be.documentation_generator import DocumentationGenerator
+from codewiki.src.be.cancellation import CancellationToken
+from codewiki.src.be.errors import CancellationError
 from codewiki.src.config_loader import RuntimeOverrides, load_config
 from codewiki.src.logging_setup import configure_web_logging
 from .models import JobStatus
@@ -44,6 +46,7 @@ class BackgroundWorker:
         self.running = False
         self.processing_queue = Queue(maxsize=WebAppConfig.QUEUE_SIZE)
         self._job_lock = threading.Lock()
+        self._cancel_tokens: dict[str, CancellationToken] = {}
         self.job_status: Dict[str, JobStatus] = {}
         self.jobs_file = Path(WebAppConfig.CACHE_DIR) / "jobs.json"
         self.load_job_statuses()
@@ -93,6 +96,15 @@ class BackgroundWorker:
         """Thread-safe deletion of a job status entry."""
         with self._job_lock:
             self.job_status.pop(job_id, None)
+
+    def cancel_job(self, job_id: str) -> bool:
+        """Request cooperative cancellation for an active job."""
+        with self._job_lock:
+            token = self._cancel_tokens.get(job_id)
+        if token:
+            token.cancel()
+            return True
+        return False
 
     def load_job_statuses(self):
         """Load job statuses from disk."""
@@ -249,6 +261,9 @@ class BackgroundWorker:
             job = self.job_status[job_id]
 
         temp_repo_dir: str | None = None
+        token = CancellationToken()
+        with self._job_lock:
+            self._cancel_tokens[job_id] = token
 
         try:
             with self._job_lock:
@@ -289,7 +304,7 @@ class BackgroundWorker:
                 job.main_model = config.main_model
                 job.progress = "Generating documentation..."
 
-            doc_generator = DocumentationGenerator(config, job.commit_id)
+            doc_generator = DocumentationGenerator(config, job.commit_id, cancel_token=token)
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
@@ -328,6 +343,14 @@ class BackgroundWorker:
 
             logger.info("Job %s: documentation generated successfully", job_id)
 
+        except CancellationError as e:
+            with self._job_lock:
+                job.status = "cancelled"
+                job.completed_at = datetime.now(timezone.utc)
+                job.error_message = str(e)
+                job.progress = "Cancelled by user"
+                job.generation_status = "cancelled"
+            logger.info("Job %s: cancelled", job_id)
         except Exception as e:
             with self._job_lock:
                 job.status = "failed"
@@ -338,6 +361,8 @@ class BackgroundWorker:
             logger.error("Job %s: failed with error: %s", job_id, e)
 
         finally:
+            with self._job_lock:
+                self._cancel_tokens.pop(job_id, None)
             if temp_repo_dir and os.path.exists(temp_repo_dir):
                 try:
                     shutil.rmtree(temp_repo_dir)

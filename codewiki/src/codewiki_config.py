@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, PrivateAttr
 
 
 class ProviderConfig(BaseModel):
     name: str
     type: str = "openai_compatible"
     api_keys: list[Any] = Field(default_factory=list)
-    model_list: list[str] = Field(
+    model_list: list[str | dict[str, Any]] = Field(
         default_factory=list,
         validation_alias=AliasChoices("model_list", "models"),
         serialization_alias="model_list",
@@ -25,6 +25,7 @@ class ProviderConfig(BaseModel):
     project_id: str | None = None
     location: str | None = None
     credentials_path: str | None = None
+    _model_stream: dict[str, bool] = PrivateAttr(default_factory=dict)
 
 
 class CodeWikiConfig(BaseModel):
