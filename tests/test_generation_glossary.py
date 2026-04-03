@@ -124,9 +124,9 @@ class TestBuildGlossary:
         result = build_glossary(index_products)
 
         assert "Nodoc" in result
-        definition = result["Nodoc"]
-        assert "class" in definition
-        assert "src/core.py" in definition
+        entry = result["Nodoc"]
+        assert entry.kind == "class"
+        assert entry.file_path == "src/core.py"
 
     def test_build_glossary_sorted(self):
         """Glossary entries are returned in alphabetical order by term."""
@@ -156,9 +156,9 @@ class TestBuildGlossary:
 
         result = build_glossary(index_products)
 
-        definition = result["Verbose"]
-        assert "Short summary." in definition
-        assert "Extra detail here" not in definition
+        entry = result["Verbose"]
+        assert "Short summary." in entry.definition
+        assert "Extra detail here" not in entry.definition
 
     def test_build_glossary_definition_contains_kind_and_file(self):
         """Definition string includes the symbol kind and file path."""
@@ -174,9 +174,9 @@ class TestBuildGlossary:
 
         result = build_glossary(index_products)
 
-        definition = result["MyFunc"]
-        assert "function" in definition
-        assert "src/utils.py" in definition
+        entry = result["MyFunc"]
+        assert entry.kind == "function"
+        assert entry.file_path == "src/utils.py"
 
     def test_build_glossary_missing_symbol_table_attr(self):
         """Object without symbol_table attribute returns empty dict (defensive)."""

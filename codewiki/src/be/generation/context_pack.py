@@ -5,7 +5,10 @@ All filtering is component-level precise (not file-level).
 """
 
 import logging
-from typing import Any
+import os
+from typing import Any, cast
+
+from codewiki.src.be.generation.glossary import GlossaryEntry, filter_glossary
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +17,7 @@ def build_context_pack(
     module_components: list[str],
     components: dict[str, Any],  # Dict[str, Node]
     index_products: Any | None,  # IndexProducts or None
-    glossary: dict[str, str] | None = None,
+    glossary: dict[str, str | GlossaryEntry] | None = None,
     link_map: dict[str, str] | None = None,
 ) -> dict:
     """Build evidence-rich context for LLM prompt.
@@ -47,6 +50,11 @@ def build_context_pack(
 
     # Build precise set of symbol_ids belonging to this module's components
     module_sym_ids = _build_module_symbol_ids(module_components, components, index_products)
+    module_file_paths = {
+        getattr(node, "relative_path", "").replace("\\", "/")
+        for component_id in module_components
+        if (node := components.get(component_id)) is not None
+    }
 
     # 1. Symbol cards (component-level precise)
     result["symbol_cards"] = _build_symbol_cards(module_sym_ids, index_products)
@@ -61,9 +69,20 @@ def build_context_pack(
 
     # 4. Glossary and link map
     if glossary:
-        result["glossary_context"] = _format_glossary(glossary)
+        if all(isinstance(entry, GlossaryEntry) for entry in glossary.values()):
+            structured_glossary = cast(dict[str, GlossaryEntry], glossary)
+            filtered_glossary = filter_glossary(
+                structured_glossary,
+                relevant_symbol_ids=module_sym_ids,
+                module_file_paths=module_file_paths,
+            )
+            result["glossary_context"] = _format_glossary(
+                cast(dict[str, str | GlossaryEntry], filtered_glossary)
+            )
+        else:
+            result["glossary_context"] = _format_glossary(glossary)
     if link_map:
-        result["link_map_context"] = _format_link_map(link_map)
+        result["link_map_context"] = _format_link_map(_filter_link_map(link_map, module_file_paths))
 
     return result
 
@@ -226,11 +245,16 @@ def _extract_file(symbol_id: str) -> str:
     return ""
 
 
-def _format_glossary(glossary: dict[str, str] | None) -> str:
+def _format_glossary(glossary: dict[str, str | GlossaryEntry] | None) -> str:
     """Format glossary dict into prompt-friendly text."""
     if not glossary:
         return ""
-    lines = [f"- **{term}**: {defn}" for term, defn in sorted(glossary.items())]
+    lines = []
+    for term, defn in sorted(glossary.items()):
+        if isinstance(defn, GlossaryEntry):
+            lines.append(f"- **{term}**: {defn.definition}")
+        else:
+            lines.append(f"- **{term}**: {defn}")
     return "\n".join(lines)
 
 
@@ -240,6 +264,24 @@ def _format_link_map(link_map: dict[str, str] | None) -> str:
         return ""
     lines = [f"- [{path}]({doc_path})" for path, doc_path in sorted(link_map.items())]
     return "\n".join(lines)
+
+
+def _filter_link_map(link_map: dict[str, str], module_file_paths: set[str]) -> dict[str, str]:
+    """Filter link map to entries near the current module's directories.
+
+    Falls back to the full map if no proximity match is found.
+    """
+    if not link_map or not module_file_paths:
+        return link_map
+
+    module_dirs = {os.path.dirname(path).replace("\\", "/") for path in module_file_paths if path}
+    filtered: dict[str, str] = {}
+    for key, doc_path in link_map.items():
+        normalized_doc = doc_path.replace("\\", "/")
+        if any(module_dir and module_dir in normalized_doc for module_dir in module_dirs):
+            filtered[key] = doc_path
+
+    return filtered or link_map
 
 
 def format_context_pack_section(context_pack: dict | None) -> str:

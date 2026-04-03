@@ -3,15 +3,26 @@
 Aligned with v3.md section 3.4 L193-195.
 """
 
+from dataclasses import dataclass
+import os
 import re
 from typing import Any
 
 from codewiki.src.be.index.models import Visibility, ExportStatus
 
 
+@dataclass(frozen=True)
+class GlossaryEntry:
+    term: str
+    definition: str
+    symbol_id: str
+    file_path: str
+    kind: str
+
+
 def build_glossary(
     index_products: Any | None,
-) -> dict[str, str]:
+) -> dict[str, GlossaryEntry]:
     """Build global glossary from public/unknown-visibility symbols.
 
     Includes symbols with Visibility PUBLIC or UNKNOWN and ExportStatus
@@ -30,7 +41,7 @@ def build_glossary(
     _INCLUDED_VISIBILITY = {Visibility.PUBLIC, Visibility.UNKNOWN}
     _INCLUDED_EXPORT = {ExportStatus.EXPORTED, ExportStatus.UNKNOWN}
 
-    glossary: dict[str, str] = {}
+    glossary: dict[str, GlossaryEntry] = {}
     for sym in index_products.symbol_table.all_symbols():
         if sym.visibility not in _INCLUDED_VISIBILITY:
             continue
@@ -46,9 +57,48 @@ def build_glossary(
                 doc_summary += "."
 
         definition = f"{doc_summary} ({sym.kind.value}, {sym.file_path})".strip()
-        glossary[sym.name] = definition
+        glossary[sym.name] = GlossaryEntry(
+            term=sym.name,
+            definition=definition,
+            symbol_id=sym.symbol_id,
+            file_path=sym.file_path,
+            kind=sym.kind.value,
+        )
 
     return dict(sorted(glossary.items()))
+
+
+def filter_glossary(
+    glossary: dict[str, GlossaryEntry],
+    relevant_symbol_ids: set[str],
+    module_file_paths: set[str] | None = None,
+    token_limit: int = 4000,
+) -> dict[str, GlossaryEntry]:
+    """Filter glossary to entries relevant to the current module."""
+    from codewiki.src.be.utils import count_tokens
+
+    priority_a = {k: v for k, v in glossary.items() if v.symbol_id in relevant_symbol_ids}
+
+    priority_b: dict[str, GlossaryEntry] = {}
+    if module_file_paths:
+        module_dirs = {os.path.dirname(path) for path in module_file_paths if path}
+        for key, value in glossary.items():
+            if key in priority_a:
+                continue
+            if os.path.dirname(value.file_path) in module_dirs:
+                priority_b[key] = value
+
+    result: dict[str, GlossaryEntry] = {}
+    token_count = 0
+    for source in (priority_a, priority_b):
+        for key, value in source.items():
+            entry_tokens = count_tokens(f"{value.term}: {value.definition}")
+            if token_count + entry_tokens > token_limit:
+                return result
+            result[key] = value
+            token_count += entry_tokens
+
+    return result
 
 
 def build_link_map(
