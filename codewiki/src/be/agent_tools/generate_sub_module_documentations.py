@@ -347,6 +347,7 @@ async def generate_sub_module_documentation(
                 content_hash=content_hash(os.path.join(deps.absolute_docs_path, assigned_filename)),
                 model=_sub_models_str,
             )
+            await deps.state_mgr.flush()
 
         # remove the sub-module name from the path to current module and the module tree
         deps.path_to_current_module.pop()
