@@ -155,6 +155,7 @@ class GenerationState:
             task = self.tasks.get(doc_id)
             if task and task.is_stale(current_hash):
                 task.status = "stale"
+                task.input_hash = current_hash
                 task.updated_at = _utcnow()
                 logger.info("Task %s marked stale (input changed)", doc_id)
 

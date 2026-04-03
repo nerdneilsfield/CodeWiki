@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from codewiki.src.be.generation_state import DocTask, GenerationState, GenerationStateManager
@@ -65,13 +67,14 @@ def test_build_generation_tasks_includes_child_content_hashes(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_scheduler_marks_completed_parent_stale_when_child_hash_changes(tmp_path):
+async def test_scheduler_marks_completed_parent_stale_when_child_hash_changes(tmp_path, caplog):
     from codewiki.src.be.documentation_scheduler import run_module_queue
     from codewiki.src.utils import doc_id_for_path
 
     tree = _tree()
     state = GenerationState()
     manager = GenerationStateManager(state, str(tmp_path / "state.json"))
+    execution_order: list[str] = []
 
     await manager.bulk_add_tasks(
         [
@@ -109,6 +112,7 @@ async def test_scheduler_marks_completed_parent_stale_when_child_hash_changes(tm
         main_model = "test/main"
 
     async def mock_process(name, components, core_ids, path, working_dir, tree_manager, **kwargs):
+        execution_order.append("/".join(path))
         await kwargs["state_mgr"].mark_completed(
             doc_id_for_path(tree, path),
             content_hash=f"{name}-new-hash",
@@ -125,6 +129,8 @@ async def test_scheduler_marks_completed_parent_stale_when_child_hash_changes(tm
 
         def close(self):
             return None
+
+    caplog.set_level(logging.INFO)
 
     await run_module_queue(
         config=FakeConfig(),
@@ -143,3 +149,5 @@ async def test_scheduler_marks_completed_parent_stale_when_child_hash_changes(tm
     assert parent is not None
     assert parent.status == "completed"
     assert parent.input_hash != "old-parent-hash"
+    assert execution_order == ["Parent/ChildA", "Parent/ChildB", "Parent"]
+    assert "Task module:parent marked stale (input changed)" in caplog.text

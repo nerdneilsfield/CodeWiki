@@ -247,11 +247,6 @@ async def run_module_queue(
                                     ]
                                 )
                                 if new_hash != parent_task.input_hash:
-                                    # Preserve the recomputed hash so the eventual
-                                    # parent completion reflects the content it was
-                                    # re-queued against, even if the downstream
-                                    # process_module path doesn't pass input_hash.
-                                    parent_task.input_hash = new_hash
                                     await state_mgr.mark_stale({parent_doc_id: new_hash})
                         if parent_key == ROOT_KEY:
                             logger.info("🔓 All top-level modules done — enqueueing root overview")
