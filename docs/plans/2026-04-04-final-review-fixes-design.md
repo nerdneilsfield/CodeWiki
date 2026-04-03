@@ -160,7 +160,7 @@
 - `routes.py`：job 创建时间、缓存时间
 - `background_worker.py`：`created_at`、`completed_at`、超时检查
 - `cache_manager.py`：`last_accessed`、`created_at`
-- `models.py`：`JobStatus.created_at` / `completed_at` 默认值
+- `models.py`：统一时间字段语义（`JobStatus.created_at` / `completed_at` 由创建方注入 UTC 时间，dataclass 本身不加默认工厂）
 - 落盘/读盘路径：`fromisoformat()` 解析已有数据时，如果无时区信息，按 UTC 处理（兼容旧数据）
 
 **影响文件:** `codewiki/src/fe/routes.py`, `codewiki/src/fe/background_worker.py`, `codewiki/src/fe/cache_manager.py`, `codewiki/src/fe/models.py`
