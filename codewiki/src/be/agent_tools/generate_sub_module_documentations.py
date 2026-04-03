@@ -305,6 +305,20 @@ async def generate_sub_module_documentation(
                     if isinstance(_msg, ModelResponse) and _msg.model_name:
                         if _msg.model_name not in _sub_models:
                             _sub_models.append(_msg.model_name)
+                            if ctx.deps.usage_stats is not None:
+                                ctx.deps.usage_stats.record(
+                                    _msg.model_name,
+                                    0,
+                                    0,
+                                    count_towards_totals=False,
+                                )
+                _sub_usage = _sub_result.usage()
+                if ctx.deps.usage_stats is not None and _sub_usage:
+                    ctx.deps.usage_stats.add_totals(
+                        _sub_usage.input_tokens or 0,
+                        _sub_usage.output_tokens or 0,
+                        _sub_usage.requests or 0,
+                    )
                 _sub_models_str = ", ".join(_sub_models) if _sub_models else "unknown"
                 if len(_sub_models) > 1:
                     logger.info(

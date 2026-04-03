@@ -288,9 +288,6 @@ class CLIDocumentationGenerator:
             if self.verbose:
                 self.progress_tracker.update_stage(0.9, "Creating repository overview...")
 
-            # Create metadata
-            doc_generator.create_documentation_metadata(working_dir, components, len(leaf_nodes))
-
             # Generate guide documents (Get Started, Beginner's Guide, etc.)
             # Reload module_tree from disk — the whole-repo path writes the real tree there
             from codewiki.src.be.guide_generator import GuideGenerator
@@ -305,8 +302,17 @@ class CLIDocumentationGenerator:
                 components=components,
                 module_tree=saved_tree,
                 working_dir=working_dir,
+                usage_stats=doc_generator.usage_stats,
             )
             await guide_gen.run()
+
+            # Create metadata after guide generation so token usage is complete.
+            doc_generator.create_documentation_metadata(
+                working_dir,
+                components,
+                len(leaf_nodes),
+                usage_stats=doc_generator.usage_stats,
+            )
 
             # Collect generated files
             for file_path in os.listdir(working_dir):

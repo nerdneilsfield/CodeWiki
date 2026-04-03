@@ -171,14 +171,16 @@ def test_run_orchestrates_generation_pipeline_in_order(tmp_path, monkeypatch):
         events.append("generate_module_documentation")
         return working_dir
 
-    def _fake_create_metadata(_working_dir, _components, _num_leaf_nodes):
+    def _fake_create_metadata(_working_dir, _components, _num_leaf_nodes, usage_stats=None):
         assert _working_dir == working_dir
         assert _components == components
         assert _num_leaf_nodes == len(leaf_nodes)
+        assert usage_stats is gen.usage_stats
         events.append("create_metadata")
 
-    def _fake_fix_docs(_working_dir, _config):
+    def _fake_fix_docs(_working_dir, _config, usage_stats=None):
         assert _working_dir == working_dir
+        assert usage_stats is gen.usage_stats
         events.append("fix_docs")
 
     gen.graph_builder = MagicMock()
@@ -205,8 +207,8 @@ def test_run_orchestrates_generation_pipeline_in_order(tmp_path, monkeypatch):
 
     assert events == [
         "generate_module_documentation",
-        "create_metadata",
         "guide_init",
         "guide_run",
         "fix_docs",
+        "create_metadata",
     ]

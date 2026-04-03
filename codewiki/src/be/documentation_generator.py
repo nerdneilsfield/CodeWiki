@@ -50,6 +50,7 @@ from codewiki.src.be.documentation_scheduler import (
     is_leaf_module as is_leaf_module_impl,
     run_module_queue as run_module_queue_impl,
 )
+from codewiki.src.be.llm_usage import LLMUsageStats
 
 
 class DocumentationGenerator:
@@ -59,7 +60,8 @@ class DocumentationGenerator:
         self.config = config
         self.commit_id = commit_id
         self.graph_builder = DependencyGraphBuilder(config)
-        self.agent_orchestrator = AgentOrchestrator(config)
+        self.usage_stats = LLMUsageStats()
+        self.agent_orchestrator = AgentOrchestrator(config, usage_stats=self.usage_stats)
         self._gen_state: Optional[GenerationState] = None
         self._state_mgr: Optional[GenerationStateManager] = None
 
@@ -102,7 +104,11 @@ class DocumentationGenerator:
         return None
 
     def create_documentation_metadata(
-        self, working_dir: str, components: Dict[str, Any], num_leaf_nodes: int
+        self,
+        working_dir: str,
+        components: Dict[str, Any],
+        num_leaf_nodes: int,
+        usage_stats: LLMUsageStats | None = None,
     ):
         """Create a metadata file with documentation generation information."""
         from datetime import datetime
@@ -124,6 +130,8 @@ class DocumentationGenerator:
             },
             "files_generated": ["overview.md", "module_tree.json", "first_module_tree.json"],
         }
+        if usage_stats is not None:
+            metadata["statistics"]["token_usage"] = usage_stats.to_dict()
 
         # Add generated markdown files to the metadata
         try:
@@ -424,6 +432,7 @@ class DocumentationGenerator:
                     components,
                     self.config,
                     index_products=self.index_products,
+                    usage_stats=self.usage_stats,
                 )
                 if module_tree:
                     freeze_doc_filenames(module_tree)
@@ -458,9 +467,6 @@ class DocumentationGenerator:
             # This processes leaf modules first, then parent modules
             working_dir = await self.generate_module_documentation(components, leaf_nodes)
 
-            # Create documentation metadata
-            self.create_documentation_metadata(working_dir, components, len(leaf_nodes))
-
             # Generate guide documents (Get Started, Beginner's Guide, etc.)
             logger.info("📖 Starting guide document generation")
             guide_gen = GuideGenerator(
@@ -468,13 +474,22 @@ class DocumentationGenerator:
                 components=components,
                 module_tree=module_tree,
                 working_dir=working_dir,
+                usage_stats=self.usage_stats,
             )
             await guide_gen.run()
 
             # Phase: post-processing fix (markdown + math + mermaid)
             from codewiki.src.be.docs_fixer import fix_docs
 
-            fix_docs(working_dir, self.config)
+            fix_docs(working_dir, self.config, usage_stats=self.usage_stats)
+
+            # Create documentation metadata after all usage-producing steps.
+            self.create_documentation_metadata(
+                working_dir,
+                components,
+                len(leaf_nodes),
+                usage_stats=self.usage_stats,
+            )
 
             logger.debug(
                 f"Documentation generation completed successfully using dynamic programming!"

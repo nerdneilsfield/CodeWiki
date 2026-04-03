@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from codewiki.src.be.dependency_analyzer.utils.security import assert_safe_path
 from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.repo_docs_collector import RepoDocsCollector, DocsBundle
 from codewiki.src.config import Config, internal_file_path
 from codewiki.src.utils import file_manager
@@ -97,6 +98,7 @@ class GuideGenerator:
         components: Dict[str, Any],
         module_tree: Dict[str, Any],
         working_dir: str,
+        usage_stats: LLMUsageStats | None = None,
     ):
         self.config = config
         self.components = components
@@ -105,6 +107,7 @@ class GuideGenerator:
         self.collector = RepoDocsCollector()
         self.docs_bundle: Optional[DocsBundle] = None
         self.cache = self._load_cache()
+        self.usage_stats = usage_stats
 
     # ── Cache management ──────────────────────────────────────────────
 
@@ -208,12 +211,12 @@ class GuideGenerator:
     # ── LLM calling with full resilience chain ─────────────────────────
 
     async def _call_llm_with_fallback(self, prompt: str) -> str:
-        """Call LLM with: long-context pre-select → retry → fallback chain.
+        """Call LLM with: long-context pre-select → model fallback chain.
 
         Mirrors the agent framework's resilience pattern:
         1. Pre-select long-context model when prompt exceeds threshold
         2. Otherwise try models in order: main → fallback(s) → long_context
-        3. Each call_llm() has its own 4-retry loop (10/30/90s backoff)
+        3. Each model is tried once; retry ownership lives outside call_llm()
         """
         from codewiki.src.be.utils import count_tokens
 
@@ -226,9 +229,16 @@ class GuideGenerator:
                 f"(prompt {prompt_tokens} tokens > threshold {self.config.long_context_threshold})"
             )
             async with self._semaphore:
-                return await asyncio.to_thread(
+                result = await asyncio.to_thread(
                     call_llm, prompt, self.config, model=self.config.long_context_model
                 )
+                if self.usage_stats and result.usage:
+                    self.usage_stats.record(
+                        result.model,
+                        result.usage.input_tokens,
+                        result.usage.output_tokens,
+                    )
+                return result.content
 
         # Build fallback chain: main → fallback(s) → long_context (last resort)
         models = [self.config.main_model]
@@ -241,7 +251,16 @@ class GuideGenerator:
         for model_name in models:
             try:
                 async with self._semaphore:
-                    return await asyncio.to_thread(call_llm, prompt, self.config, model=model_name)
+                    result = await asyncio.to_thread(
+                        call_llm, prompt, self.config, model=model_name
+                    )
+                    if self.usage_stats and result.usage:
+                        self.usage_stats.record(
+                            result.model,
+                            result.usage.input_tokens,
+                            result.usage.output_tokens,
+                        )
+                    return result.content
             except Exception as e:
                 logger.warning(f"Guide LLM call failed with model {model_name}: {e}")
                 last_exc = e

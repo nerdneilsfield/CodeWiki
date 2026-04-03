@@ -40,6 +40,16 @@ def _make_node(cid: str, relative_path: str, depends_on=None) -> Node:
     )
 
 
+def _llm_result(content: str):
+    from codewiki.src.be.llm_usage import LLMCallResult, LLMCallUsage
+
+    return LLMCallResult(
+        content=content,
+        usage=LLMCallUsage(input_tokens=10, output_tokens=5, source="api"),
+        model="test-model",
+    )
+
+
 def _make_index_products(edges=None):
     """Create a minimal mock IndexProducts with an edges list."""
     ip = MagicMock()
@@ -521,7 +531,7 @@ class TestLLMNamingHappyPath:
         config = _make_config_with_cluster_model()
         with patch(
             "codewiki.src.be.clustering.naming.call_llm",
-            return_value=_VALID_LLM_RESPONSE,
+            return_value=_llm_result(_VALID_LLM_RESPONSE),
         ):
             result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
 
@@ -541,7 +551,7 @@ class TestLLMNamingFallbackOnInvalidJson:
         config = _make_config_with_cluster_model()
         with patch(
             "codewiki.src.be.clustering.naming.call_llm",
-            return_value="this is not json at all %%%",
+            return_value=_llm_result("this is not json at all %%%"),
         ):
             result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
 
@@ -589,7 +599,7 @@ class TestLLMNamingFallbackOnWrongCount:
         config = _make_config_with_cluster_model()
         with patch(
             "codewiki.src.be.clustering.naming.call_llm",
-            return_value=short_response,
+            return_value=_llm_result(short_response),
         ):
             result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
 
@@ -797,7 +807,10 @@ class TestLLMNamingValidation:
         file_map = {"auth/a.py::A": "auth/a.py"}
         config = type("C", (), {"cluster_model": "test-model"})()
         response = json.dumps([{"cluster_idx": 0, "title": "", "description": "desc"}])
-        with patch("codewiki.src.be.clustering.naming.call_llm", return_value=response):
+        with patch(
+            "codewiki.src.be.clustering.naming.call_llm",
+            return_value=_llm_result(response),
+        ):
             result = name_clusters(clusters, file_map, config)
         # Empty title → LLM rejected → heuristic used
         assert result[0]["title"] != ""
@@ -809,7 +822,10 @@ class TestLLMNamingValidation:
         file_map = {"auth/a.py::A": "auth/a.py"}
         config = type("C", (), {"cluster_model": "test-model"})()
         response = json.dumps([{"cluster_idx": 0, "title": "Auth", "description": ""}])
-        with patch("codewiki.src.be.clustering.naming.call_llm", return_value=response):
+        with patch(
+            "codewiki.src.be.clustering.naming.call_llm",
+            return_value=_llm_result(response),
+        ):
             result = name_clusters(clusters, file_map, config)
         # Empty description → LLM rejected → heuristic used
         assert result[0]["description"] != ""

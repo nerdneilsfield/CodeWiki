@@ -5,6 +5,7 @@ from collections import Counter
 from typing import Any
 
 from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_usage import LLMUsageStats
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,7 @@ def _name_clusters_with_llm(
     component_file_map: dict[str, str],
     config: Any,
     components: dict[str, Any] | None = None,
+    usage_stats: LLMUsageStats | None = None,
 ) -> list[dict] | None:
     """Call LLM for cluster naming. Returns None on failure.
 
@@ -106,12 +108,18 @@ def _name_clusters_with_llm(
 
     try:
         raw = call_llm(prompt, config, model=config.cluster_model)
+        if usage_stats and raw.usage:
+            usage_stats.record(
+                raw.model,
+                raw.usage.input_tokens,
+                raw.usage.output_tokens,
+            )
     except Exception as e:
         logger.warning("call_llm raised during cluster naming: %s", e)
         return None
 
     try:
-        parsed = json_repair.loads(raw)
+        parsed = json_repair.loads(raw.content)
     except Exception as e:
         logger.warning("JSON parse failed for cluster naming response: %s", e)
         return None
@@ -159,6 +167,7 @@ def name_clusters(
     component_file_map: dict[str, str],
     config: Any = None,
     components: dict[str, Any] | None = None,
+    usage_stats: LLMUsageStats | None = None,
 ) -> list[dict]:
     """Name clusters using LLM with heuristic fallback.
 
@@ -177,7 +186,9 @@ def name_clusters(
     # Try LLM naming when config and cluster_model are available
     if config is not None and getattr(config, "cluster_model", None):
         try:
-            result = _name_clusters_with_llm(clusters, component_file_map, config, components)
+            result = _name_clusters_with_llm(
+                clusters, component_file_map, config, components, usage_stats
+            )
             if result is not None and len(result) == len(clusters):
                 return result
         except Exception as e:

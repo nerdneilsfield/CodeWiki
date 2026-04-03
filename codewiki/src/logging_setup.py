@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import cast
 
 import structlog
 
@@ -16,6 +17,32 @@ _THIRD_PARTY_LOGGERS = [
     "fastapi",
     "watchfiles",
 ]
+
+
+class _CurrentStderrProxy:
+    """Resolve stderr at emit time so pytest stream capture doesn't go stale."""
+
+    def _target(self):
+        stream = sys.stderr
+        if stream is None or getattr(stream, "closed", False):
+            return sys.__stderr__
+        return stream
+
+    def write(self, data):
+        return self._target().write(data)
+
+    def flush(self):
+        return self._target().flush()
+
+    def isatty(self):
+        return bool(getattr(self._target(), "isatty", lambda: False)())
+
+    @property
+    def encoding(self):
+        return getattr(self._target(), "encoding", "utf-8")
+
+    def fileno(self):
+        return self._target().fileno()
 
 
 def _shared_processors():
@@ -53,13 +80,14 @@ def _configure_root_handler(*, renderer, level: int, stream) -> None:
 
     for handler in root.handlers:
         if getattr(handler, "_codewiki_structlog", False):
-            handler.setLevel(level)
-            handler.setFormatter(formatter)
-            handler.stream = stream
+            stream_handler = cast(logging.StreamHandler, handler)
+            stream_handler.setLevel(level)
+            stream_handler.setFormatter(formatter)
+            stream_handler.stream = stream
             break
     else:
         handler = logging.StreamHandler(stream)
-        handler._codewiki_structlog = True  # type: ignore[attr-defined]
+        setattr(handler, "_codewiki_structlog", True)
         handler.setLevel(level)
         handler.setFormatter(formatter)
         root.addHandler(handler)
@@ -70,7 +98,7 @@ def configure_cli_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     renderer = structlog.dev.ConsoleRenderer(colors=True)
     _configure_structlog(renderer=renderer)
-    _configure_root_handler(renderer=renderer, level=level, stream=sys.stderr)
+    _configure_root_handler(renderer=renderer, level=level, stream=_CurrentStderrProxy())
 
     codewiki_logger = logging.getLogger("codewiki")
     codewiki_logger.setLevel(level)
@@ -84,7 +112,11 @@ def configure_web_logging() -> None:
     """Configure structlog for web/worker usage with JSON output."""
     renderer = structlog.processors.JSONRenderer()
     _configure_structlog(renderer=renderer)
-    _configure_root_handler(renderer=renderer, level=logging.INFO, stream=sys.stderr)
+    _configure_root_handler(
+        renderer=renderer,
+        level=logging.INFO,
+        stream=_CurrentStderrProxy(),
+    )
 
     codewiki_logger = logging.getLogger("codewiki")
     codewiki_logger.setLevel(logging.INFO)

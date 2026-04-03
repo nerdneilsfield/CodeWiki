@@ -12,6 +12,7 @@ from networkx.algorithms.community import louvain_communities
 
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.utils import count_tokens
 from codewiki.src.config import Config
 from codewiki.src.be.prompt_template import format_cluster_prompt
@@ -409,6 +410,7 @@ def cluster_modules(
     current_module_path: Optional[List[str]] = None,
     _token_threshold: Optional[int] = None,
     index_products=None,  # NEW: when provided, use v2 pipeline
+    usage_stats: LLMUsageStats | None = None,
 ) -> Dict[str, Any]:
     """
     Cluster the potential core components into modules.
@@ -447,6 +449,7 @@ def cluster_modules(
                 current_module_name,
                 current_module_path,
                 _token_threshold,
+                usage_stats=usage_stats,
             )
             if result:  # v2 produced valid output
                 return result
@@ -509,6 +512,12 @@ def cluster_modules(
         graph_clusters_hint=graph_hint,
     )
     response = call_llm(prompt, config, model=config.cluster_model)
+    if usage_stats and response.usage:
+        usage_stats.record(
+            response.model,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+        )
 
     module_tree = None
 
@@ -529,21 +538,23 @@ def cluster_modules(
                 return None
             return parsed
         except Exception as e:
-            logger.error(f"Failed to parse LLM response: {e}. Response: {response[:200]}...")
+            logger.error(
+                f"Failed to parse LLM response: {e}. Response: {response.content[:200]}..."
+            )
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
-    if "<GROUPED_COMPONENTS>" in response and "</GROUPED_COMPONENTS>" in response:
-        response_content = response.split("<GROUPED_COMPONENTS>")[1].split("</GROUPED_COMPONENTS>")[
-            0
-        ]
+    if "<GROUPED_COMPONENTS>" in response.content and "</GROUPED_COMPONENTS>" in response.content:
+        response_content = response.content.split("<GROUPED_COMPONENTS>")[1].split(
+            "</GROUPED_COMPONENTS>"
+        )[0]
         module_tree = _try_parse(response_content)
     else:
         # Accept bare JSON/dict responses as a fallback
         logger.warning(
             "LLM response missing <GROUPED_COMPONENTS> tags — attempting to parse raw response"
         )
-        module_tree = _try_parse(response)
+        module_tree = _try_parse(response.content)
 
     # ── Step 3: Fallback to graph clusters if LLM failed ──────────────────
     if not module_tree and graph_clusters:
@@ -618,6 +629,7 @@ def cluster_modules(
             module_name,
             parent_path,
             _token_threshold=config.max_token_per_leaf_module,
+            usage_stats=usage_stats,
         )
 
     max_workers = max(1, config.max_concurrent)

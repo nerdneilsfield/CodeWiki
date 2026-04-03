@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Optional, Set, TYPE_CHECKING
 from codewiki.src.be.dependency_analyzer.models.core import Node
+from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.config import Config
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ class CodeWikiDeps:
     assigned_doc_filename: str = ""
     gen_state: Any = None
     state_mgr: Any = None
+    usage_stats: Optional[LLMUsageStats] = None
     # Tracks sub-module names already dispatched in this agent run to prevent
     # the LLM from processing the same sub-module twice via repeated tool calls.
     _dispatched_sub_modules: Set[str] = field(default_factory=set)

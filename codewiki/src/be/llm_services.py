@@ -17,6 +17,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from codewiki.src.be.llm_usage import LLMCallResult, LLMCallUsage
 from codewiki.src.config import Config
 from codewiki.src.config_loader import resolve_model_ref
 
@@ -305,7 +306,7 @@ def call_llm(
     config: Config,
     model: str | None = None,
     temperature: float = 0.0,
-) -> str:
+) -> "LLMCallResult":
     from codewiki.src.be.utils import count_tokens
 
     if model is None:
@@ -333,83 +334,52 @@ def call_llm(
     else:
         resolved_model_name = model
 
-    last_exc: Exception | None = None
-    use_streaming = False
     t0 = time.time()
-    for attempt, delay in enumerate([0] + _RETRY_DELAYS):
-        if delay:
-            retry_after = _parse_retry_after(last_exc) if last_exc is not None else None
-            wait = retry_after if retry_after is not None else delay
-            msg = (
-                f"⚠  LLM retry {attempt}/{len(_RETRY_DELAYS)}"
-                f" — model={model}"
-                f" — waiting {wait}s"
-                f" — reason: {last_exc}" + (" [streaming]" if use_streaming else "")
-            )
-            _logger.warning(msg)
-            try:
-                from tqdm import tqdm as _tqdm
+    usage = None
 
-                _tqdm.write(msg, file=sys.stderr)
-            except Exception:
-                print(msg, file=sys.stderr, flush=True)
-            if retry_after is not None:
-                _logger.info(f"call_llm: honouring Retry-After: {retry_after}s")
-                time.sleep(retry_after)
-            else:
-                _sleep_with_jitter(delay)
-            start_msg = f"↻  LLM retry {attempt}/{len(_RETRY_DELAYS)} starting — model={model}"
-            _logger.info(start_msg)
-            try:
-                from tqdm import tqdm as _tqdm
-
-                _tqdm.write(start_msg, file=sys.stderr)
-            except Exception:
-                print(start_msg, file=sys.stderr, flush=True)
-        try:
-            if provider_type in {"openai_compatible", "azure_openai"}:
-                if use_streaming:
-                    content = _call_llm_streaming(
-                        client, resolved_model_name, prompt, temperature, config
-                    )
-                else:
-                    response = client.chat.completions.create(
-                        model=resolved_model_name,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=temperature,
-                        max_tokens=config.max_tokens,
-                    )
-                    if not response.choices:
-                        raise ValueError(
-                            f"LLM returned empty choices (model={resolved_model_name})"
-                        )
-                    content = response.choices[0].message.content
-                    if content is None:
-                        raise ValueError(
-                            f"LLM returned null content (model={resolved_model_name}, "
-                            f"finish_reason={response.choices[0].finish_reason!r})"
-                        )
-            elif provider_type == "claude":
-                content = _call_claude(client, resolved_model_name, prompt, temperature, config)
-            else:
-                raise ValueError(f"unsupported provider type: {provider_type}")
-            if not content:
-                raise ValueError(f"LLM returned empty content (model={resolved_model_name})")
-            elapsed = time.time() - t0
-            _logger.debug(
-                f"call_llm [model={model}]: success in {elapsed:.1f}s, "
-                f"response length={len(content)}" + (" [streaming]" if use_streaming else "")
+    if provider_type in {"openai_compatible", "azure_openai"}:
+        response = client.chat.completions.create(
+            model=resolved_model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=config.max_tokens,
+        )
+        if not response.choices:
+            raise ValueError(f"LLM returned empty choices (model={resolved_model_name})")
+        content = response.choices[0].message.content
+        if content is None:
+            raise ValueError(
+                f"LLM returned null content (model={resolved_model_name}, "
+                f"finish_reason={response.choices[0].finish_reason!r})"
             )
-            return content
-        except Exception as exc:
-            if isinstance(exc, ValueError) and str(exc).startswith("LLM returned "):
-                raise
-            last_exc = exc
-            if provider_type in {"openai_compatible", "azure_openai"} and _is_cf_timeout(exc):
-                use_streaming = True
-                _logger.info(
-                    f"call_llm [model={model}]: connection timeout detected — switching to streaming for next retry"
-                )
-    if last_exc is not None:
-        raise last_exc
-    raise RuntimeError("LLM call retry loop exited without producing a response or exception")
+        if response.usage:
+            usage = LLMCallUsage(
+                input_tokens=response.usage.prompt_tokens or 0,
+                output_tokens=response.usage.completion_tokens or 0,
+                source="api",
+            )
+    elif provider_type == "claude":
+        content = _call_claude(client, resolved_model_name, prompt, temperature, config)
+    else:
+        raise ValueError(f"unsupported provider type: {provider_type}")
+
+    if not content:
+        raise ValueError(f"LLM returned empty content (model={resolved_model_name})")
+
+    if usage is None:
+        usage = LLMCallUsage(
+            input_tokens=count_tokens(prompt),
+            output_tokens=count_tokens(content),
+            source="estimated",
+        )
+
+    elapsed = time.time() - t0
+    _logger.debug(
+        "call_llm: model=%s, elapsed=%.1fs, input_tokens=%s, output_tokens=%s, source=%s",
+        model,
+        elapsed,
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.source,
+    )
+    return LLMCallResult(content=content, usage=usage, model=resolved_model_name)

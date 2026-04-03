@@ -1,3 +1,5 @@
+import contextlib
+import io
 import logging
 
 
@@ -27,3 +29,16 @@ class TestLoggingSetup:
         from codewiki.src.logging_setup import configure_web_logging
 
         configure_web_logging()
+
+    def test_configure_cli_logging_uses_current_stderr(self):
+        import structlog
+
+        from codewiki.src.logging_setup import configure_cli_logging
+
+        configure_cli_logging(verbose=False)
+
+        current_stderr = io.StringIO()
+        with contextlib.redirect_stderr(current_stderr):
+            structlog.get_logger("codewiki.test").info("hello", key="value")
+
+        assert "hello" in current_stderr.getvalue()

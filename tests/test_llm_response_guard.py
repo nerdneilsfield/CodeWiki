@@ -54,7 +54,7 @@ class TestLlmResponseGuard:
             with pytest.raises(ValueError, match="null content"):
                 call_llm("test prompt", config)
 
-    def test_empty_streaming_content_raises_value_error(self):
+    def test_openai_failure_propagates_without_streaming_fallback(self):
         from codewiki.src.be.llm_services import call_llm
 
         config = _make_config()
@@ -66,11 +66,11 @@ class TestLlmResponseGuard:
                 "codewiki.src.be.llm_services._create_client_for_model",
                 return_value=(mock_client, "openai_compatible"),
             ),
-            patch("codewiki.src.be.llm_services._call_llm_streaming", return_value=""),
-            patch("codewiki.src.be.llm_services._sleep_with_jitter", return_value=None),
+            patch("codewiki.src.be.llm_services._call_llm_streaming") as mock_streaming,
         ):
-            with pytest.raises(ValueError, match="empty content"):
+            with pytest.raises(Exception, match="cloudflare timeout"):
                 call_llm("test prompt", config)
+        mock_streaming.assert_not_called()
 
     def test_empty_claude_content_raises_value_error(self):
         from codewiki.src.be.llm_services import call_llm

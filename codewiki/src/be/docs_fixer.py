@@ -29,6 +29,7 @@ from pathlib import Path
 import mdformat
 
 from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.postprocess.lint_report import LintError, LintReport
 from codewiki.src.config import Config
 
@@ -184,15 +185,23 @@ Return ONLY the corrected formula content (no $, $$, \\[, \\( delimiters, no com
 """
 
 
-def _llm_repair_math(content: str, issues: list[str], config: Config) -> str:
+def _llm_repair_math(
+    content: str, issues: list[str], config: Config, usage_stats: LLMUsageStats | None = None
+) -> str:
     """Ask the LLM to fix a broken LaTeX formula. Returns the fixed content."""
     prompt = _MATH_REPAIR_USER.format(
         issues="\n".join(f"- {i}" for i in issues),
         formula=content.strip(),
     )
     try:
-        fixed = call_llm(prompt, config, temperature=0.0)
-        return fixed.strip()
+        result = call_llm(prompt, config, temperature=0.0)
+        if usage_stats and result.usage:
+            usage_stats.record(
+                result.model,
+                result.usage.input_tokens,
+                result.usage.output_tokens,
+            )
+        return result.content.strip()
     except Exception as exc:
         logger.warning(f"Math LLM repair failed: {exc}")
         return content
@@ -202,6 +211,7 @@ def _fix_math_in_text(
     text: str,
     config: Config,
     stats: FixStats,
+    usage_stats: LLMUsageStats | None = None,
     report: LintReport | None = None,
     filename: str = "",
 ) -> str:
@@ -241,7 +251,7 @@ def _fix_math_in_text(
         if not issues:
             return m.group(0)
         stats.math_invalid += 1
-        fixed = _llm_repair_math(content, issues, config)
+        fixed = _llm_repair_math(content, issues, config, usage_stats)
         if fixed == content.strip():
             stats.math_failed += 1
             error_msg = "; ".join(issues)
@@ -378,14 +388,23 @@ Return ONLY the corrected diagram content (no ``` fences, no commentary).
 """
 
 
-def _llm_repair(content: str, issues: list[str], config: Config) -> str:
+def _llm_repair(
+    content: str, issues: list[str], config: Config, usage_stats: LLMUsageStats | None = None
+) -> str:
     """Ask the LLM to fix a broken Mermaid diagram. Returns the fixed content."""
     prompt = _REPAIR_USER.format(
         issues="\n".join(f"- {i}" for i in issues),
         diagram=content.strip(),
     )
     try:
-        fixed = call_llm(prompt, config, temperature=0.0)
+        result = call_llm(prompt, config, temperature=0.0)
+        if usage_stats and result.usage:
+            usage_stats.record(
+                result.model,
+                result.usage.input_tokens,
+                result.usage.output_tokens,
+            )
+        fixed = result.content
         # Strip any fences the LLM might have wrapped around its answer
         fixed = re.sub(r"^```\s*mermaid\s*\n?", "", fixed.strip(), flags=re.IGNORECASE)
         fixed = re.sub(r"\n?```\s*$", "", fixed)
@@ -399,6 +418,7 @@ def _fix_mermaid_in_text(
     text: str,
     config: Config,
     stats: FixStats,
+    usage_stats: LLMUsageStats | None = None,
     report: LintReport | None = None,
     filename: str = "",
 ) -> str:
@@ -437,7 +457,7 @@ def _fix_mermaid_in_text(
         approx_line = text[:start].count("\n") + 1
         logger.info(f"    \U0001f527 Mermaid line ~{approx_line} \u2014 {'; '.join(issues)}")
 
-        fixed = _llm_repair(content, issues, config)
+        fixed = _llm_repair(content, issues, config, usage_stats)
 
         # Verify the fix with the same validator used for detection
         repair_failed = False
@@ -510,13 +530,17 @@ def _fix_mermaid_in_text(
 # ── Backward-compat wrapper ─────────────────────────────────────────────────────
 
 
-def fix_mermaid_in_file(path: Path, config: Config, stats: FixStats) -> bool:
+def fix_mermaid_in_file(
+    path: Path, config: Config, stats: FixStats, usage_stats: LLMUsageStats | None = None
+) -> bool:
     """Scan one markdown file and repair broken Mermaid diagrams in-place.
 
     Returns True if the file was modified.
     """
     text = path.read_text(encoding="utf-8")
-    new_text = _fix_mermaid_in_text(text, config, stats, report=None, filename=path.name)
+    new_text = _fix_mermaid_in_text(
+        text, config, stats, usage_stats, report=None, filename=path.name
+    )
     if new_text == text:
         return False
     path.write_text(new_text, encoding="utf-8")
@@ -526,7 +550,9 @@ def fix_mermaid_in_file(path: Path, config: Config, stats: FixStats) -> bool:
 # ── Directory-level entry point ─────────────────────────────────────────────────
 
 
-def fix_docs(working_dir: str, config: Config) -> FixStats:
+def fix_docs(
+    working_dir: str, config: Config, usage_stats: LLMUsageStats | None = None
+) -> FixStats:
     """Apply all post-processing fix phases to every .md file in *working_dir*.
 
     Phase 1 — Markdown formatting (mdformat, mechanical) — run in parallel
@@ -606,10 +632,14 @@ def fix_docs(working_dir: str, config: Config) -> FixStats:
                 continue  # skip Phases 2+3
 
             # Phase 2 — Math repair
-            text = _fix_math_in_text(text, config, stats, report=report, filename=md_file.name)
+            text = _fix_math_in_text(
+                text, config, stats, usage_stats, report=report, filename=md_file.name
+            )
 
             # Phase 3 — Mermaid repair
-            text = _fix_mermaid_in_text(text, config, stats, report=report, filename=md_file.name)
+            text = _fix_mermaid_in_text(
+                text, config, stats, usage_stats, report=report, filename=md_file.name
+            )
 
             if text != original_raw:
                 md_file.write_text(text, encoding="utf-8")

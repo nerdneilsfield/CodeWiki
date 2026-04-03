@@ -232,6 +232,8 @@ async def generate_parent_module_docs(
             parent_docs = await llm_callable(prompt, config)
         else:
             parent_docs = await asyncio.to_thread(llm_callable, prompt, config)
+        if hasattr(parent_docs, "content"):
+            parent_docs = parent_docs.content
 
         if "<OVERVIEW>" in parent_docs and "</OVERVIEW>" in parent_docs:
             parent_content = parent_docs.split("<OVERVIEW>")[1].split("</OVERVIEW>")[0].strip()
