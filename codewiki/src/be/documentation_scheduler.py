@@ -11,6 +11,7 @@ import openai
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from tqdm import tqdm
 
+from codewiki.src.be.pipeline import ModuleFailure, ModuleSkip, ModuleSummary
 from codewiki.src.be.documentation_tree_utils import stable_hash
 from codewiki.src.utils import doc_id_for_path
 
@@ -123,9 +124,10 @@ async def run_module_queue(
     gen_state=None,
     state_mgr=None,
     progress_factory: Callable[..., Any] = tqdm,
-) -> None:
+) -> ModuleSummary:
     ROOT_KEY = "__root__"
     max_concurrent = config.max_concurrent
+    summary = ModuleSummary()
 
     all_tasks: Dict[str, tuple] = {}
     pending_count: Dict[str, int] = {}
@@ -145,6 +147,7 @@ async def run_module_queue(
                 _walk(children, current_path, parent_key=key)
 
     _walk(graph_tree, [])
+    summary.total = len(all_tasks)
 
     top_level_keys = list(graph_tree.keys())
     if include_root:
@@ -153,7 +156,7 @@ async def run_module_queue(
             child_to_parent[name] = ROOT_KEY
 
     work_queue: asyncio.Queue[str] = asyncio.Queue()
-    done_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
+    done_queue: asyncio.Queue[tuple[str, bool, bool, str | None]] = asyncio.Queue()
 
     leaf_count = 0
     for key, (_, _, _, is_leaf) in all_tasks.items():
@@ -204,9 +207,23 @@ async def run_module_queue(
     async def _coordinator() -> None:
         active_tasks = leaf_count
         while active_tasks > 0:
-            key, success = await done_queue.get()
+            key, success, retried, error = await done_queue.get()
             active_tasks -= 1
             progress.update(1)
+            if key != ROOT_KEY:
+                doc_id = doc_id_for_path(graph_tree, all_tasks[key][0])
+                if success:
+                    summary.completed.append(doc_id)
+                    if retried:
+                        summary.retried_then_succeeded.append(doc_id)
+                else:
+                    summary.failed.append(
+                        ModuleFailure(
+                            doc_id=doc_id,
+                            error=error or "unknown error",
+                            retried=retried,
+                        )
+                    )
             if success:
                 parent_key = child_to_parent.get(key)
                 if parent_key is not None:
@@ -277,6 +294,15 @@ async def run_module_queue(
             unresolved_labels = [
                 "overview" if key == ROOT_KEY else all_tasks[key][1] for key in unresolved_keys
             ]
+            for key in unresolved_keys:
+                if key == ROOT_KEY:
+                    continue
+                summary.skipped.append(
+                    ModuleSkip(
+                        doc_id=doc_id_for_path(graph_tree, all_tasks[key][0]),
+                        reason="dependency failed",
+                    )
+                )
             progress.update(len(unresolved_keys))
             logger.warning(
                 "Skipping %s task(s) because dependencies failed: %s",
@@ -292,6 +318,8 @@ async def run_module_queue(
                 return
             label = "overview" if key == ROOT_KEY else all_tasks[key][1]
             success = False
+            retried = False
+            error_message = None
             try:
                 progress.set_postfix_str(label, refresh=False)
                 task_t0 = asyncio.get_event_loop().time()
@@ -299,6 +327,7 @@ async def run_module_queue(
                 last_exc = None
                 for attempt in range(len(retry_delays) + 1):
                     if attempt > 0:
+                        retried = True
                         assert last_exc is not None
                         delay = _retry_delay(attempt, last_exc)
                         logger.warning(
@@ -363,8 +392,11 @@ async def run_module_queue(
                     if key != ROOT_KEY:
                         failed_doc_id = doc_id_for_path(graph_tree, all_tasks[key][0])
                     await state_mgr.mark_failed(failed_doc_id, str(e))
+                error_message = str(e)
             finally:
-                await done_queue.put((key, success))
+                await done_queue.put(
+                    (key, success, retried, error_message if not success else None)
+                )
                 work_queue.task_done()
 
     workers = [asyncio.create_task(_worker(i)) for i in range(max_concurrent)]
@@ -380,6 +412,7 @@ async def run_module_queue(
             coordinator.cancel()
         await asyncio.gather(coordinator, return_exceptions=True)
         progress.close()
+    return summary
 
 
 async def fill_missing_module_docs(
@@ -388,7 +421,7 @@ async def fill_missing_module_docs(
     working_dir: str,
     components: Dict[str, Any],
     tree_manager,
-    run_module_queue: Callable[..., Awaitable[None]],
+    run_module_queue: Callable[..., Awaitable[ModuleSummary]],
     module_doc_exists: Callable[..., bool],
     gen_state=None,
 ) -> None:
