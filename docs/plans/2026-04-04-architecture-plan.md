@@ -366,9 +366,12 @@ git commit -m "feat(scheduler): return ModuleSummary with completed/failed/skipp
 - Create: `codewiki/src/be/stages/postprocess.py`
 - Create: `codewiki/src/be/stages/metadata.py`
 - Modify: `codewiki/src/be/documentation_generator.py`
+- Modify: `codewiki/cli/adapters/doc_generator.py` (consume GenerationResult)
+- Modify: `codewiki/src/fe/background_worker.py` (consume GenerationResult)
+- Modify: `codewiki/src/be/main.py` (consume GenerationResult)
 - Create: `tests/test_pipeline_stages.py`
 
-This is the largest task. Each stage extracts a block from `run()` into a class with `async execute(ctx: PipelineContext)`.
+This is the largest task. Each stage extracts a block from `run()` into a class with `async execute(ctx: PipelineContext)`. All three callers of `run()` must be updated in the same task to avoid a half-migrated state.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -801,12 +804,14 @@ model_list = ["gpt-4o"]
 
 - [ ] **Step 2: Implement `load_config()` → CodeWikiConfig**
 
-Add a new `load_config(config_path, repo_path, overrides=None) -> CodeWikiConfig` function to `config_loader.py`. It:
-1. Calls existing `load_app_config()` to get the raw AppConfig
-2. Calls `to_runtime_config()` equivalent logic (resolve models, env secrets)
-3. Returns `CodeWikiConfig.model_validate(resolved_dict)`
+`load_config()` becomes the **sole public entry point** in `config_loader.py`. It does NOT wrap `load_app_config()` — it replaces it:
 
-Keep `load_app_config()` as a **transitional internal helper** (NOT a backward compatibility promise). It exists only so `load_config()` can reuse its TOML parsing logic during this task. It will be deleted in Task 6 when all callers are migrated to `load_config()` → `CodeWikiConfig`.
+1. `tomllib.load()` → raw dict
+2. `_resolve_env_secrets()` — walk values, expand `env:VAR` prefixes
+3. `_resolve_providers()` — build ProviderConfig list, validate model refs
+4. `CodeWikiConfig.model_validate(resolved_dict)` with `repo_path` injected
+
+Internal parsing helpers (`_resolve_env_secrets`, `_resolve_providers`, `resolve_model_ref`) are kept as private functions. `AppConfig`, `load_app_config()`, `RuntimeSection`, `TokensSection`, `GenerationSection`, `AgentSection`, and `to_runtime_config()` are all deleted in this same task — not deferred to Task 6. The old intermediate model chain does not survive this step.
 
 - [ ] **Step 3: Run tests**
 
@@ -867,7 +872,13 @@ Run: `pytest tests/ -q -k "not network" --timeout=60`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A
+git add codewiki/src/config.py codewiki/src/config_loader.py codewiki/src/codewiki_config.py \
+  codewiki/cli/commands/config.py codewiki/cli/commands/generate.py \
+  codewiki/cli/adapters/doc_generator.py \
+  codewiki/src/be/documentation_generator.py codewiki/src/be/llm_services.py \
+  codewiki/src/be/agent_orchestrator.py codewiki/src/be/guide_generator.py \
+  codewiki/src/fe/background_worker.py codewiki/src/fe/visualise_docs.py
+git rm codewiki/cli/models/config.py codewiki/cli/config_manager.py
 git commit -m "refactor(config)!: unify to CodeWikiConfig, remove legacy Config/ConfigManager
 
 BREAKING CHANGE: ~/.codewiki/config.json and keyring are no longer supported.
