@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional, List, Tuple
 import click
 import time
+import structlog
 
 from codewiki.cli.config_manager import ConfigManager
 from codewiki.cli.utils.errors import (
@@ -31,6 +32,7 @@ from codewiki.cli.utils.instructions import display_post_generation_instructions
 from codewiki.cli.utils.errors import EXIT_CONFIG_ERROR
 from codewiki.cli.models.config import AgentInstructions
 from codewiki.src.be.llm_services import validate_llm_credentials
+from codewiki.src.logging_setup import configure_cli_logging
 from codewiki.src.config_loader import (
     AppConfig,
     AgentSection,
@@ -41,6 +43,24 @@ from codewiki.src.config_loader import (
     RuntimeOverrides,
     load_app_config,
 )
+
+_logger = structlog.get_logger("codewiki.cli.generate")
+
+
+def log_effective_config(config) -> None:
+    """Log the effective runtime configuration at INFO level."""
+    if not structlog.is_configured():
+        configure_cli_logging(verbose=False)
+    _logger.info(
+        "effective_config",
+        main_model=config.main_model,
+        cluster_model=config.cluster_model,
+        fallback_model=config.fallback_model,
+        max_tokens=config.max_tokens,
+        max_concurrent=config.max_concurrent,
+        output_language=config.output_language,
+        providers=len(config.providers) if config.providers else 0,
+    )
 
 
 def _legacy_model_ref(provider_name: str, model_name: str | None) -> str | None:
@@ -423,9 +443,7 @@ def generate_command(
     """
     logger = create_logger(verbose=verbose)
     start_time = time.time()
-
-    # Suppress httpx INFO logs
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    configure_cli_logging(verbose=verbose)
 
     try:
         # Pre-generation checks
@@ -547,6 +565,7 @@ def generate_command(
         )
         effective_config = app_config.to_runtime_config(str(repo_path), runtime_overrides)
         validate_llm_credentials(effective_config)
+        log_effective_config(effective_config)
 
         # Log max token settings if verbose
         if verbose:
