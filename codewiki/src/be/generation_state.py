@@ -242,16 +242,12 @@ class GenerationStateManager:
         async with self._lock:
             self._state._add_task(task)
             self._dirty = True
-            self._state._save(self._persist_path)
-            self._dirty = False
 
     async def bulk_add_tasks(self, tasks: list[DocTask]) -> None:
         async with self._lock:
             for task in tasks:
                 self._state._add_task(task)
             self._dirty = True
-            self._state._save(self._persist_path)
-            self._dirty = False
 
     async def mark_running(self, doc_id: str) -> None:
         async with self._lock:
@@ -284,8 +280,6 @@ class GenerationStateManager:
         async with self._lock:
             self._state._register_discovered_task(task)
             self._dirty = True
-            self._state._save(self._persist_path)
-            self._dirty = False
 
     async def promote_ready(self) -> int:
         async with self._lock:

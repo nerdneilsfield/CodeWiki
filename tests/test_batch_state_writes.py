@@ -122,3 +122,78 @@ async def test_run_module_queue_flushes_on_done_queue(tmp_path, monkeypatch):
     )
 
     assert flush_calls == ["flush"]
+
+
+@pytest.mark.asyncio
+async def test_add_task_stays_in_memory_until_flush(tmp_path):
+    state = GenerationState()
+    path = tmp_path / "generation_state.json"
+    state._save(str(path))
+
+    manager = GenerationStateManager(state, str(path))
+    await manager.add_task(
+        DocTask(
+            doc_id="module:new",
+            kind="module",
+            module_path=["New"],
+            output_file="new.md",
+            status="planned",
+        )
+    )
+
+    assert manager._dirty is True
+    on_disk = json.loads(path.read_text(encoding="utf-8"))
+    assert on_disk["tasks"] == []
+
+
+@pytest.mark.asyncio
+async def test_register_discovered_task_stays_in_memory_until_flush(tmp_path):
+    state = GenerationState()
+    path = tmp_path / "generation_state.json"
+    state._save(str(path))
+
+    manager = GenerationStateManager(state, str(path))
+    await manager.register_discovered_task(
+        DocTask(
+            doc_id="module:discovered",
+            kind="module",
+            module_path=["Discovered"],
+            output_file="discovered.md",
+            status="planned",
+        )
+    )
+
+    assert manager._dirty is True
+    on_disk = json.loads(path.read_text(encoding="utf-8"))
+    assert on_disk["tasks"] == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_add_tasks_stays_in_memory_until_flush(tmp_path):
+    state = GenerationState()
+    path = tmp_path / "generation_state.json"
+    state._save(str(path))
+
+    manager = GenerationStateManager(state, str(path))
+    await manager.bulk_add_tasks(
+        [
+            DocTask(
+                doc_id="module:a",
+                kind="module",
+                module_path=["A"],
+                output_file="a.md",
+                status="planned",
+            ),
+            DocTask(
+                doc_id="module:b",
+                kind="module",
+                module_path=["B"],
+                output_file="b.md",
+                status="planned",
+            ),
+        ]
+    )
+
+    assert manager._dirty is True
+    on_disk = json.loads(path.read_text(encoding="utf-8"))
+    assert on_disk["tasks"] == []

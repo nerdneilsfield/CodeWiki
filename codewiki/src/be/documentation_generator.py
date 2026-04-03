@@ -222,6 +222,7 @@ class DocumentationGenerator:
             if not self._gen_state.tasks:
                 try:
                     await self._state_mgr.bulk_add_tasks(planned_tasks)
+                    await self._state_mgr.flush()
                 except ValueError as exc:
                     logger.warning(
                         "Skipping colliding planned tasks during initial ledger load: %s", exc
@@ -229,6 +230,7 @@ class DocumentationGenerator:
                     for task in planned_tasks:
                         try:
                             await self._state_mgr.add_task(task)
+                            await self._state_mgr.flush()
                         except ValueError as item_exc:
                             logger.warning(
                                 "Skipped task %s due to output_file collision: %s",
@@ -241,11 +243,13 @@ class DocumentationGenerator:
                 if missing_tasks:
                     try:
                         await self._state_mgr.bulk_add_tasks(missing_tasks)
+                        await self._state_mgr.flush()
                     except ValueError as exc:
                         logger.warning("Skipping colliding missing tasks: %s", exc)
                         for task in missing_tasks:
                             try:
                                 await self._state_mgr.add_task(task)
+                                await self._state_mgr.flush()
                             except ValueError as item_exc:
                                 logger.warning(
                                     "Skipped task %s due to output_file collision: %s",

@@ -253,6 +253,7 @@ def test_generation_state_manager_wraps_mutations(tmp_path):
             )
         )
         await manager.mark_stale({"parent": "new"})
+        await manager.flush()
 
     asyncio.run(_run())
 

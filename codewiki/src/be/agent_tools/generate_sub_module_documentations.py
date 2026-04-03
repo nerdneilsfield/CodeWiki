@@ -182,6 +182,7 @@ async def generate_sub_module_documentation(
                         prompt_version="v7",
                     )
                 )
+                await deps.state_mgr.flush()
 
     for sub_module_name, core_component_ids in sub_module_specs.items():
         # Create visual indentation for nested modules
