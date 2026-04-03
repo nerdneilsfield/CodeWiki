@@ -11,6 +11,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from tqdm import tqdm
 
 from codewiki.src.be.llm_services import _MAX_RETRY_AFTER
+from codewiki.src.be.documentation_tree_utils import stable_hash
 from codewiki.src.utils import doc_id_for_path
 
 logger = logging.getLogger(__name__)
@@ -202,6 +203,56 @@ async def run_module_queue(
                     pending_count[parent_key] -= 1
                     if pending_count[parent_key] == 0:
                         del pending_count[parent_key]
+                        if gen_state and state_mgr:
+                            parent_doc_id = (
+                                "overview:root"
+                                if parent_key == ROOT_KEY
+                                else doc_id_for_path(graph_tree, all_tasks[parent_key][0])
+                            )
+                            parent_task = gen_state.get_task(parent_doc_id)
+                            if parent_task and parent_task.status == "completed":
+                                if parent_key == ROOT_KEY:
+                                    parent_components: list[str] = []
+                                    child_keys = [
+                                        key
+                                        for key, value in child_to_parent.items()
+                                        if value == ROOT_KEY
+                                    ]
+                                else:
+                                    _, _, parent_info, _ = all_tasks[parent_key]
+                                    parent_components = sorted(parent_info.get("components", []))
+                                    child_keys = [
+                                        key
+                                        for key, value in child_to_parent.items()
+                                        if value == parent_key
+                                    ]
+                                child_doc_ids = [
+                                    "overview:root"
+                                    if child_key == ROOT_KEY
+                                    else doc_id_for_path(graph_tree, all_tasks[child_key][0])
+                                    for child_key in child_keys
+                                ]
+                                child_content_hashes = []
+                                for child_doc_id in child_doc_ids:
+                                    child_task = gen_state.get_task(child_doc_id)
+                                    if child_task and child_task.content_hash:
+                                        child_content_hashes.append(child_task.content_hash)
+                                new_hash = stable_hash(
+                                    [
+                                        *parent_components,
+                                        *child_doc_ids,
+                                        *child_content_hashes,
+                                        parent_task.language,
+                                        "v7",
+                                    ]
+                                )
+                                if new_hash != parent_task.input_hash:
+                                    # Preserve the recomputed hash so the eventual
+                                    # parent completion reflects the content it was
+                                    # re-queued against, even if the downstream
+                                    # process_module path doesn't pass input_hash.
+                                    parent_task.input_hash = new_hash
+                                    await state_mgr.mark_stale({parent_doc_id: new_hash})
                         if parent_key == ROOT_KEY:
                             logger.info("🔓 All top-level modules done — enqueueing root overview")
                         else:

@@ -156,9 +156,23 @@ def freeze_doc_filenames(tree: Dict[str, Any]) -> None:
     _walk(tree)
 
 
-def build_generation_tasks(tree: Dict[str, Any], config: Config) -> list[DocTask]:
+def build_generation_tasks(
+    tree: Dict[str, Any],
+    config: Config,
+    existing_state: GenerationState | None = None,
+) -> list[DocTask]:
     """Build ledger tasks from the frozen tree."""
     tasks: list[DocTask] = []
+
+    def _content_hashes(doc_ids: list[str]) -> list[str]:
+        if existing_state is None:
+            return []
+        hashes: list[str] = []
+        for doc_id in doc_ids:
+            task = existing_state.get_task(doc_id)
+            if task and task.content_hash:
+                hashes.append(task.content_hash)
+        return hashes
 
     def _walk(children: Dict[str, Any], parent_path: List[str]) -> list[str]:
         child_doc_ids: list[str] = []
@@ -180,6 +194,7 @@ def build_generation_tasks(tree: Dict[str, Any], config: Config) -> list[DocTask
                         [
                             *sorted(info.get("components", [])),
                             *nested_child_ids,
+                            *_content_hashes(nested_child_ids),
                             config.output_language,
                             "v7",
                         ]
@@ -199,7 +214,9 @@ def build_generation_tasks(tree: Dict[str, Any], config: Config) -> list[DocTask
             module_path=[],
             output_file=OVERVIEW_FILENAME,
             depends_on=top_level_ids,
-            input_hash=stable_hash([*top_level_ids, config.output_language, "v7"]),
+            input_hash=stable_hash(
+                [*top_level_ids, *_content_hashes(top_level_ids), config.output_language, "v7"]
+            ),
             language=config.output_language,
             prompt_version="v7",
         )

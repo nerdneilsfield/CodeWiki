@@ -213,7 +213,9 @@ class DocumentationGenerator:
         self._gen_state = self._gen_state or GenerationState.load(state_path)
         self._state_mgr = self._state_mgr or GenerationStateManager(self._gen_state, state_path)
         await self._state_mgr.update_metadata(self.commit_id or "", config_fingerprint(self.config))
-        planned_tasks = build_generation_tasks(module_tree, self.config)
+        planned_tasks = build_generation_tasks(
+            module_tree, self.config, existing_state=self._gen_state
+        )
         if not self._gen_state.tasks:
             try:
                 await self._state_mgr.bulk_add_tasks(planned_tasks)
