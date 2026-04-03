@@ -10,11 +10,12 @@ import openai
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from tqdm import tqdm
 
-from codewiki.src.be.llm_services import _MAX_RETRY_AFTER
 from codewiki.src.be.documentation_tree_utils import stable_hash
 from codewiki.src.utils import doc_id_for_path
 
 logger = logging.getLogger(__name__)
+
+_MAX_RETRY_AFTER = 120.0
 
 
 def is_leaf_module(module_info: Dict[str, Any]) -> bool:

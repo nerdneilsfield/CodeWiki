@@ -2,10 +2,8 @@
 LLM service factory for creating configured LLM clients.
 """
 
-import sys
 import time
 import logging
-import random
 from functools import lru_cache
 from typing import Any
 
@@ -23,9 +21,6 @@ from codewiki.src.config import Config
 from codewiki.src.config_loader import resolve_model_ref
 
 _logger = logging.getLogger(__name__)
-
-# Delays (seconds) between successive retries: 10 s, 30 s, 90 s
-_RETRY_DELAYS = [10, 30, 90]
 
 # Long-running LLM calls can take well over the default 5 s httpx timeout.
 _LLM_TIMEOUT = httpx.Timeout(180.0)
@@ -239,32 +234,6 @@ def _is_cf_timeout(exc: Exception) -> bool:
         or "stream disconnected" in msg.lower()
         or "stream closed before" in msg.lower()
     )
-
-
-_MAX_RETRY_AFTER = 120.0
-
-
-def _parse_retry_after(exc: Exception) -> float | None:
-    import openai
-
-    if not isinstance(exc, openai.RateLimitError):
-        return None
-    headers = getattr(getattr(exc, "response", None), "headers", {})
-    val = headers.get("retry-after") or headers.get("Retry-After")
-    if val:
-        try:
-            seconds = float(val)
-        except (ValueError, OverflowError):
-            return None
-        if not (0 <= seconds < float("inf")):
-            return None
-        return min(seconds, _MAX_RETRY_AFTER)
-    return None
-
-
-def _sleep_with_jitter(base_delay: float) -> None:
-    actual = base_delay + random.uniform(0, base_delay * 0.5)
-    time.sleep(actual)
 
 
 def _call_llm_streaming(
