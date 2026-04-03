@@ -543,9 +543,11 @@ class TestNaiveDatetimeBackwardCompat:
         from codewiki.src.fe.cache_manager import CacheManager
 
         # Write a fake cache_index.json with naive timestamps (no timezone info)
+        # Must include all fields CacheManager.load_cache_index() expects
         index_data = {
             "abc123": {
                 "repo_url": "http://example.com/repo",
+                "repo_url_hash": "abc123",
                 "docs_path": str(tmp_path / "docs"),
                 "created_at": "2026-01-01T12:00:00",  # naive — no +00:00
                 "last_accessed": "2026-01-01T12:00:00",
@@ -664,7 +666,15 @@ def flush(self):
         self._dirty = False
 ```
 
-Call `self.flush()` at the end of `add_to_cache()`, `remove_from_cache()`, `cleanup_expired_cache()`.
+In `add_to_cache()`, `remove_from_cache()`, and `cleanup_expired_cache()`: set `self._dirty = True` after modifying the index, then call `self.flush()`. All three methods mutate `self.cache_index` — without setting dirty first, `flush()` would skip the write.
+
+```python
+# Example pattern for each method:
+def add_to_cache(self, ...):
+    # ... existing logic that modifies self.cache_index ...
+    self._dirty = True
+    self.flush()
+```
 
 Add at the end of `__init__`:
 ```python
