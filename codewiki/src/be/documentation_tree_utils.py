@@ -7,7 +7,8 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from codewiki.src.be.generation_state import DocTask, GenerationState
-from codewiki.src.config import Config, OVERVIEW_FILENAME
+from codewiki.src.codewiki_config import CodeWikiConfig
+from codewiki.src.config import OVERVIEW_FILENAME
 from codewiki.src.utils import (
     _normalize_for_match,
     doc_id_for_path,
@@ -116,7 +117,7 @@ def cleanup_legacy_internal_files(working_dir: str) -> list[str]:
     return removed
 
 
-def config_fingerprint(config: Config) -> str:
+def config_fingerprint(config: CodeWikiConfig) -> str:
     return stable_hash(
         [
             config.main_model,
@@ -158,7 +159,7 @@ def freeze_doc_filenames(tree: Dict[str, Any]) -> None:
 
 def build_generation_tasks(
     tree: Dict[str, Any],
-    config: Config,
+    config: CodeWikiConfig,
     existing_state: GenerationState | None = None,
 ) -> list[DocTask]:
     """Build ledger tasks from the frozen tree."""

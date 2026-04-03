@@ -31,7 +31,7 @@ import mdformat
 from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.postprocess.lint_report import LintError, LintReport
-from codewiki.src.config import Config
+from codewiki.src.codewiki_config import CodeWikiConfig
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,10 @@ Return ONLY the corrected formula content (no $, $$, \\[, \\( delimiters, no com
 
 
 def _llm_repair_math(
-    content: str, issues: list[str], config: Config, usage_stats: LLMUsageStats | None = None
+    content: str,
+    issues: list[str],
+    config: CodeWikiConfig,
+    usage_stats: LLMUsageStats | None = None,
 ) -> str:
     """Ask the LLM to fix a broken LaTeX formula. Returns the fixed content."""
     prompt = _MATH_REPAIR_USER.format(
@@ -209,7 +212,7 @@ def _llm_repair_math(
 
 def _fix_math_in_text(
     text: str,
-    config: Config,
+    config: CodeWikiConfig,
     stats: FixStats,
     usage_stats: LLMUsageStats | None = None,
     report: LintReport | None = None,
@@ -389,7 +392,10 @@ Return ONLY the corrected diagram content (no ``` fences, no commentary).
 
 
 def _llm_repair(
-    content: str, issues: list[str], config: Config, usage_stats: LLMUsageStats | None = None
+    content: str,
+    issues: list[str],
+    config: CodeWikiConfig,
+    usage_stats: LLMUsageStats | None = None,
 ) -> str:
     """Ask the LLM to fix a broken Mermaid diagram. Returns the fixed content."""
     prompt = _REPAIR_USER.format(
@@ -416,7 +422,7 @@ def _llm_repair(
 
 def _fix_mermaid_in_text(
     text: str,
-    config: Config,
+    config: CodeWikiConfig,
     stats: FixStats,
     usage_stats: LLMUsageStats | None = None,
     report: LintReport | None = None,
@@ -531,7 +537,10 @@ def _fix_mermaid_in_text(
 
 
 def fix_mermaid_in_file(
-    path: Path, config: Config, stats: FixStats, usage_stats: LLMUsageStats | None = None
+    path: Path,
+    config: CodeWikiConfig,
+    stats: FixStats,
+    usage_stats: LLMUsageStats | None = None,
 ) -> bool:
     """Scan one markdown file and repair broken Mermaid diagrams in-place.
 
@@ -551,7 +560,7 @@ def fix_mermaid_in_file(
 
 
 def fix_docs(
-    working_dir: str, config: Config, usage_stats: LLMUsageStats | None = None
+    working_dir: str, config: CodeWikiConfig, usage_stats: LLMUsageStats | None = None
 ) -> FixStats:
     """Apply all post-processing fix phases to every .md file in *working_dir*.
 

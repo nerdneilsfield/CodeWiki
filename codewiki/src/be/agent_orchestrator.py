@@ -80,8 +80,8 @@ from codewiki.src.be.prompt_template import (
 from codewiki.src.be.generation.context_pack import build_context_pack, format_context_pack_section
 from codewiki.src.be.llm_usage import LLMUsageStats, record_agent_run_usage
 from codewiki.src.be.utils import is_complex_module, count_tokens, agent_progress_handler
+from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.config import (
-    Config,
     MODULE_TREE_FILENAME,
 )
 from codewiki.src.utils import (
@@ -97,7 +97,7 @@ from codewiki.src.be.dependency_analyzer.models.core import Node
 class AgentOrchestrator:
     """Orchestrates the AI agents for documentation generation."""
 
-    def __init__(self, config: Config, usage_stats: LLMUsageStats | None = None):
+    def __init__(self, config: CodeWikiConfig, usage_stats: LLMUsageStats | None = None):
         self.config = config
         self.usage_stats = usage_stats
         self.fallback_models = create_fallback_models(config)

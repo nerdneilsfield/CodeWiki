@@ -24,9 +24,6 @@ logger = logging.getLogger(__name__)
 
 # Local imports
 from codewiki.src.be.documentation_generator import DocumentationGenerator
-from codewiki.src.config import (
-    Config,
-)
 from codewiki.src.config_loader import load_config
 
 

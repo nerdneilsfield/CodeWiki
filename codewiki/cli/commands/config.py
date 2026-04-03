@@ -147,6 +147,27 @@ def _config_to_dict(config_path: str, cfg: CodeWikiConfig) -> dict[str, Any]:
     }
 
 
+def _lookup_config_value(payload: dict[str, Any], key: str) -> Any:
+    current: Any = payload
+    for part in key.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+            continue
+        raise ConfigurationError(f"Unknown config key: {key}")
+    return current
+
+
+def _render_config(payload: dict[str, Any]) -> None:
+    _logger.info("CodeWiki Configuration", config_file=payload["config_file"])
+    _logger.info("Models", **payload["generation"])
+    _logger.info("Runtime", **payload["runtime"])
+    _logger.info("Tokens", **payload["tokens"])
+    for provider in payload["providers"]:
+        _logger.info("Provider", **provider)
+    if payload["agent"]:
+        _logger.info("Agent instructions", **payload["agent"])
+
+
 def _first_provider(data: dict[str, Any]) -> dict[str, Any]:
     providers = data.setdefault("providers", [])
     if not providers:
@@ -217,7 +238,7 @@ def config_validate(config_path: str | None, quick: bool, verbose: bool, check_s
     try:
         path = _resolve_config_path(config_path)
         _logger.info("Validating configuration", path=str(path))
-        cfg = _load_runtime_config(path, resolve_secrets=False)
+        cfg = _load_runtime_config(path, resolve_secrets=True)
         _logger.info("Model references resolved", providers=len(cfg.providers))
         if verbose:
             _logger.info(
@@ -227,17 +248,51 @@ def config_validate(config_path: str | None, quick: bool, verbose: bool, check_s
                 fallback_model=cfg.fallback_model,
             )
 
+        validate_llm_credentials(cfg)
         if check_secrets:
-            cfg_with_secrets = _load_runtime_config(path, resolve_secrets=True)
-            validate_llm_credentials(cfg_with_secrets)
             _logger.info("All env: secret references are set")
+        else:
+            _logger.info("All provider credentials resolved")
 
         _logger.info("Configuration is valid")
     except Exception as exc:
         raise SystemExit(handle_error(exc, verbose=verbose))
 
 
-@config_group.command(name="show")
+@config_group.command(name="get")
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to TOML config file to display.",
+)
+@click.option("--json", "output_json", is_flag=True, help="Output in JSON format.")
+@click.argument("key", required=False)
+def config_get(config_path: str | None, output_json: bool, key: str | None):
+    """Display current TOML configuration or a specific key."""
+    configure_cli_logging(verbose=False)
+    try:
+        path = _resolve_config_path(config_path)
+        cfg = _load_runtime_config(path, resolve_secrets=False)
+        payload = _config_to_dict(str(path), cfg)
+        if key:
+            value = _lookup_config_value(payload, key)
+            if output_json or isinstance(value, (dict, list)):
+                click.echo(json.dumps(value, indent=2))
+            else:
+                click.echo(str(value))
+            return
+        if output_json:
+            click.echo(json.dumps(payload, indent=2))
+            return
+
+        _render_config(payload)
+    except Exception as exc:
+        raise SystemExit(handle_error(exc))
+
+
+@config_group.command(name="show", hidden=True)
 @click.option(
     "--config",
     "config_path",
@@ -247,7 +302,7 @@ def config_validate(config_path: str | None, quick: bool, verbose: bool, check_s
 )
 @click.option("--json", "output_json", is_flag=True, help="Output in JSON format.")
 def config_show(config_path: str | None, output_json: bool):
-    """Display current TOML configuration."""
+    """Backward-compatible alias for `config get`."""
     configure_cli_logging(verbose=False)
     try:
         path = _resolve_config_path(config_path)
@@ -257,14 +312,7 @@ def config_show(config_path: str | None, output_json: bool):
             click.echo(json.dumps(payload, indent=2))
             return
 
-        _logger.info("CodeWiki Configuration", config_file=str(path))
-        _logger.info("Models", **payload["generation"])
-        _logger.info("Runtime", **payload["runtime"])
-        _logger.info("Tokens", **payload["tokens"])
-        for provider in payload["providers"]:
-            _logger.info("Provider", **provider)
-        if payload["agent"]:
-            _logger.info("Agent instructions", **payload["agent"])
+        _render_config(payload)
     except Exception as exc:
         raise SystemExit(handle_error(exc))
 

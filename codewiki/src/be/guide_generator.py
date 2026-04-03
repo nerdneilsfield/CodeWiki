@@ -20,7 +20,8 @@ from codewiki.src.be.dependency_analyzer.utils.security import assert_safe_path
 from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.repo_docs_collector import RepoDocsCollector, DocsBundle
-from codewiki.src.config import Config, internal_file_path
+from codewiki.src.codewiki_config import CodeWikiConfig
+from codewiki.src.config import internal_file_path
 from codewiki.src.utils import file_manager
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ class GuideGenerator:
 
     def __init__(
         self,
-        config: Config,
+        config: CodeWikiConfig,
         components: Dict[str, Any],
         module_tree: Dict[str, Any],
         working_dir: str,

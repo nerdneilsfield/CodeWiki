@@ -2,7 +2,7 @@ from codewiki.src.be.documentation_generator import (
     DocumentationGenerator,
     cleanup_legacy_internal_files,
 )
-from codewiki.src.config import Config
+from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.be.generation_state import GenerationState, DocTask
 from unittest.mock import MagicMock
 
@@ -11,7 +11,7 @@ import asyncio
 
 def _make_generator(tmp_path):
     return DocumentationGenerator(
-        Config(
+        CodeWikiConfig(
             repo_path=str(tmp_path / "repo"),
             output_dir=str(tmp_path / "out"),
             dependency_graph_dir=str(tmp_path / "graphs"),

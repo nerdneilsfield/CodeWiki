@@ -1,9 +1,9 @@
 from codewiki.src.be.generation_state import DocTask, GenerationState
-from codewiki.src.config import Config
+from codewiki.src.codewiki_config import CodeWikiConfig
 
 
 def _make_config(tmp_path):
-    return Config(
+    return CodeWikiConfig(
         repo_path=str(tmp_path / "repo"),
         output_dir=str(tmp_path / "out"),
         dependency_graph_dir=str(tmp_path / "graphs"),

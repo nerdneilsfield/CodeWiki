@@ -14,7 +14,8 @@ from codewiki.src.be.generation_state import GenerationState, GenerationStateMan
 from codewiki.src.be.llm_usage import LLMCallResult, LLMUsageStats
 from codewiki.src.be.module_tree_manager import ModuleTreeManager
 from codewiki.src.be.prompt_template import format_overview_prompt
-from codewiki.src.config import Config, MODULE_TREE_FILENAME, OVERVIEW_FILENAME
+from codewiki.src.codewiki_config import CodeWikiConfig
+from codewiki.src.config import MODULE_TREE_FILENAME, OVERVIEW_FILENAME
 from codewiki.src.utils import content_hash, doc_id_for_path, file_manager, find_module_doc
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class OverviewContext:
-    config: Config
+    config: CodeWikiConfig
     module_tree: Dict[str, Any]
     working_dir: str
     gen_state: Optional[GenerationState] = None

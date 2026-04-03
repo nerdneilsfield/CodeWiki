@@ -1,16 +1,8 @@
-"""Shared runtime constants for CodeWiki.
-
-This module intentionally no longer owns the runtime config model.
-Import `CodeWikiConfig` from `codewiki.src.codewiki_config` for the canonical
-configuration object. `Config` is kept here as a compatibility alias while
-callers are migrated.
-"""
+"""Shared runtime constants for CodeWiki."""
 
 from __future__ import annotations
 
 import os
-
-from codewiki.src.codewiki_config import CodeWikiConfig as Config
 
 # Constants
 OUTPUT_BASE_DIR = "output"

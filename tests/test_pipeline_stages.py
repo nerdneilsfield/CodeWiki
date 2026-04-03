@@ -72,9 +72,9 @@ def test_default_stages_put_metadata_last():
 
 def test_documentation_generator_run_returns_generation_result(tmp_path, monkeypatch):
     from codewiki.src.be.documentation_generator import DocumentationGenerator
-    from codewiki.src.config import Config
+    from codewiki.src.codewiki_config import CodeWikiConfig
 
-    config = Config(
+    config = CodeWikiConfig(
         repo_path=str(tmp_path / "repo"),
         output_dir=str(tmp_path / "out"),
         dependency_graph_dir=str(tmp_path / "graphs"),

@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 from codewiki.src.be.dependency_analyzer import DependencyGraphBuilder
 from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.cluster_modules import cluster_modules, heal_module_tree_components
+from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.config import (
-    Config,
     FIRST_MODULE_TREE_FILENAME,
     MODULE_TREE_FILENAME,
     OVERVIEW_FILENAME,
@@ -62,7 +62,7 @@ from codewiki.src.be.pipeline import (
 class DocumentationGenerator:
     """Main documentation generation orchestrator."""
 
-    def __init__(self, config: Config, commit_id: str | None = None):
+    def __init__(self, config: CodeWikiConfig, commit_id: str | None = None):
         self.config = config
         self.commit_id = commit_id
         self.graph_builder = DependencyGraphBuilder(config)

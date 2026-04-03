@@ -1,6 +1,6 @@
 from typing import Dict, List, Any
 import os
-from codewiki.src.config import Config
+from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.be.dependency_analyzer.ast_parser import DependencyParser
 from codewiki.src.be.dependency_analyzer.topo_sort import (
     build_graph_from_components,
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class DependencyGraphBuilder:
     """Handles dependency analysis and graph building."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: CodeWikiConfig):
         self.config = config
 
     def build_dependency_graph(self) -> tuple[Dict[str, Any], List[str]]:

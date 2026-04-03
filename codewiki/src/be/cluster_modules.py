@@ -14,7 +14,7 @@ from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.utils import count_tokens
-from codewiki.src.config import Config
+from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.be.prompt_template import format_cluster_prompt
 
 logger = logging.getLogger(__name__)
@@ -404,7 +404,7 @@ def _format_graph_clusters_hint(
 def cluster_modules(
     leaf_nodes: List[str],
     components: Dict[str, Node],
-    config: Config,
+    config: CodeWikiConfig,
     current_module_tree: Optional[dict[str, Any]] = None,
     current_module_name: Optional[str] = None,
     current_module_path: Optional[List[str]] = None,

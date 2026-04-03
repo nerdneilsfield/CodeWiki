@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Set, TYPE_CHECKING
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.llm_usage import LLMUsageStats
-from codewiki.src.config import Config
+from codewiki.src.codewiki_config import CodeWikiConfig
 
 if TYPE_CHECKING:
     from codewiki.src.be.module_tree_manager import ModuleTreeManager
@@ -19,7 +19,7 @@ class CodeWikiDeps:
     module_tree: dict[str, Any]
     max_depth: int
     current_depth: int
-    config: Config  # LLM configuration
+    config: CodeWikiConfig  # LLM configuration
     custom_instructions: Optional[str] = None
     module_tree_manager: Optional["ModuleTreeManager"] = None
     fallback_models: Any = None  # pre-built FallbackModel from AgentOrchestrator

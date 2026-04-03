@@ -17,7 +17,7 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from codewiki.src.be.llm_usage import LLMCallResult, LLMCallUsage
-from codewiki.src.config import Config
+from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.config_loader import resolve_model_ref
 
 _logger = logging.getLogger(__name__)
@@ -51,16 +51,16 @@ def _get_cached_anthropic_provider(api_key: str, base_url: str | None = None) ->
     return AnthropicProvider(api_key=api_key, base_url=base_url)
 
 
-def _model_settings(config: Config) -> OpenAIChatModelSettings:
+def _model_settings(config: CodeWikiConfig) -> OpenAIChatModelSettings:
     return OpenAIChatModelSettings(temperature=0.0, max_tokens=config.max_tokens)
 
 
-def _has_provider_registry(config: Config) -> bool:
+def _has_provider_registry(config: CodeWikiConfig) -> bool:
     providers = getattr(config, "providers", None)
     return isinstance(providers, list) and len(providers) > 0
 
 
-def _get_provider_config(config: Config, model_ref: str):
+def _get_provider_config(config: CodeWikiConfig, model_ref: str):
     if not _has_provider_registry(config):
         raise ValueError("Provider registry is not available on runtime config")
     resolved = resolve_model_ref(model_ref, config.providers)
@@ -103,11 +103,11 @@ def validate_llm_credentials(config) -> None:
         raise RuntimeError(f"Cannot resolve provider for model {model!r}: {exc}") from exc
 
 
-def _make_provider(config: Config) -> OpenAIProvider:
+def _make_provider(config: CodeWikiConfig) -> OpenAIProvider:
     return _get_cached_async_provider(config.llm_base_url, config.llm_api_key)
 
 
-def _make_provider_for_model(config: Config, model_ref: str):
+def _make_provider_for_model(config: CodeWikiConfig, model_ref: str):
     if not _has_provider_registry(config):
         return _make_provider(config)
 
@@ -125,7 +125,7 @@ def _make_provider_for_model(config: Config, model_ref: str):
     raise ValueError(f"unsupported provider type: {provider_type}")
 
 
-def create_model_from_ref(config: Config, model_ref: str):
+def create_model_from_ref(config: CodeWikiConfig, model_ref: str):
     provider = _make_provider_for_model(config, model_ref)
     provider_config, model_name = _get_provider_config(config, model_ref)
     settings = _model_settings(config)
@@ -139,7 +139,7 @@ def create_model_from_ref(config: Config, model_ref: str):
     raise ValueError(f"unsupported provider type: {provider_config.type}")
 
 
-def create_main_model(config: Config):
+def create_main_model(config: CodeWikiConfig):
     if _has_provider_registry(config):
         return create_model_from_ref(config, config.main_model)
     return OpenAIChatModel(
@@ -149,7 +149,7 @@ def create_main_model(config: Config):
     )
 
 
-def create_fallback_models(config: Config) -> FallbackModel:
+def create_fallback_models(config: CodeWikiConfig) -> FallbackModel:
     main = create_main_model(config)
 
     fallback_names = [n.strip() for n in config.fallback_model.split(",") if n.strip()]
@@ -181,7 +181,7 @@ def create_fallback_models(config: Config) -> FallbackModel:
     return FallbackModel(main, *fallbacks)
 
 
-def create_long_context_model(config: Config):
+def create_long_context_model(config: CodeWikiConfig):
     if config.long_context_model is None:
         raise ValueError("long_context_model is not configured")
     if _has_provider_registry(config):
@@ -193,7 +193,7 @@ def create_long_context_model(config: Config):
     )
 
 
-def select_agent_model(config: Config, estimated_tokens: int = 0):
+def select_agent_model(config: CodeWikiConfig, estimated_tokens: int = 0):
     if config.long_context_model and estimated_tokens > config.long_context_threshold:
         _logger.info(
             f"Pre-selecting long-context model {config.long_context_model} "
@@ -203,11 +203,11 @@ def select_agent_model(config: Config, estimated_tokens: int = 0):
     return create_fallback_models(config)
 
 
-def create_openai_client(config: Config) -> OpenAI:
+def create_openai_client(config: CodeWikiConfig) -> OpenAI:
     return _get_cached_openai_client(config.llm_base_url, config.llm_api_key)
 
 
-def _create_client_for_model(config: Config, model: str):
+def _create_client_for_model(config: CodeWikiConfig, model: str):
     if not _has_provider_registry(config):
         return create_openai_client(config), "openai_compatible"
 
@@ -226,7 +226,7 @@ def _create_client_for_model(config: Config, model: str):
 
 
 def _call_claude(
-    client: Anthropic, model: str, prompt: str, temperature: float, config: Config
+    client: Anthropic, model: str, prompt: str, temperature: float, config: CodeWikiConfig
 ) -> Any:
     return client.messages.create(
         model=model,
@@ -238,7 +238,7 @@ def _call_claude(
 
 def call_llm(
     prompt: str,
-    config: Config,
+    config: CodeWikiConfig,
     model: str | None = None,
     temperature: float = 0.0,
 ) -> "LLMCallResult":

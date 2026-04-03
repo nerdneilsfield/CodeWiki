@@ -12,9 +12,9 @@ from codewiki.src.be.guide_generator import GuideGenerator, _PROMPT_VERSIONS
 
 def _minimal_config():
     """Return a minimal Config-like object for testing."""
-    from codewiki.src.config import Config
+    from codewiki.src.codewiki_config import CodeWikiConfig
 
-    return Config(
+    return CodeWikiConfig(
         repo_path="/tmp/fake-repo",
         output_dir="/tmp/output",
         dependency_graph_dir="/tmp/dg",

@@ -1,7 +1,7 @@
 """
 Tests for the config subcommands:
   - config init  (create TOML template)
-  - config show  (TOML path only)
+  - config get   (TOML path only)
   - config validate (TOML path only)
   - config set   (TOML editing)
   - config agent (TOML editing)
@@ -99,8 +99,8 @@ def test_config_init_shows_next_steps(tmp_path):
 # ── config validate ───────────────────────────────────────────────────────────
 
 
-def test_config_validate_toml_succeeds_without_env_secrets(tmp_path):
-    """validate must not require env: secrets to be present."""
+def test_config_validate_requires_env_secrets_by_default(tmp_path):
+    """validate must fail when referenced env: secrets are missing."""
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         "[runtime]\noutput_dir = 'docs'\n"
@@ -117,12 +117,12 @@ def test_config_validate_toml_succeeds_without_env_secrets(tmp_path):
 
     result = _runner().invoke(config_group, ["validate", "--config", str(config_file)])
 
-    assert result.exit_code == 0, f"Expected success but got:\n{result.output}"
-    assert "valid" in result.output.lower()
+    assert result.exit_code != 0
+    assert "secret" in result.output.lower() or "environment" in result.output.lower()
 
 
-def test_config_show_toml_succeeds_without_env_secrets(tmp_path):
-    """show must not require env: secrets to be present."""
+def test_config_get_toml_succeeds_without_env_secrets(tmp_path):
+    """get must not require env: secrets to be present."""
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         "[runtime]\noutput_dir = 'docs'\n"
@@ -136,14 +136,14 @@ def test_config_show_toml_succeeds_without_env_secrets(tmp_path):
 
     os.environ.pop("OPENAI_API_KEY_THAT_IS_NOT_SET", None)
 
-    result = _runner().invoke(config_group, ["show", "--config", str(config_file)])
+    result = _runner().invoke(config_group, ["get", "--config", str(config_file)])
 
     assert result.exit_code == 0, f"Expected success but got:\n{result.output}"
     assert "openai/gpt-4o-mini" in result.output
 
 
 def test_config_validate_check_secrets_fails_when_env_missing(tmp_path):
-    """--check-secrets must fail when a referenced env var is not set."""
+    """--check-secrets remains compatible and still fails when env vars are missing."""
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         "[runtime]\noutput_dir = 'docs'\n"
@@ -186,6 +186,25 @@ def test_config_validate_check_secrets_passes_when_env_set(tmp_path, monkeypatch
     assert "secret" in result.output.lower()
 
 
+def test_config_validate_passes_when_env_set_by_default(tmp_path, monkeypatch):
+    """validate should check provider credentials even without --check-secrets."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        "[runtime]\noutput_dir = 'docs'\n"
+        "[generation]\nmain_model = 'openai/gpt-4o-mini'\ncluster_model = 'openai/gpt-4o-mini'\n"
+        "[[providers]]\nname = 'openai'\ntype = 'openai_compatible'\n"
+        "model_list = ['gpt-4o-mini']\napi_keys = ['env:OPENAI_VALIDATE_DEFAULT']\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("OPENAI_VALIDATE_DEFAULT", "sk-test-value")
+
+    result = _runner().invoke(config_group, ["validate", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert "valid" in result.output.lower()
+
+
 def test_config_validate_toml_success(tmp_path):
     config_file = _write_toml(tmp_path)
 
@@ -198,7 +217,10 @@ def test_config_validate_toml_success(tmp_path):
         cluster_model="openai/gpt-4o-mini",
     )
 
-    with patch("codewiki.cli.commands.config.load_config", return_value=sentinel):
+    with (
+        patch("codewiki.cli.commands.config.load_config", return_value=sentinel),
+        patch("codewiki.cli.commands.config.validate_llm_credentials"),
+    ):
         result = _runner().invoke(config_group, ["validate", "--config", str(config_file)])
 
     assert result.exit_code == 0
@@ -224,7 +246,10 @@ def test_config_validate_toml_verbose(tmp_path):
         ],
     )
 
-    with patch("codewiki.cli.commands.config.load_config", return_value=sentinel):
+    with (
+        patch("codewiki.cli.commands.config.load_config", return_value=sentinel),
+        patch("codewiki.cli.commands.config.validate_llm_credentials"),
+    ):
         result = _runner().invoke(
             config_group, ["validate", "--config", str(config_file), "--verbose"]
         )
@@ -242,10 +267,10 @@ def test_config_validate_toml_load_failure(tmp_path):
     assert result.exit_code != 0
 
 
-# ── config show ───────────────────────────────────────────────────────────────
+# ── config get ────────────────────────────────────────────────────────────────
 
 
-def _make_show_sentinel():
+def _make_get_sentinel():
     from codewiki.src.codewiki_config import CodeWikiConfig, ProviderConfig
 
     return CodeWikiConfig(
@@ -264,24 +289,36 @@ def _make_show_sentinel():
     )
 
 
-def test_config_show_toml_reads_config_file(tmp_path):
+def test_config_get_toml_reads_config_file(tmp_path):
     config_file = _write_toml(tmp_path)
 
-    with patch("codewiki.cli.commands.config.load_config", return_value=_make_show_sentinel()):
-        result = _runner().invoke(config_group, ["show", "--config", str(config_file)])
+    with patch("codewiki.cli.commands.config.load_config", return_value=_make_get_sentinel()):
+        result = _runner().invoke(config_group, ["get", "--config", str(config_file)])
 
     assert result.exit_code == 0
     assert "openai/gpt-4o-mini" in result.output
 
 
-def test_config_show_toml_json_output(tmp_path):
+def test_config_get_toml_json_output(tmp_path):
     import json
 
     config_file = _write_toml(tmp_path)
 
-    with patch("codewiki.cli.commands.config.load_config", return_value=_make_show_sentinel()):
-        result = _runner().invoke(config_group, ["show", "--config", str(config_file), "--json"])
+    with patch("codewiki.cli.commands.config.load_config", return_value=_make_get_sentinel()):
+        result = _runner().invoke(config_group, ["get", "--config", str(config_file), "--json"])
 
     assert result.exit_code == 0
     parsed = json.loads(result.output)
     assert parsed["generation"]["main_model"] == "openai/gpt-4o-mini"
+
+
+def test_config_get_specific_key(tmp_path):
+    config_file = _write_toml(tmp_path)
+
+    with patch("codewiki.cli.commands.config.load_config", return_value=_make_get_sentinel()):
+        result = _runner().invoke(
+            config_group, ["get", "--config", str(config_file), "generation.main_model"]
+        )
+
+    assert result.exit_code == 0
+    assert result.output.strip() == "openai/gpt-4o-mini"

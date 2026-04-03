@@ -28,9 +28,9 @@ def _make_minimal_tree():
 
 def _make_generator(tmp_path):
     from codewiki.src.be.documentation_generator import DocumentationGenerator
-    from codewiki.src.config import Config
+    from codewiki.src.codewiki_config import CodeWikiConfig
 
-    config = Config(
+    config = CodeWikiConfig(
         repo_path=str(tmp_path),
         output_dir=str(tmp_path / "output"),
         dependency_graph_dir=str(tmp_path / "graphs"),

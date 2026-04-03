@@ -1,10 +1,10 @@
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
-from codewiki.src.config import Config
+from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.utils import doc_id_for_path
 
 
 def _make_config(tmp_path):
-    return Config(
+    return CodeWikiConfig(
         repo_path=str(tmp_path / "repo"),
         output_dir=str(tmp_path / "out"),
         dependency_graph_dir=str(tmp_path / "graphs"),
