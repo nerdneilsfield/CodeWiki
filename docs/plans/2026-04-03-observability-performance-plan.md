@@ -690,9 +690,27 @@ if usage_stats:
     metadata["statistics"]["token_usage"] = usage_stats.to_dict()
 ```
 
-**Fix metadata write order:**
-- In `documentation_generator.py:run()`: move `create_documentation_metadata()` to AFTER `guide_gen.run()` and `fix_docs()` (currently at line 462, must move to after line 477)
-- In CLI adapter `doc_generator.py`: move metadata creation to AFTER `guide_gen.run()` (currently at line 332, must move to after line 349)
+- [ ] **Step 3: Fix metadata write order**
+
+Current code writes metadata BEFORE guides and docs_fixer, so their token usage is lost.
+
+In `documentation_generator.py:run()`: move the `create_documentation_metadata()` call from its current position (line 462, before guide generation) to AFTER `guide_gen.run()` and `fix_docs()` (after line 477):
+
+```python
+            # MOVED: was before guide_gen.run(), now after fix_docs()
+            self.create_documentation_metadata(working_dir, components, len(leaf_nodes),
+                                                usage_stats=self.usage_stats)
+```
+
+In CLI adapter `doc_generator.py`: move `create_documentation_metadata()` from line 332 to AFTER `guide_gen.run()` (after line 349):
+
+```python
+            # MOVED: was before guide generation, now after
+            doc_generator.create_documentation_metadata(
+                working_dir, components, len(leaf_nodes),
+                usage_stats=doc_generator.usage_stats,
+            )
+```
 ```
 
 - [ ] **Step 3: Run tests**
