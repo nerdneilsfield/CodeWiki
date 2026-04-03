@@ -6,6 +6,7 @@ FastAPI route handlers for the CodeWiki web application.
 import logging
 import os
 import re
+import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import asdict
@@ -233,87 +234,17 @@ class WebRoutes:
         if not docs_path or not docs_path.exists():
             raise HTTPException(status_code=404, detail="Documentation files not found")
 
-        # Load module tree
-        module_tree = None
-        module_tree_file = docs_path / "module_tree.json"
-        if module_tree_file.exists():
-            try:
-                module_tree = file_manager.load_json(str(module_tree_file))
-                self._attach_doc_filenames(module_tree, docs_path)
-            except Exception:
-                pass
-
-        # Load metadata
-        metadata = None
-        metadata_file = docs_path / "metadata.json"
-        if metadata_file.exists():
-            try:
-                metadata = file_manager.load_json(str(metadata_file))
-            except Exception:
-                pass
-
-        # Serve the requested file (fuzzy-match tolerates - vs _ differences)
-        file_path = (docs_path / filename).resolve()
-        if not file_path.is_relative_to(docs_path.resolve()):
-            raise HTTPException(status_code=403, detail="Access denied")
-        if not file_path.exists():
-            # Strip extension, build a single-element path for fuzzy lookup
-            stem = filename.rsplit(".", 1)[0] if "." in filename else filename
-            found = None
-            tree_file = docs_path / "module_tree.json"
-            if tree_file.exists():
-                try:
-                    tree = file_manager.load_json(str(tree_file)) or {}
-                    for _name, _info in tree.items():
-                        pass
-                except Exception:
-                    tree = None
-                if tree:
-
-                    def _search(nodes):
-                        for _key, _info in nodes.items():
-                            doc_filename = _info.get("doc_filename") or _info.get("_doc_filename")
-                            if doc_filename and Path(doc_filename).stem == stem:
-                                return str((docs_path / doc_filename).resolve())
-                            children = _info.get("children") or {}
-                            if children:
-                                res = _search(children)
-                                if res:
-                                    return res
-                        return None
-
-                    found = _search(tree)
-            if not found:
-                found = find_module_doc(str(docs_path), stem.split("-"))
-            if found:
-                found_path = Path(found).resolve()
-                if not found_path.is_relative_to(docs_path.resolve()):
-                    raise HTTPException(status_code=403, detail="Access denied")
-                file_path = found_path
-            else:
-                raise HTTPException(status_code=404, detail=f"File {filename} not found")
-
         try:
-            content = file_manager.load_text(str(file_path))
-
-            # Convert markdown to HTML (reuse from visualise_docs.py)
-            from .visualise_docs import markdown_to_html, get_file_title
-            from .templates import DOCS_VIEW_TEMPLATE
-
-            html_content = markdown_to_html(content, base_url=f"/static-docs/{job_id}/")
-            title = get_file_title(file_path)
-
-            context = {
-                "repo_name": repo_url.split("/")[-1],
-                "title": title,
-                "content": html_content,
-                "navigation": module_tree,
-                "current_page": filename,
-                "job_id": job_id,
-                "metadata": metadata,
-            }
-
-            return HTMLResponse(content=render_template(DOCS_VIEW_TEMPLATE, context))
+            html = await asyncio.to_thread(
+                self._render_generated_docs_sync,
+                docs_path,
+                repo_url,
+                job_id,
+                filename,
+            )
+            return HTMLResponse(content=html)
+        except HTTPException:
+            raise
 
         except Exception as e:
             logger.error("Error reading %s: %s", filename, e, exc_info=True)
@@ -359,6 +290,83 @@ class WebRoutes:
             children = info.get("children")
             if isinstance(children, dict) and children:
                 self._attach_doc_filenames(children, docs_dir, module_path)
+
+    def _render_generated_docs_sync(
+        self,
+        docs_path: Path,
+        repo_url: str,
+        job_id: str,
+        filename: str,
+    ) -> str:
+        module_tree = None
+        module_tree_file = docs_path / "module_tree.json"
+        if module_tree_file.exists():
+            try:
+                module_tree = file_manager.load_json(str(module_tree_file))
+                self._attach_doc_filenames(module_tree, docs_path)
+            except Exception:
+                pass
+
+        metadata = None
+        metadata_file = docs_path / "metadata.json"
+        if metadata_file.exists():
+            try:
+                metadata = file_manager.load_json(str(metadata_file))
+            except Exception:
+                pass
+
+        file_path = (docs_path / filename).resolve()
+        if not file_path.is_relative_to(docs_path.resolve()):
+            raise HTTPException(status_code=403, detail="Access denied")
+        if not file_path.exists():
+            stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+            found = None
+            tree_file = docs_path / "module_tree.json"
+            if tree_file.exists():
+                try:
+                    tree = file_manager.load_json(str(tree_file)) or {}
+                except Exception:
+                    tree = None
+                if tree:
+                    found = self._search_tree_for_stem(tree, docs_path, stem)
+            if not found:
+                found = find_module_doc(str(docs_path), stem.split("-"))
+            if found:
+                found_path = Path(found).resolve()
+                if not found_path.is_relative_to(docs_path.resolve()):
+                    raise HTTPException(status_code=403, detail="Access denied")
+                file_path = found_path
+            else:
+                raise HTTPException(status_code=404, detail=f"File {filename} not found")
+
+        from .visualise_docs import markdown_to_html, get_file_title
+        from .templates import DOCS_VIEW_TEMPLATE
+
+        content = file_manager.load_text(str(file_path))
+        html_content = markdown_to_html(content, base_url=f"/static-docs/{job_id}/")
+        title = get_file_title(file_path)
+        context = {
+            "repo_name": repo_url.split("/")[-1],
+            "title": title,
+            "content": html_content,
+            "navigation": module_tree,
+            "current_page": filename,
+            "job_id": job_id,
+            "metadata": metadata,
+        }
+        return render_template(DOCS_VIEW_TEMPLATE, context)
+
+    def _search_tree_for_stem(self, nodes, docs_path: Path, stem: str) -> str | None:
+        for _key, _info in nodes.items():
+            doc_filename = _info.get("doc_filename") or _info.get("_doc_filename")
+            if doc_filename and Path(doc_filename).stem == stem:
+                return str((docs_path / doc_filename).resolve())
+            children = _info.get("children") or {}
+            if children:
+                result = self._search_tree_for_stem(children, docs_path, stem)
+                if result:
+                    return result
+        return None
 
     def cleanup_old_jobs(self):
         """Clean up old job status entries."""

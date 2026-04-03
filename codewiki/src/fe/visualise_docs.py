@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import html as html_mod
 import os
 import re
@@ -225,19 +226,8 @@ async def index():
         )
 
     try:
-        content = file_manager.load_text(str(overview_file))
-
-        html_content = markdown_to_html(content)
-        title = get_file_title(overview_file)
-
-        context = {
-            "title": title,
-            "content": html_content,
-            "navigation": MODULE_TREE,
-            "current_page": "overview.md",
-        }
-
-        return HTMLResponse(content=render_template(DOCS_VIEW_TEMPLATE, context))
+        html = await asyncio.to_thread(_render_overview_sync, overview_file)
+        return HTMLResponse(content=html)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading overview.md: {e}")
@@ -278,19 +268,8 @@ async def serve_doc(filename: str):
             raise HTTPException(status_code=404, detail=f"File {filename} not found")
 
     try:
-        content = file_manager.load_text(str(file_path))
-
-        html_content = markdown_to_html(content)
-        title = get_file_title(file_path)
-
-        context = {
-            "title": title,
-            "content": html_content,
-            "navigation": MODULE_TREE,
-            "current_page": filename,
-        }
-
-        return HTMLResponse(content=render_template(DOCS_VIEW_TEMPLATE, context))
+        html = await asyncio.to_thread(_render_doc_sync, file_path, filename)
+        return HTMLResponse(content=html)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading {filename}: {e}")
@@ -298,6 +277,32 @@ async def serve_doc(filename: str):
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="."), name="static")
+
+
+def _render_overview_sync(overview_file: Path) -> str:
+    content = file_manager.load_text(str(overview_file))
+    html_content = markdown_to_html(content)
+    title = get_file_title(overview_file)
+    context = {
+        "title": title,
+        "content": html_content,
+        "navigation": MODULE_TREE,
+        "current_page": "overview.md",
+    }
+    return render_template(DOCS_VIEW_TEMPLATE, context)
+
+
+def _render_doc_sync(file_path: Path, filename: str) -> str:
+    content = file_manager.load_text(str(file_path))
+    html_content = markdown_to_html(content)
+    title = get_file_title(file_path)
+    context = {
+        "title": title,
+        "content": html_content,
+        "navigation": MODULE_TREE,
+        "current_page": filename,
+    }
+    return render_template(DOCS_VIEW_TEMPLATE, context)
 
 
 def main():
