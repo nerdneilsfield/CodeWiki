@@ -393,6 +393,8 @@ def call_llm(
                 content = _call_claude(client, resolved_model_name, prompt, temperature, config)
             else:
                 raise ValueError(f"unsupported provider type: {provider_type}")
+            if not content:
+                raise ValueError(f"LLM returned empty content (model={resolved_model_name})")
             elapsed = time.time() - t0
             _logger.debug(
                 f"call_llm [model={model}]: success in {elapsed:.1f}s, "

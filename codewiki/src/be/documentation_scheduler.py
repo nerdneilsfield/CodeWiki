@@ -209,6 +209,17 @@ async def run_module_queue(
                         await work_queue.put(parent_key)
                         active_tasks += 1
             done_queue.task_done()
+        unresolved_keys = list(pending_count.keys())
+        if unresolved_keys:
+            unresolved_labels = [
+                "overview" if key == ROOT_KEY else all_tasks[key][1] for key in unresolved_keys
+            ]
+            progress.update(len(unresolved_keys))
+            logger.warning(
+                "Skipping %s task(s) because dependencies failed: %s",
+                len(unresolved_labels),
+                ", ".join(unresolved_labels[:5]) + ("..." if len(unresolved_labels) > 5 else ""),
+            )
 
     async def _worker(_worker_id: int):
         while True:

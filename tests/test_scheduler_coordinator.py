@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 
@@ -62,11 +64,12 @@ async def test_coordinator_processes_leaves_before_parents():
 
 
 @pytest.mark.asyncio
-async def test_coordinator_handles_failed_task(monkeypatch):
+async def test_coordinator_handles_failed_task(monkeypatch, caplog):
     """A failed task must not block other leaf tasks from completing."""
     from codewiki.src.be import documentation_scheduler as scheduler
 
     call_count = 0
+    execution_order = []
 
     async def _fast_sleep(_delay):
         return None
@@ -76,6 +79,7 @@ async def test_coordinator_handles_failed_task(monkeypatch):
     async def mock_process(name, components, core_ids, path, working_dir, tree_manager, **kwargs):
         nonlocal call_count
         call_count += 1
+        execution_order.append("/".join(path))
         if name == "FailChild":
             raise RuntimeError("intentional failure")
         return {}, "mock"
@@ -95,6 +99,8 @@ async def test_coordinator_handles_failed_task(monkeypatch):
         max_retries = 2
         main_model = "test/main"
 
+    caplog.set_level(logging.WARNING)
+
     await scheduler.run_module_queue(
         config=FakeConfig(),
         graph_tree=tree,
@@ -107,3 +113,5 @@ async def test_coordinator_handles_failed_task(monkeypatch):
     )
 
     assert call_count >= 2
+    assert "Parent" not in execution_order
+    assert "Skipping 1 task(s) because dependencies failed" in caplog.text

@@ -53,11 +53,16 @@ _ALLOWED_ATTRIBUTES = {
     "img": {"src", "alt", "title", "width", "height"},
     "div": {"class", "id", "data-nav", "data-nav-sub"},
     "span": {"class", "id"},
+    "h1": {"id"},
+    "h2": {"id"},
+    "h3": {"id"},
+    "h4": {"id"},
+    "h5": {"id"},
+    "h6": {"id"},
     "code": {"class"},
     "pre": {"class"},
     "td": {"align", "colspan", "rowspan"},
     "th": {"align", "colspan", "rowspan"},
-    "*": {"id", "class"},
 }
 
 _SAFE_URL_SCHEMES = {"http", "https", "mailto"}

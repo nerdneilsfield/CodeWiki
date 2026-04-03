@@ -34,7 +34,7 @@ class TestSanitizeHtml:
         from codewiki.src.fe.html_sanitizer import sanitize_html
 
         safe = (
-            '<h1>Title</h1><p>Text with <strong>bold</strong> and '
+            "<h1>Title</h1><p>Text with <strong>bold</strong> and "
             '<a href="https://example.com">link</a></p>'
             '<pre><code class="language-python">print("hi")</code></pre>'
         )
@@ -83,3 +83,11 @@ class TestSanitizeHtml:
         result = sanitize_html(html)
         assert "<table>" in result
         assert "<th>Col</th>" in result
+
+    def test_preserves_heading_id_but_strips_heading_class(self):
+        from codewiki.src.fe.html_sanitizer import sanitize_html
+
+        html = '<h2 id="section-a" class="hero">Title</h2>'
+        result = sanitize_html(html)
+        assert '<h2 id="section-a">Title</h2>' in result
+        assert 'class="hero"' not in result

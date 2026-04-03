@@ -53,3 +53,36 @@ class TestLlmResponseGuard:
         ):
             with pytest.raises(ValueError, match="null content"):
                 call_llm("test prompt", config)
+
+    def test_empty_streaming_content_raises_value_error(self):
+        from codewiki.src.be.llm_services import call_llm
+
+        config = _make_config()
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception("cloudflare timeout")
+
+        with (
+            patch(
+                "codewiki.src.be.llm_services._create_client_for_model",
+                return_value=(mock_client, "openai_compatible"),
+            ),
+            patch("codewiki.src.be.llm_services._call_llm_streaming", return_value=""),
+            patch("codewiki.src.be.llm_services._sleep_with_jitter", return_value=None),
+        ):
+            with pytest.raises(ValueError, match="empty content"):
+                call_llm("test prompt", config)
+
+    def test_empty_claude_content_raises_value_error(self):
+        from codewiki.src.be.llm_services import call_llm
+
+        config = _make_config()
+
+        with (
+            patch(
+                "codewiki.src.be.llm_services._create_client_for_model",
+                return_value=(MagicMock(), "claude"),
+            ),
+            patch("codewiki.src.be.llm_services._call_claude", return_value=""),
+        ):
+            with pytest.raises(ValueError, match="empty content"):
+                call_llm("test prompt", config)
