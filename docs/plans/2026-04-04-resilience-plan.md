@@ -131,10 +131,16 @@ class TestClassifyLlmException:
         result = classify_llm_exception(FakeAPIError())
         assert result.category == ErrorCategory.RESOURCE_EXHAUSTED
 
-    def test_value_error_is_config(self):
+    def test_config_value_error_is_config(self):
         from codewiki.src.be.errors import classify_llm_exception, ErrorCategory
-        result = classify_llm_exception(ValueError("missing model"))
+        result = classify_llm_exception(ValueError("API key not configured"))
         assert result.category == ErrorCategory.NON_RETRYABLE_CONFIG
+
+    def test_runtime_value_error_reraised(self):
+        """ValueError not matching config indicators should re-raise, not wrap."""
+        from codewiki.src.be.errors import classify_llm_exception
+        with pytest.raises(ValueError, match="LLM returned empty"):
+            classify_llm_exception(ValueError("LLM returned empty content"))
 
     def test_unknown_error_reraised(self):
         from codewiki.src.be.errors import classify_llm_exception
@@ -217,9 +223,15 @@ def classify_llm_exception(exc: Exception) -> LLMError:
     if isinstance(exc, openai.APITimeoutError):
         return LLMError(str(exc), ErrorCategory.RETRYABLE_TRANSIENT)
 
-    # Config/input errors
+    # Config/input errors — only for known config-related messages
     if isinstance(exc, (ValueError, KeyError)):
-        return LLMError(str(exc), ErrorCategory.NON_RETRYABLE_CONFIG)
+        msg = str(exc).lower()
+        config_indicators = ["api key", "provider", "model not found", "model reference",
+                             "unsupported provider", "not configured"]
+        if any(indicator in msg for indicator in config_indicators):
+            return LLMError(str(exc), ErrorCategory.NON_RETRYABLE_CONFIG)
+        # Other ValueError/KeyError (e.g. "LLM returned empty content") → re-raise as-is
+        raise exc
 
     # SDK status errors
     status = getattr(exc, "status_code", None)
@@ -471,6 +483,34 @@ class TestPipelineRunnerWithCancelToken:
 
         assert result.status == "cancelled"
         assert "stage1" not in executed
+
+    @pytest.mark.asyncio
+    async def test_stage_internal_cancellation_sets_cancelled(self):
+        """CancellationError raised INSIDE a stage must also produce cancelled status."""
+        from codewiki.src.be.cancellation import CancellationToken
+        from codewiki.src.be.pipeline import PipelineRunner, PipelineContext
+        from codewiki.src.be.errors import CancellationError
+
+        executed_after = []
+
+        class CancellingStage:
+            name = "cancelling"
+            failure_policy = "degraded_ok"
+            async def execute(self, ctx):
+                raise CancellationError("cancelled mid-stage")
+
+        class NextStage:
+            name = "next"
+            failure_policy = "degraded_ok"
+            async def execute(self, ctx):
+                executed_after.append(self.name)
+
+        ctx = PipelineContext(config=None)
+        runner = PipelineRunner([CancellingStage(), NextStage()])
+        result = await runner.execute(ctx)
+
+        assert result.status == "cancelled"
+        assert "next" not in executed_after  # pipeline must stop
 ```
 
 - [ ] **Step 2: Implement**
@@ -698,6 +738,34 @@ class TestWithRetry:
         assert len(calls) == 1
 
     @pytest.mark.asyncio
+    async def test_retry_after_header_takes_priority(self):
+        """When Retry-After header is present, use it instead of exponential backoff."""
+        from codewiki.src.be.llm_retry import with_retry
+        from unittest.mock import patch, MagicMock
+
+        calls = []
+        sleep_values = []
+
+        async def flaky():
+            calls.append(1)
+            if len(calls) < 2:
+                # Create an LLMError whose __cause__ has a Retry-After header
+                cause = MagicMock()
+                cause.response = MagicMock()
+                cause.response.headers = {"retry-after": "7.5"}
+                err = LLMError("rate limit", ErrorCategory.RETRYABLE_TRANSIENT, status_code=429)
+                err.__cause__ = cause
+                raise err
+            return "ok"
+
+        with patch("asyncio.sleep", side_effect=lambda d: sleep_values.append(d)) as mock_sleep:
+            result = await with_retry(flaky, max_retries=3)
+
+        assert result == "ok"
+        assert len(sleep_values) == 1
+        assert sleep_values[0] == 7.5  # Retry-After header, not exponential backoff
+
+    @pytest.mark.asyncio
     async def test_exhausted_raises_llm_retry_exhausted(self):
         from codewiki.src.be.llm_retry import with_retry, LLMRetryExhausted
 
@@ -885,9 +953,10 @@ class TestCallLlmStreamParam:
 
 In `codewiki/src/config_loader.py`:
 - `ResolvedModel` add `stream: bool = False`
-- In `_load_provider_configs`, normalize `model_list` items: `str` items become `{"name": str, "stream": False}`; dict items keep their `stream` value. After normalization, `ProviderConfig.model_list` is always `list[str]` (just names) — the stream metadata is stored separately on each `ProviderConfig` as `model_options: dict[str, dict]` (keyed by model name)
-- In `resolve_model_ref`, look up `provider.model_options.get(model_name, {}).get("stream", False)` and set `ResolvedModel.stream`
-- **Key constraint:** downstream code (`llm_services.py`, `guide_generator.py`, etc.) never sees `str | dict` union type. They only access `ResolvedModel.stream` — the polymorphism is fully resolved at load time
+- `ProviderConfig.model_list` stays as `list[str | dict]` in the raw pydantic model (accepts both forms from TOML)
+- In `_load_provider_configs`, normalize each item: `str` → `{"name": str, "stream": False}`; dict items keep their values. Store normalized result as `ProviderConfig._model_stream: dict[str, bool]` (internal, keyed by model name) during provider construction
+- In `resolve_model_ref`, look up `provider._model_stream.get(model_name, False)` and set `ResolvedModel.stream`
+- **Key constraint:** no separate `model_options` section. The polymorphism is consumed and resolved inside the loader. Downstream code only accesses `ResolvedModel.stream` — never sees `str | dict` union type
 
 In `codewiki/src/be/llm_services.py`:
 - Add `stream: bool = False` parameter to `call_llm`
