@@ -232,6 +232,26 @@ class TestBuildGlossary:
             == "Describes U.S. rollout by Dr. Smith; see Fig. 2 for context. (class, src/mod.py)"
         )
 
+    def test_build_glossary_preserves_vs_and_etc_in_first_sentence(self):
+        """Common abbreviations like vs./etc. must not be treated as sentence ends."""
+        from codewiki.src.be.generation.glossary import build_glossary
+
+        sym = _make_symbol(
+            "VsEtc",
+            docstring=(
+                "Compares sync vs. async modes, etc. for production tuning. "
+                "Further implementation notes follow."
+            ),
+        )
+        index_products = _FakeIndexProducts([sym])
+
+        result = build_glossary(index_products)
+
+        assert (
+            result["VsEtc"].definition
+            == "Compares sync vs. async modes, etc. for production tuning. (class, src/mod.py)"
+        )
+
     def test_build_glossary_missing_symbol_table_attr(self):
         """Object without symbol_table attribute returns empty dict (defensive)."""
         from codewiki.src.be.generation.glossary import build_glossary
@@ -324,7 +344,8 @@ class TestBuildLinkMap:
         result = build_link_map(tree)
 
         assert "Some Long Human Title" in result
-        assert result["Some Long Human Title"] == "mod_stable_path.md"
+        assert result["Some Long Human Title"].doc_filename == "mod_stable_path.md"
+        assert result["Some Long Human Title"].source_path == "mod/stable_path"
 
     def test_build_link_map_sorted(self):
         """Link map entries are sorted by key (title path)."""
@@ -371,7 +392,7 @@ class TestBuildLinkMap:
 
         result = build_link_map(tree)
 
-        filename = result["Auth Module"]
+        filename = result["Auth Module"].doc_filename
         assert filename.endswith(".md")
 
     def test_build_link_map_falls_back_without_doc_filename(self):
@@ -386,8 +407,8 @@ class TestBuildLinkMap:
 
         result = build_link_map(tree)
 
-        assert result["Pathless"] == module_doc_filename(["Pathless"])
-        assert result["HasPath"] == module_doc_filename(["src/valid"])
+        assert result["Pathless"].doc_filename == module_doc_filename(["Pathless"])
+        assert result["HasPath"].doc_filename == module_doc_filename(["src/valid"])
 
     def test_build_link_map_reads_frozen_doc_filename(self):
         """Frozen _doc_filename wins over recomputation."""
@@ -411,8 +432,8 @@ class TestBuildLinkMap:
 
         result = build_link_map(tree)
 
-        assert result["Auth Module"] == "cli.md"
-        assert result["Auth Module/Sub Module"] == "cli-sub_module.md"
+        assert result["Auth Module"].doc_filename == "cli.md"
+        assert result["Auth Module/Sub Module"].doc_filename == "cli-sub_module.md"
 
     def test_build_link_map_non_dict_values_skipped(self):
         """Non-dict values in module_tree are skipped without error."""

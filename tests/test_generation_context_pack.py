@@ -320,20 +320,19 @@ def test_build_context_pack_link_map(module_components, components):
     assert "src/utils/helpers.py" in ctx
 
 
-def test_build_context_pack_filters_link_map_by_module_paths(
-    module_components, components, index_with_cards_and_edges
-):
+def test_build_context_pack_filters_link_map_by_module_paths(module_components, components):
     from codewiki.src.be.generation.context_pack import build_context_pack
 
     link_map = {
         "src/auth/login.py": "docs/auth/login.md",
         "src/utils/helpers.py": "docs/utils/helpers.md",
     }
+    index = _MockIndexProducts(cards=[], edges=[])
 
     result = build_context_pack(
         module_components=module_components,
         components=components,
-        index_products=index_with_cards_and_edges,
+        index_products=index,
         link_map=link_map,
     )
 
@@ -385,6 +384,40 @@ def test_build_context_pack_pathless_module_does_not_emit_full_link_map():
     )
 
     assert result["link_map_context"] == ""
+
+
+def test_build_context_pack_filters_link_map_by_dependency_related_files(components):
+    from codewiki.src.be.generation.context_pack import build_context_pack
+    from codewiki.src.be.generation.glossary import LinkMapEntry
+    from codewiki.src.be.index.edge_index import EdgeIndex
+
+    auth_symbol = "py:src/auth/login.py#LoginService(class)"
+    session_symbol = "py:src/auth/session.py#SessionStore(class)"
+    db_symbol = "py:src/db/connection.py#Connection(class)"
+
+    edges = [_make_edge(auth_symbol, session_symbol, EdgeType.CALLS)]
+    index = _MockIndexProducts(cards=[], edges=edges)
+    index.edge_index = EdgeIndex(edges)
+
+    link_map = {
+        "Auth/Login": LinkMapEntry("Auth/Login", "docs/auth-login.md", "src/auth/login.py"),
+        "Auth/Session": LinkMapEntry("Auth/Session", "docs/auth-session.md", "src/auth/session.py"),
+        "DB/Connection": LinkMapEntry(
+            "DB/Connection", "docs/db-connection.md", "src/db/connection.py"
+        ),
+    }
+
+    result = build_context_pack(
+        module_components=["comp_a", "comp_b"],
+        components=components,
+        index_products=index,
+        link_map=link_map,
+    )
+
+    ctx = result["link_map_context"]
+    assert "Auth/Login" in ctx
+    assert "Auth/Session" in ctx
+    assert "DB/Connection" not in ctx
 
 
 # ---------------------------------------------------------------------------

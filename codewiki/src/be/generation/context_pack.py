@@ -8,7 +8,7 @@ import logging
 import os
 from typing import Any, cast
 
-from codewiki.src.be.generation.glossary import GlossaryEntry, filter_glossary
+from codewiki.src.be.generation.glossary import GlossaryEntry, LinkMapEntry, filter_glossary
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ def build_context_pack(
     components: dict[str, Any],  # Dict[str, Node]
     index_products: Any | None,  # IndexProducts or None
     glossary: dict[str, str | GlossaryEntry] | None = None,
-    link_map: dict[str, str] | None = None,
+    link_map: dict[str, str | LinkMapEntry] | None = None,
 ) -> dict:
     """Build evidence-rich context for LLM prompt.
 
@@ -52,11 +52,15 @@ def build_context_pack(
 
     # Build precise set of symbol_ids belonging to this module's components
     module_sym_ids = _build_module_symbol_ids(module_components, components, index_products)
+    expanded_sym_ids = _expand_related_symbol_ids(module_sym_ids, index_products)
     module_file_paths = {
         getattr(node, "relative_path", "").replace("\\", "/")
         for component_id in module_components
         if (node := components.get(component_id)) is not None
     }
+    relevant_file_paths = module_file_paths | _symbol_ids_to_file_paths(
+        expanded_sym_ids, index_products
+    )
 
     # 1. Symbol cards (component-level precise)
     result["symbol_cards"] = _build_symbol_cards(module_sym_ids, index_products)
@@ -75,8 +79,8 @@ def build_context_pack(
             structured_glossary = cast(dict[str, GlossaryEntry], glossary)
             filtered_glossary = filter_glossary(
                 structured_glossary,
-                relevant_symbol_ids=module_sym_ids,
-                module_file_paths=module_file_paths,
+                relevant_symbol_ids=expanded_sym_ids,
+                module_file_paths=relevant_file_paths,
             )
             result["glossary_context"] = _format_glossary(
                 cast(dict[str, str | GlossaryEntry], filtered_glossary)
@@ -84,7 +88,9 @@ def build_context_pack(
         else:
             result["glossary_context"] = _format_glossary(glossary)
     if link_map:
-        result["link_map_context"] = _format_link_map(_filter_link_map(link_map, module_file_paths))
+        result["link_map_context"] = _format_link_map(
+            _filter_link_map(link_map, relevant_file_paths)
+        )
 
     return result
 
@@ -168,6 +174,40 @@ def _build_symbol_cards(module_sym_ids: set[str], index_products) -> list[str]:
             formatted += f" | {card.file_context}"
             cards.append(formatted)
     return cards
+
+
+def _expand_related_symbol_ids(module_sym_ids: set[str], index_products) -> set[str]:
+    """Expand symbol ids via direct dependency relationships."""
+    expanded = set(module_sym_ids)
+    edge_index = getattr(index_products, "edge_index", None)
+    if edge_index is None:
+        for edge in getattr(index_products, "edges", []):
+            if edge.from_symbol in module_sym_ids and edge.to_symbol:
+                expanded.add(edge.to_symbol)
+            if edge.to_symbol in module_sym_ids:
+                expanded.add(edge.from_symbol)
+        return expanded
+
+    for symbol_id in module_sym_ids:
+        for edge in edge_index.callees_of(symbol_id):
+            if edge.to_symbol:
+                expanded.add(edge.to_symbol)
+        for edge in edge_index.callers_of(symbol_id):
+            expanded.add(edge.from_symbol)
+    return expanded
+
+
+def _symbol_ids_to_file_paths(symbol_ids: set[str], index_products) -> set[str]:
+    """Resolve symbol ids to stable file paths."""
+    symbol_table = getattr(index_products, "symbol_table", None)
+    if symbol_table is not None:
+        by_id = {sym.symbol_id: sym for sym in symbol_table.all_symbols()}
+        return {
+            by_id[symbol_id].file_path.replace("\\", "/")
+            for symbol_id in symbol_ids
+            if symbol_id in by_id
+        }
+    return {_extract_file(symbol_id) for symbol_id in symbol_ids if _extract_file(symbol_id)}
 
 
 def _classify_edges(module_sym_ids: set[str], index_products):
@@ -260,23 +300,22 @@ def _format_glossary(glossary: dict[str, str | GlossaryEntry] | None) -> str:
     return "\n".join(lines)
 
 
-def _format_link_map(link_map: dict[str, str] | None) -> str:
+def _format_link_map(link_map: dict[str, str | LinkMapEntry] | None) -> str:
     """Format link map into prompt-friendly text."""
     if not link_map:
         return ""
-    lines = [f"- [{path}]({doc_path})" for path, doc_path in sorted(link_map.items())]
+    lines = []
+    for path, entry in sorted(link_map.items()):
+        doc_path = entry.doc_filename if isinstance(entry, LinkMapEntry) else entry
+        lines.append(f"- [{path}]({doc_path})")
     return "\n".join(lines)
 
 
-def _filter_link_map(link_map: dict[str, str], module_file_paths: set[str]) -> dict[str, str]:
-    """Filter link map to entries near the current module's files/directories.
-
-    Uses the link-map key as the primary signal. This works for path-shaped keys
-    and still gives title/path-token overlap a chance.
-
-    If nothing scores as relevant, return an empty subset rather than the full
-    map so the context remains selective by default.
-    """
+def _filter_link_map(
+    link_map: dict[str, str | LinkMapEntry],
+    module_file_paths: set[str],
+) -> dict[str, str | LinkMapEntry]:
+    """Filter link map using stable file relationships when available."""
     if not link_map:
         return link_map
     if not module_file_paths:
@@ -286,27 +325,39 @@ def _filter_link_map(link_map: dict[str, str], module_file_paths: set[str]) -> d
     module_dirs = {os.path.dirname(path) for path in module_files if os.path.dirname(path)}
     module_tokens = {token for path in module_files for token in _tokenize_pathish(path)}
 
-    scored_entries: list[tuple[int, str, str]] = []
-    for key, doc_path in link_map.items():
+    scored_entries: list[tuple[int, str, str | LinkMapEntry]] = []
+    for key, entry in link_map.items():
         key_norm = key.replace("\\", "/").lower()
         score = 0
 
-        if key_norm in module_files:
-            score += 10
-        if any(module_dir and key_norm.startswith(module_dir + "/") for module_dir in module_dirs):
-            score += 6
-
-        key_tokens = _tokenize_pathish(key_norm)
+        if isinstance(entry, LinkMapEntry):
+            source_norm = entry.source_path.replace("\\", "/").lower()
+            if source_norm and source_norm in module_files:
+                score += 10
+            if any(
+                module_dir and source_norm.startswith(module_dir + "/")
+                for module_dir in module_dirs
+            ):
+                score += 6
+            key_tokens = _tokenize_pathish(source_norm) | _tokenize_pathish(key_norm)
+        else:
+            if key_norm in module_files:
+                score += 10
+            if any(
+                module_dir and key_norm.startswith(module_dir + "/") for module_dir in module_dirs
+            ):
+                score += 6
+            key_tokens = _tokenize_pathish(key_norm)
         score += len(module_tokens & key_tokens)
 
         if score > 0:
-            scored_entries.append((score, key, doc_path))
+            scored_entries.append((score, key, entry))
 
     if not scored_entries:
         return {}
 
     scored_entries.sort(key=lambda item: (-item[0], item[1]))
-    return {key: doc_path for _, key, doc_path in scored_entries}
+    return {key: entry for _, key, entry in scored_entries}
 
 
 def _tokenize_pathish(value: str) -> set[str]:

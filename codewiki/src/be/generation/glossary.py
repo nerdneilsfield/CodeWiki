@@ -13,6 +13,8 @@ from codewiki.src.be.index.models import Visibility, ExportStatus
 _ABBREVIATIONS = {
     "e.g.": "e<DOT>g<DOT>",
     "i.e.": "i<DOT>e<DOT>",
+    "vs.": "vs<DOT>",
+    "etc.": "etc<DOT>",
     "U.S.": "U<DOT>S<DOT>",
     "U.K.": "U<DOT>K<DOT>",
     "Dr.": "Dr<DOT>",
@@ -31,6 +33,13 @@ class GlossaryEntry:
     symbol_id: str
     file_path: str
     kind: str
+
+
+@dataclass(frozen=True)
+class LinkMapEntry:
+    title_path: str
+    doc_filename: str
+    source_path: str
 
 
 def _first_sentence(text: str) -> str:
@@ -126,14 +135,14 @@ def filter_glossary(
 
 def build_link_map(
     module_tree: dict,
-) -> dict[str, str]:
+) -> dict[str, LinkMapEntry]:
     """Build link map for cross-module references.
 
     Keys use slash-joined tree title paths for prompt reference.
     Values use frozen ``_doc_filename`` when present; otherwise they fall back
     to ``module_doc_filename()`` based on path or title path.
     """
-    link_map: dict[str, str] = {}
+    link_map: dict[str, LinkMapEntry] = {}
     _walk_tree(module_tree, [], link_map)
     return dict(sorted(link_map.items()))
 
@@ -141,7 +150,7 @@ def build_link_map(
 def _walk_tree(
     tree: dict,
     parent_path: list[str],
-    link_map: dict[str, str],
+    link_map: dict[str, LinkMapEntry],
 ) -> None:
     """Recursively walk module tree and populate link_map."""
     from codewiki.src.utils import module_doc_filename
@@ -153,12 +162,16 @@ def _walk_tree(
         key_path = parent_path + [title]
         key_str = "/".join(key_path) if len(key_path) > 1 else title
 
+        path = info.get("path", "")
         doc_filename = info.get("_doc_filename")
         if not doc_filename:
-            path = info.get("path", "")
             doc_filename = module_doc_filename([path] if path else key_path)
 
-        link_map[key_str] = doc_filename
+        link_map[key_str] = LinkMapEntry(
+            title_path=key_str,
+            doc_filename=doc_filename,
+            source_path=path,
+        )
 
         children = info.get("children", {})
         if children and isinstance(children, dict):
