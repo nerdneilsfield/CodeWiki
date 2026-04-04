@@ -523,10 +523,10 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
         return re.sub(r"\\\\(?=[A-Za-z])", r"\\", s)
 
     def _is_cjk_prose(inner: str) -> bool:
-        """Return True only when CJK chars appear but NO LaTeX commands exist.
+        """Return True only when CJK chars appear in non-math content.
 
         ``$100$`` next to Chinese text → skip (CJK prose with dollar signs).
-        ``$\\text{中文}$`` → real math, extract even though CJK is present.
+        ``$\\text{中文}$`` → real math (has LaTeX cmd), extract.
         """
         return bool(_CJK_RE.search(inner)) and not _LATEX_CMD_RE.search(inner)
 
@@ -543,13 +543,15 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
         protected.append((ph, f'<div class="math-block not-prose">\\[{escaped}\\]</div>'))
         return ph
 
+    _PURE_NUMERIC_RE = re.compile(r"^[\d,.\s%+\-*/=]+$")
+
     def _inline(m: re.Match) -> str:
         inner = m.group(1)
         if _is_cjk_prose(inner):
             return m.group(0)
-        # Also skip when CJK chars are immediately adjacent (e.g. 价格$100$元)
-        # BUT allow if the content has LaTeX commands
-        if not _LATEX_CMD_RE.search(inner):
+        # Only skip CJK-adjacent pure-numeric content like 价格$100$元.
+        # Anything with letters (e.g. $O(W)$, $T_a$) is real math.
+        if _PURE_NUMERIC_RE.match(inner):
             before = m.string[: m.start()].rstrip()
             after = m.string[m.end() :].lstrip()
             if (before and _CJK_RE.search(before[-1])) or (after and _CJK_RE.search(after[0])):
