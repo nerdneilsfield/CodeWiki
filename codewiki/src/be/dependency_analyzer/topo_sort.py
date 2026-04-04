@@ -310,70 +310,43 @@ def get_leaf_nodes(graph: Dict[str, Set[str]], components: Dict[str, Node]) -> L
     # Find leaf nodes (nodes that no other nodes depend on)
     leaf_nodes = set(acyclic_graph.keys())
 
-    def concise_node(leaf_nodes: Set[str]) -> List[str]:
-        concise_leaf_nodes: Set[str] = set()
-        for node in leaf_nodes:
-            if node.endswith("__init__"):
-                # replace by class name
-                concise_leaf_nodes.add(node.replace(".__init__", ""))
-            else:
-                concise_leaf_nodes.add(node)
+    # Collapse __init__ into class name
+    concise: Set[str] = set()
+    for node in leaf_nodes:
+        concise.add(node.replace(".__init__", "") if node.endswith("__init__") else node)
 
-        keep_leaf_nodes = []
+    # All code-bearing types are valid — no type-based discrimination.
+    # Functions carry business logic even in repos that also have classes.
+    _VALID_TYPES = {
+        "class",
+        "abstract class",
+        "interface",
+        "struct",
+        "enum",
+        "trait",
+        "type",
+        "function",
+        "macro",
+        "table",
+        "table_array",
+        "hls_top",
+        "kernel_instance",
+        "hls_project",
+    }
 
-        # Determine if we should include functions based on available component types
-        # For C-based projects, we need to include functions since they don't have classes
-        available_types = set()
-        for comp in components.values():
-            available_types.add(comp.component_type)
+    keep: List[str] = []
+    for node in concise:
+        if not isinstance(node, str) or not node.strip():
+            continue
+        if any(kw in node.lower() for kw in ("error", "exception", "failed", "invalid")):
+            logger.debug("Skipping invalid leaf node identifier: '%s'", node)
+            continue
+        if node in components and components[node].component_type in _VALID_TYPES:
+            keep.append(node)
 
-        # Valid types for leaf nodes — OOP types are primary, HLS types are also primary
-        primary_leaf_types = {"class", "interface", "struct", "hls_top", "kernel_instance"}
-        valid_types = set(primary_leaf_types)
-        # If no OOP class-like types are found, include functions and HLS container types
-        if not available_types.intersection({"class", "interface", "struct"}):
-            valid_types.update({"function", "hls_project"})
-
-        for leaf_node in leaf_nodes:
-            # Skip any leaf nodes that are clearly error strings or invalid identifiers
-            if (
-                not isinstance(leaf_node, str)
-                or leaf_node.strip() == ""
-                or any(
-                    err_keyword in leaf_node.lower()
-                    for err_keyword in ["error", "exception", "failed", "invalid"]
-                )
-            ):
-                logger.debug(f"Skipping invalid leaf node identifier: '{leaf_node}'")
-                continue
-
-            if leaf_node in components:
-                if components[leaf_node].component_type in valid_types:
-                    keep_leaf_nodes.append(leaf_node)
-                else:
-                    # logger.debug(f"Leaf node {leaf_node} is a {components[leaf_node].component_type}, removing it")
-                    pass
-            else:
-                # logger.debug(f"Leaf node {leaf_node} not found in components, removing it")
-                pass
-
-        return keep_leaf_nodes
-
-    concise_leaf_nodes = concise_node(leaf_nodes)
-    if len(concise_leaf_nodes) >= 400:
-        logger.debug(
-            f"Leaf nodes are too many ({len(concise_leaf_nodes)}), removing dependencies of other nodes"
-        )
-        # Remove nodes that are dependencies of other nodes
-        for node, deps in acyclic_graph.items():
-            for dep in deps:
-                leaf_nodes.discard(dep)
-
-        concise_leaf_nodes = concise_node(leaf_nodes)
-
-    if not concise_leaf_nodes:
+    if not keep:
         logger.warning("No leaf nodes found in the graph")
         return []
 
-    logger.debug("get_leaf_nodes: %d leaf nodes selected", len(concise_leaf_nodes))
-    return concise_leaf_nodes
+    logger.debug("get_leaf_nodes: %d leaf nodes selected", len(keep))
+    return keep

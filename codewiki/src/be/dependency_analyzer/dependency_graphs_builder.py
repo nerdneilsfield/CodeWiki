@@ -79,68 +79,37 @@ class DependencyGraphBuilder:
         # Get leaf nodes
         leaf_nodes = get_leaf_nodes(graph, components)
 
-        # Keep leaf nodes whose component type represents a meaningful code unit.
-        # Primary types: class-like structures from all supported languages.
-        # Secondary types (function/macro/table): only when no primary types exist
-        # in the repo (e.g. pure-C, pure-Bash, pure-CMake, pure-TOML repos).
-        PRIMARY_TYPES = {
-            "class",  # Python, Java, C#, PHP, JavaScript, TypeScript
-            "abstract class",  # PHP, Java
-            "interface",  # Java, C#, TypeScript, Go, PHP
-            "struct",  # C, C++, Go, Rust
-            "enum",  # Rust, PHP, Java, C#, TypeScript
-            "trait",  # Rust, PHP
-            "type",  # Go (type aliases / named types)
-            # HLS / compiled-language types (always meaningful leaf nodes)
-            "hls_top",  # Vitis HLS top function (set_top / syn.top)
-            "kernel_instance",  # Instantiated HLS kernel (nk= in connectivity)
+        # All code-bearing types are valid — no type-based discrimination.
+        # Functions carry business logic even in repos that also have classes.
+        # Leiden's resolution parameter controls clustering granularity.
+        _VALID_TYPES = {
+            "class",
+            "abstract class",
+            "interface",
+            "struct",
+            "enum",
+            "trait",
+            "type",
+            "function",
+            "macro",
+            "table",
+            "table_array",
+            "hls_top",
+            "kernel_instance",
+            "hls_project",
         }
-        SECONDARY_TYPES = {
-            "function",  # Python, C, C++, Bash, CMake, Go
-            "macro",  # CMake, Rust
-            "table",  # TOML top-level tables
-            "table_array",  # TOML arrays of tables
-            "hls_project",  # Vitis HLS project container (open_project)
-        }
-
-        # Check types among actual leaf nodes (not all components).
-        # Using all components would cause false-positives: e.g. an hls_top node
-        # exists in components but is never a leaf (it depends on C++ functions),
-        # so checking all components would incorrectly suppress including "function".
-        available_leaf_types = {
-            components[ln].component_type for ln in leaf_nodes if ln in components
-        }
-
-        valid_types = PRIMARY_TYPES.copy()
-        # Fall back to secondary types when no OOP class-like primary types exist
-        # among the actual leaf nodes (hls_top / kernel_instance don't count here
-        # since HLS projects are function-based and need function leaves too).
-        OOP_PRIMARY = PRIMARY_TYPES - {"hls_top", "kernel_instance"}
-        if not available_leaf_types & OOP_PRIMARY:
-            valid_types |= SECONDARY_TYPES
 
         keep_leaf_nodes = []
         for leaf_node in leaf_nodes:
-            # Skip any leaf nodes that are clearly error strings or invalid identifiers
-            if (
-                not isinstance(leaf_node, str)
-                or leaf_node.strip() == ""
-                or any(
-                    err_keyword in leaf_node.lower()
-                    for err_keyword in ["error", "exception", "failed", "invalid"]
-                )
-            ):
-                logger.warning(f"Skipping invalid leaf node identifier: '{leaf_node}'")
+            if not isinstance(leaf_node, str) or not leaf_node.strip():
                 continue
-
-            if leaf_node in components:
-                if components[leaf_node].component_type in valid_types:
-                    keep_leaf_nodes.append(leaf_node)
-                else:
-                    # logger.debug(f"Leaf node {leaf_node} is a {components[leaf_node].component_type}, removing it")
-                    pass
-            else:
-                logger.warning(f"Leaf node {leaf_node} not found in components, removing it")
+            if any(kw in leaf_node.lower() for kw in ("error", "exception", "failed", "invalid")):
+                logger.warning("Skipping invalid leaf node identifier: '%s'", leaf_node)
+                continue
+            if leaf_node in components and components[leaf_node].component_type in _VALID_TYPES:
+                keep_leaf_nodes.append(leaf_node)
+            elif leaf_node not in components:
+                logger.warning("Leaf node %s not found in components, removing it", leaf_node)
 
         logger.debug(
             "GraphBuild complete: %d components, %d graph nodes, %d raw leaves → %d filtered leaves",

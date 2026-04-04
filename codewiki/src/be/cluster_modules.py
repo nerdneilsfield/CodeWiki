@@ -7,8 +7,11 @@ import json
 import logging
 import traceback
 
+import math
+
+import igraph as ig
+import leidenalg
 import networkx as nx
-from networkx.algorithms.community import louvain_communities
 
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.llm_services import call_llm
@@ -283,17 +286,45 @@ def graph_pre_cluster(
                 if not G.has_edge(a, b):
                     G.add_edge(a, b, weight=0.3)
 
-    # Run Louvain community detection; cap to MAX_CLUSTERS afterwards.
-    # Resolution 1.0 produces coarser communities than the original 2.0,
-    # reducing the initial count before the cap step.
-    # Scale cap with repo size: ~1 cluster per 50 nodes, clamped [12, 32].
-    MAX_CLUSTERS = max(12, min(32, len(node_set) // 50))
+    # ── Leiden community detection ─────────────────────────────────────────
+    # Convert networkx graph to igraph for leidenalg (much faster on large graphs).
+    # Adaptive resolution: higher for larger graphs to avoid over-merging.
+    n_nodes = len(node_set)
+    resolution = max(1.0, math.log10(max(n_nodes, 10)) - 1)
+    logger.debug(
+        "Leiden clustering: %d nodes, resolution=%.2f",
+        n_nodes,
+        resolution,
+    )
+
+    # Build igraph from networkx edges
+    node_list = sorted(node_set)
+    node_index = {name: idx for idx, name in enumerate(node_list)}
+    ig_graph = ig.Graph(n=len(node_list), directed=False)
+    ig_graph.vs["name"] = node_list
+    edges: list[tuple[int, int]] = []
+    weights: list[float] = []
+    for u, v, data in G.edges(data=True):
+        if u in node_index and v in node_index:
+            edges.append((node_index[u], node_index[v]))
+            weights.append(data.get("weight", 1.0))
+    ig_graph.add_edges(edges)
+    ig_graph.es["weight"] = weights
+
     try:
-        communities = cast(
-            list[set[str]], louvain_communities(G, weight="weight", resolution=1.0, seed=42)
+        partition = leidenalg.find_partition(
+            ig_graph,
+            leidenalg.RBConfigurationVertexPartition,
+            weights=weights,
+            resolution_parameter=resolution,
+            seed=42,
+            n_iterations=-1,  # iterate until stable
         )
+        communities: list[set[str]] = [
+            {node_list[idx] for idx in members} for members in partition if members
+        ]
     except Exception as e:
-        logger.warning(f"Louvain community detection failed: {e}")
+        logger.warning("Leiden community detection failed: %s", e)
         return {}, {}
 
     if len(communities) <= 1:
@@ -302,20 +333,8 @@ def graph_pre_cluster(
     # Sort: largest first
     communities = cast(list[set[str]], sorted(communities, key=len, reverse=True))
 
-    def _merge_smallest(comms: list[set[str]]) -> list[set[str]]:
-        """Merge the smallest community into its most-connected neighbour."""
-        comms = cast(list[set[str]], sorted(comms, key=len))  # smallest first
-        smallest = comms[0]
-        rest = comms[1:]
-        best, best_score = 0, -1
-        for idx, other in enumerate(rest):
-            score = sum(1 for n in smallest for nbr in G.neighbors(n) if nbr in other)
-            if score > best_score:
-                best, best_score = idx, score
-        rest[best] = rest[best] | smallest
-        return cast(list[set[str]], sorted(rest, key=len, reverse=True))
-
-    # Phase 1: merge tiny (< 3 members) communities
+    # Only merge truly tiny communities (singletons/pairs) into neighbours.
+    # No artificial cluster-count cap — let Leiden's resolution control granularity.
     MIN_CLUSTER_SIZE = 3
     n_before = len(communities)
     large = [c for c in communities if len(c) >= MIN_CLUSTER_SIZE]
@@ -330,14 +349,11 @@ def graph_pre_cluster(
             large[best] = large[best] | tiny
         communities = cast(list[set[str]], sorted(large, key=len, reverse=True))
 
-    # Phase 2: enforce MAX_CLUSTERS cap — keep merging smallest until at cap
-    while len(communities) > MAX_CLUSTERS:
-        communities = _merge_smallest(communities)
-
     if len(communities) != n_before:
         logger.debug(
-            f"Merged {n_before} → {len(communities)} communities "
-            f"(tiny merge + {MAX_CLUSTERS}-cluster cap)"
+            "Merged %d → %d communities (tiny-community absorption only)",
+            n_before,
+            len(communities),
         )
 
     # Build cluster dict with heuristic names
