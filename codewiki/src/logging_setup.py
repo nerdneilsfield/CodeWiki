@@ -26,6 +26,9 @@ class _CurrentStderrProxy:
     Logging handlers can outlive pytest's temporary stderr objects. Looking up
     the active stream lazily keeps later log records pointed at the current
     capture target instead of a closed file object.
+
+    When tqdm progress bars are active, writes are routed through
+    ``tqdm.write()`` so the bar redraws cleanly below log output.
     """
 
     def _target(self):
@@ -34,7 +37,21 @@ class _CurrentStderrProxy:
             return sys.__stderr__
         return stream
 
+    @staticmethod
+    def _tqdm_active() -> bool:
+        try:
+            from tqdm import tqdm
+
+            return len(getattr(tqdm, "_instances", set())) > 0
+        except ImportError:
+            return False
+
     def write(self, data):
+        if self._tqdm_active():
+            from tqdm import tqdm
+
+            tqdm.write(data, file=self._target(), end="")
+            return len(data)
         return self._target().write(data)
 
     def flush(self):
