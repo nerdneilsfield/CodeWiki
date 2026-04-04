@@ -45,6 +45,7 @@ cluster_model = "openai/gpt-4o-mini"
 [postprocess]
 strict    = false
 fix_links = true
+# repair_model = "openai/gpt-4o-mini"  # optional: dedicated repair model
 
 [[providers]]
 name      = "openai"
@@ -219,6 +220,7 @@ Validates and repairs generated documentation:
 - **Heading anchors** — `heading_to_slug()` as single source of truth, used by both renderer and validator, with duplicate heading dedup (-1, -2 suffixes)
 - **Math validation** — `pylatexenc` structural parsing plus KaTeX render checks, deterministic cleanup rules, then batch LLM repair when needed
 - **Mermaid validation** — `mmdc` when available, regex fallback otherwise, deterministic cleanup rules, then batch LLM repair when needed
+- **Repair model chain** — `repair_model -> repair_fallback_1 -> repair_fallback_2`, batched by `repair_batch_size`
 - **Mermaid degradation** — unfixable diagrams replaced with `text` code blocks + error comments
 - **Math degradation** — inline math → backtick code; display math → `latex` fenced block
 - **LintReport** — JSON report saved to `_lint_report.json` with all failures

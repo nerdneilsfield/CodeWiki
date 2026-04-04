@@ -45,6 +45,7 @@ cluster_model = "openai/gpt-4o-mini"
 [postprocess]
 strict    = false
 fix_links = true
+# repair_model = "openai/gpt-4o-mini"  # 可选：专门用于修复阶段的模型
 
 [[providers]]
 name      = "openai"
@@ -219,6 +220,7 @@ CodeWiki 将仓库处理分为五个层次，每层基于前一层的产出：
 - **标题锚点** —— `heading_to_slug()` 作为唯一规则源，渲染器和校验器共用，重复标题自动去重（-1、-2 后缀）
 - **数学公式校验** —— `pylatexenc` 结构解析加 KaTeX 渲染双层检查，先走确定性清理规则，再按批次调用 LLM 修复
 - **Mermaid 校验** —— 优先用 `mmdc`，不可用时退回正则启发式；同样先走确定性清理规则，再按批次调用 LLM 修复
+- **修复模型链** —— `repair_model -> repair_fallback_1 -> repair_fallback_2`，按 `repair_batch_size` 分批修复
 - **Mermaid 降级** —— 无法修复的图表替换为 `text` 代码块 + 错误注释
 - **Math 降级** —— 行内公式 → 反引号代码；展示公式 → `latex` 围栏代码块
 - **LintReport** —— JSON 报告保存到 `_lint_report.json`

@@ -49,8 +49,8 @@ fix_links          = true        # validate and rewrite internal links
 # repair_model      = "openai/gpt-4o-mini"  # empty = main_model
 # repair_fallback_1 = ""
 # repair_fallback_2 = ""
-# repair_batch_size = 8
-# repair_max_retries = 2
+# repair_batch_size = 8          # formulas/diagrams per repair prompt
+# repair_max_retries = 2         # retries per repair model
 
 # ── Providers ────────────────────────────────────────────────────────────────
 
