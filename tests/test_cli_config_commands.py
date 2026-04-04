@@ -1,6 +1,7 @@
 """
 Tests for the config subcommands:
   - config init  (create TOML template)
+  - config gen   (print TOML template to stdout)
   - config get   (TOML path only)
   - config validate (TOML path only)
   - config set   (TOML editing)
@@ -94,6 +95,26 @@ def test_config_init_shows_next_steps(tmp_path):
     assert result.exit_code == 0
     assert "Next steps" in result.output
     assert "codewiki generate --config" in result.output
+
+
+# ── config gen ────────────────────────────────────────────────────────────────
+
+
+def test_config_gen_prints_template_to_stdout():
+    result = _runner().invoke(config_group, ["gen"])
+
+    assert result.exit_code == 0
+    assert "[runtime]" in result.output
+    assert "[generation]" in result.output
+    assert "[[providers]]" in result.output
+    assert "config.toml" in result.output
+
+
+def test_config_gen_allows_custom_output_path_in_template():
+    result = _runner().invoke(config_group, ["gen", "--output", "nested/custom.toml"])
+
+    assert result.exit_code == 0
+    assert "nested/custom.toml" in result.output
 
 
 # ── config validate ───────────────────────────────────────────────────────────

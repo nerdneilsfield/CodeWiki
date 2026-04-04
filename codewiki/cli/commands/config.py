@@ -231,6 +231,20 @@ def config_init(output: str, force: bool):
     _logger.info(f"3. Run codewiki generate --config {dest}")
 
 
+@config_group.command(name="gen")
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(dir_okay=False),
+    default="config.toml",
+    show_default=True,
+    help="Path to embed in the generated template comments.",
+)
+def config_gen(output: str):
+    """Print the starter config template to stdout."""
+    click.echo(_TOML_TEMPLATE.replace("{output_path}", output), nl=False)
+
+
 @config_group.command(name="validate")
 @click.option(
     "--config",
