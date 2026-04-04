@@ -139,3 +139,198 @@ def test_run_re_raises_pipeline_failures(tmp_path):
             assert "pipeline exploded" in str(exc)
         else:
             raise AssertionError("Expected RuntimeError")
+
+
+def test_cluster_modules_uses_cached_tree_when_commit_matches(tmp_path):
+    from codewiki.src.be.generation_state import GenerationState
+    from codewiki.src.be.documentation_tree_utils import config_fingerprint
+    from codewiki.src.config import FIRST_MODULE_TREE_FILENAME, MODULE_TREE_FILENAME
+
+    gen = _make_generator(tmp_path)
+    ctx = gen._build_initial_context()
+    ctx.components = {"comp": {"file_path": "a.py"}}
+    ctx.leaf_nodes = ["comp"]
+    ctx.index_products = MagicMock()
+    cached_tree = {"Root": {"components": ["comp"], "children": {}}}
+    state = GenerationState()
+    state.repo_commit = "abc123"
+    state.config_fingerprint = config_fingerprint(gen.config)
+
+    def _exists(path: str) -> bool:
+        return path.endswith(FIRST_MODULE_TREE_FILENAME)
+
+    with (
+        patch("codewiki.src.be.documentation_generator.file_manager.ensure_directory"),
+        patch("codewiki.src.be.documentation_generator.os.path.exists", side_effect=_exists),
+        patch(
+            "codewiki.src.be.documentation_generator.file_manager.load_json",
+            return_value=cached_tree,
+        ),
+        patch("codewiki.src.be.documentation_generator.GenerationState.load", return_value=state),
+        patch(
+            "codewiki.src.be.documentation_generator.heal_module_tree_components",
+            return_value=cached_tree,
+        ) as heal,
+        patch("codewiki.src.be.documentation_generator.cluster_modules") as cluster,
+        patch("codewiki.src.be.documentation_generator.freeze_doc_filenames"),
+        patch("codewiki.src.be.documentation_generator.file_manager.save_json") as save_json,
+        patch("codewiki.src.be.generation.glossary.build_glossary", return_value={"term": "def"}),
+        patch("codewiki.src.be.generation.glossary.build_link_map", return_value={"doc": "link"}),
+    ):
+        asyncio.run(gen._cluster_modules(ctx))
+
+    heal.assert_called_once_with(cached_tree, ctx.components)
+    cluster.assert_not_called()
+    assert ctx.module_tree == cached_tree
+    assert any(
+        call.args[1].endswith(FIRST_MODULE_TREE_FILENAME) for call in save_json.call_args_list
+    )
+    assert any(call.args[1].endswith(MODULE_TREE_FILENAME) for call in save_json.call_args_list)
+
+
+def test_cluster_modules_reclusters_and_warns_when_context_setup_fails(tmp_path):
+    from codewiki.src.be.generation_state import GenerationState
+    from codewiki.src.config import FIRST_MODULE_TREE_FILENAME
+
+    gen = _make_generator(tmp_path)
+    ctx = gen._build_initial_context()
+    ctx.components = {"comp": {"file_path": "a.py"}}
+    ctx.leaf_nodes = ["comp"]
+    ctx.index_products = MagicMock()
+    reclustered = {"Grouped": {"components": ["comp"], "children": {}}}
+    state = GenerationState()
+    state.repo_commit = "old"
+    state.config_fingerprint = "different"
+
+    with (
+        patch("codewiki.src.be.documentation_generator.file_manager.ensure_directory"),
+        patch(
+            "codewiki.src.be.documentation_generator.os.path.exists",
+            side_effect=lambda path: path.endswith(FIRST_MODULE_TREE_FILENAME),
+        ),
+        patch(
+            "codewiki.src.be.documentation_generator.file_manager.load_json",
+            return_value={"old": {}},
+        ),
+        patch("codewiki.src.be.documentation_generator.GenerationState.load", return_value=state),
+        patch(
+            "codewiki.src.be.documentation_generator.cluster_modules", return_value=reclustered
+        ) as cluster,
+        patch("codewiki.src.be.documentation_generator.freeze_doc_filenames"),
+        patch("codewiki.src.be.documentation_generator.file_manager.save_json"),
+        patch("codewiki.src.be.generation.glossary.build_glossary", return_value={"term": "def"}),
+        patch("codewiki.src.be.generation.glossary.build_link_map", return_value={"doc": "link"}),
+        patch.object(
+            gen.agent_orchestrator,
+            "set_generation_context",
+            side_effect=RuntimeError("context boom"),
+        ),
+    ):
+        asyncio.run(gen._cluster_modules(ctx))
+
+    cluster.assert_called_once()
+    assert ctx.module_tree == reclustered
+    assert any("Generation context setup failed" in warning for warning in ctx.result.warnings)
+
+
+def test_initialize_generation_state_falls_back_to_add_task_on_initial_collision(tmp_path):
+    from codewiki.src.be.generation_state import DocTask, GenerationState
+
+    gen = _make_generator(tmp_path)
+    module_tree = {"Root": {"children": {}}}
+    state = GenerationState()
+    state_mgr = MagicMock()
+    state_mgr.update_metadata = AsyncMock()
+    state_mgr.bulk_add_tasks = AsyncMock(side_effect=ValueError("collision"))
+    state_mgr.flush = AsyncMock()
+    state_mgr.add_task = AsyncMock(side_effect=[None, ValueError("dup")])
+    state_mgr.promote_ready = AsyncMock()
+    gen._gen_state = state
+    gen._state_mgr = state_mgr
+
+    tasks = [
+        DocTask(
+            doc_id="module:a",
+            kind="module",
+            module_path=["A"],
+            output_file="a.md",
+            input_hash="h1",
+        ),
+        DocTask(
+            doc_id="module:b",
+            kind="module",
+            module_path=["B"],
+            output_file="b.md",
+            input_hash="h2",
+        ),
+    ]
+
+    with (
+        patch("codewiki.src.be.documentation_generator.cleanup_legacy_internal_files"),
+        patch("codewiki.src.be.documentation_generator.dedup_docs_directory"),
+        patch("codewiki.src.be.documentation_generator.freeze_doc_filenames"),
+        patch("codewiki.src.be.documentation_generator.file_manager.save_json"),
+        patch("codewiki.src.be.documentation_generator.build_generation_tasks", return_value=tasks),
+    ):
+        asyncio.run(gen._initialize_generation_state_from_tree(module_tree, str(tmp_path / "docs")))
+
+    state_mgr.bulk_add_tasks.assert_awaited_once_with(tasks)
+    assert state_mgr.add_task.await_count == 2
+    state_mgr.promote_ready.assert_awaited_once()
+
+
+def test_initialize_generation_state_handles_missing_task_collisions(tmp_path):
+    from codewiki.src.be.generation_state import DocTask, GenerationState
+
+    gen = _make_generator(tmp_path)
+    module_tree = {"Root": {"children": {}}}
+    existing = DocTask(
+        doc_id="module:a",
+        kind="module",
+        module_path=["A"],
+        output_file="a.md",
+        input_hash="old",
+        status="completed",
+    )
+    state = GenerationState()
+    state._add_task(existing)
+    state_mgr = MagicMock()
+    state_mgr.update_metadata = AsyncMock()
+    state_mgr.bulk_add_tasks = AsyncMock(side_effect=ValueError("collision"))
+    state_mgr.flush = AsyncMock()
+    state_mgr.add_task = AsyncMock(side_effect=[None, ValueError("dup")])
+    state_mgr.mark_stale = AsyncMock()
+    state_mgr.promote_ready = AsyncMock()
+    gen._gen_state = state
+    gen._state_mgr = state_mgr
+
+    tasks = [
+        existing,
+        DocTask(
+            doc_id="module:b",
+            kind="module",
+            module_path=["B"],
+            output_file="b.md",
+            input_hash="h2",
+        ),
+        DocTask(
+            doc_id="module:c",
+            kind="module",
+            module_path=["C"],
+            output_file="c.md",
+            input_hash="h3",
+        ),
+    ]
+
+    with (
+        patch("codewiki.src.be.documentation_generator.cleanup_legacy_internal_files"),
+        patch("codewiki.src.be.documentation_generator.dedup_docs_directory"),
+        patch("codewiki.src.be.documentation_generator.freeze_doc_filenames"),
+        patch("codewiki.src.be.documentation_generator.file_manager.save_json"),
+        patch("codewiki.src.be.documentation_generator.build_generation_tasks", return_value=tasks),
+    ):
+        asyncio.run(gen._initialize_generation_state_from_tree(module_tree, str(tmp_path / "docs")))
+
+    state_mgr.bulk_add_tasks.assert_awaited_once()
+    assert state_mgr.add_task.await_count == 2
+    state_mgr.mark_stale.assert_awaited_once()

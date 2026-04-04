@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -108,3 +109,53 @@ def test_fix_docs_strict_mode_raises_lint_error(tmp_path):
             assert payload["link_issues"][0]["target"] == "missing.md"
         else:
             raise AssertionError("Expected LintError in strict mode")
+
+
+def test_validate_with_mmdc_times_out():
+    from codewiki.src.be.docs_fixer import _validate_with_mmdc
+
+    with (
+        patch("codewiki.src.be.docs_fixer._find_mmdc", return_value="/usr/bin/mmdc"),
+        patch(
+            "codewiki.src.be.docs_fixer.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["mmdc"], timeout=30),
+        ),
+    ):
+        assert _validate_with_mmdc("graph TD\nA-->B") == "mmdc timed out"
+
+
+def test_validate_with_mmdc_returns_process_error_output():
+    from codewiki.src.be.docs_fixer import _validate_with_mmdc
+
+    proc = MagicMock(returncode=1, stderr="bad syntax", stdout="")
+    with (
+        patch("codewiki.src.be.docs_fixer._find_mmdc", return_value="/usr/bin/mmdc"),
+        patch("codewiki.src.be.docs_fixer.subprocess.run", return_value=proc),
+    ):
+        assert _validate_with_mmdc("graph TD\nA-->B") == "bad syntax"
+
+
+def test_fix_docs_continues_when_link_rewriter_and_validator_fail(tmp_path):
+    from codewiki.src.be.docs_fixer import fix_docs
+
+    (tmp_path / "overview.md").write_text("# Overview\n", encoding="utf-8")
+    config = MagicMock()
+    config.postprocess_fix_links = True
+    config.postprocess_strict = False
+
+    with (
+        patch(
+            "codewiki.src.be.docs_fixer.rewrite_broken_links",
+            side_effect=RuntimeError("rewrite boom"),
+            create=True,
+        ),
+        patch(
+            "codewiki.src.be.docs_fixer.validate_links",
+            side_effect=RuntimeError("validate boom"),
+            create=True,
+        ),
+    ):
+        stats = fix_docs(str(tmp_path), config)
+
+    assert stats.md_files_formatted >= 0
+    assert (tmp_path / "_lint_report.json").exists()
