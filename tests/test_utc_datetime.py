@@ -83,3 +83,43 @@ class TestNaiveDatetimeBackwardCompat:
 
         assert job is not None
         assert job.created_at.tzinfo is not None
+
+    def test_background_worker_restores_cancelled_jobs(self, tmp_path, monkeypatch):
+        from codewiki.src.fe.background_worker import BackgroundWorker
+        from codewiki.src.fe.cache_manager import CacheManager
+
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        jobs_file = cache_dir / "jobs.json"
+        jobs_file.write_text(
+            json.dumps(
+                {
+                    "job-2": {
+                        "job_id": "job-2",
+                        "repo_url": "http://example.com/repo",
+                        "status": "cancelled",
+                        "created_at": "2026-01-01T12:00:00",
+                        "started_at": "2026-01-01T12:01:00",
+                        "completed_at": "2026-01-01T12:02:00",
+                        "error_message": "Operation cancelled",
+                        "progress": "Cancelled by user",
+                        "docs_path": None,
+                        "generation_status": "cancelled",
+                        "degradation_reasons": [],
+                        "module_summary": None,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(
+            "codewiki.src.fe.background_worker.WebAppConfig.CACHE_DIR", str(cache_dir)
+        )
+
+        worker = BackgroundWorker(cache_manager=CacheManager(cache_dir=str(cache_dir)))
+        job = worker.snapshot_job("job-2")
+
+        assert job is not None
+        assert job.status == "cancelled"
+        assert job.generation_status == "cancelled"

@@ -27,6 +27,26 @@ class ProviderConfig(BaseModel):
     credentials_path: str | None = None
     _model_stream: dict[str, bool] = PrivateAttr(default_factory=dict)
 
+    def model_post_init(self, __context: Any) -> None:
+        normalized_model_list: list[str | dict[str, Any]] = []
+        model_stream: dict[str, bool] = {}
+        for item in self.model_list:
+            if isinstance(item, str):
+                model_name = item
+                stream = False
+            elif isinstance(item, dict):
+                model_name = str(item.get("name", "")).strip()
+                if not model_name:
+                    continue
+                stream = bool(item.get("stream", False))
+            else:
+                model_name = str(item)
+                stream = False
+            normalized_model_list.append(model_name)
+            model_stream[model_name] = stream
+        self.model_list = normalized_model_list
+        self._model_stream = model_stream
+
 
 class CodeWikiConfig(BaseModel):
     """Canonical config shared by CLI, backend, and web entry points."""

@@ -31,6 +31,50 @@ class TestGuideGeneratorCancelToken:
         sig = inspect.signature(GuideGenerator.__init__)
         assert "cancel_token" in sig.parameters
 
+    @pytest.mark.asyncio
+    async def test_cancellation_stops_fallback_chain_immediately(self, monkeypatch, tmp_path):
+        import asyncio
+
+        from codewiki.src.be.cancellation import CancellationToken
+        from codewiki.src.be.errors import CancellationError
+        from codewiki.src.be.guide_generator import GuideGenerator
+        from codewiki.src.codewiki_config import CodeWikiConfig
+
+        config = CodeWikiConfig(
+            repo_path="/tmp/fake-repo",
+            output_dir=str(tmp_path / "output"),
+            dependency_graph_dir=str(tmp_path / "dg"),
+            docs_dir=str(tmp_path / "docs"),
+            max_depth=2,
+            llm_base_url="http://localhost:4000/",
+            llm_api_key="sk-test",
+            main_model="openai/model-a",
+            cluster_model="openai/model-a",
+            fallback_model="openai/model-b,openai/model-c",
+        )
+        token = CancellationToken()
+        gen = GuideGenerator(
+            config=config,
+            components={},
+            module_tree={},
+            working_dir=str(tmp_path),
+            cancel_token=token,
+        )
+        gen._semaphore = asyncio.Semaphore(1)
+
+        attempted_models = []
+
+        async def fake_with_retry(_operation, *args, **kwargs):
+            attempted_models.append(kwargs["model"])
+            raise CancellationError("cancelled during llm call")
+
+        monkeypatch.setattr("codewiki.src.be.guide_generator.with_retry", fake_with_retry)
+
+        with pytest.raises(CancellationError):
+            await gen._call_llm_with_fallback("prompt")
+
+        assert attempted_models == ["openai/model-a"]
+
 
 @pytest.mark.asyncio
 async def test_scheduler_cancellation_stops_before_next_leaf():

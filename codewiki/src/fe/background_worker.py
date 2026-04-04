@@ -117,7 +117,7 @@ class BackgroundWorker:
             data = file_manager.load_json(str(self.jobs_file)) or {}
 
             for job_id, job_data in data.items():
-                if job_data.get("status") in {"completed", "failed"}:
+                if job_data.get("status") in {"completed", "failed", "cancelled"}:
                     self.set_job(
                         job_id,
                         JobStatus(

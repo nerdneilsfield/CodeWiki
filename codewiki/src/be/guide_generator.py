@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from codewiki.src.be.dependency_analyzer.utils.security import assert_safe_path
 from codewiki.src.be.cancellation import CancellationToken
-from codewiki.src.be.errors import LLMError
+from codewiki.src.be.errors import CancellationError, LLMError
 from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.llm_retry import with_retry
 from codewiki.src.be.llm_usage import LLMUsageStats
@@ -302,6 +302,8 @@ class GuideGenerator:
                 last_exc = e
                 if not e.is_retryable:
                     continue
+                raise
+            except CancellationError:
                 raise
             except Exception as e:
                 logger.warning(f"Guide LLM call failed with model {model_name}: {e}")
