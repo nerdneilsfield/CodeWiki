@@ -129,8 +129,8 @@ async def test_cli_backend_generation_cancelled_raises_api_error(tmp_path):
         "codewiki.cli.adapters.doc_generator.DocumentationGenerator",
         return_value=fake_doc_generator,
     ):
-        with pytest.raises(APIError, match="cancelled"):
-            await adapter._run_backend_generation(adapter.config)
+        # Graceful cancel now returns normally (progress saved) instead of raising
+        await adapter._run_backend_generation(adapter.config)
 
 
 def test_finalize_job_writes_fallback_metadata_when_missing(tmp_path):

@@ -6,6 +6,7 @@ and provides CLI-specific functionality like progress reporting.
 """
 
 from pathlib import Path
+import signal
 import time
 import asyncio
 import os
@@ -17,6 +18,7 @@ from codewiki.cli.models.job import DocumentationJob, LLMConfig
 from codewiki.cli.utils.errors import APIError
 
 # Import backend modules
+from codewiki.src.be.cancellation import CancellationToken
 from codewiki.src.be.documentation_generator import DocumentationGenerator
 from codewiki.src.codewiki_config import CodeWikiConfig
 
@@ -151,18 +153,43 @@ class CLIDocumentationGenerator:
         if self.verbose:
             self.progress_tracker.update_stage(0.1, "Running documentation pipeline...")
 
-        doc_generator = DocumentationGenerator(backend_config)
+        cancel_token = CancellationToken()
+        doc_generator = DocumentationGenerator(backend_config, cancel_token=cancel_token)
+
+        # Graceful shutdown: first Ctrl+C sets cancel_token so the pipeline
+        # finishes in-flight tasks and persists state.  Second Ctrl+C raises
+        # KeyboardInterrupt for immediate exit.
+        _original_handler = signal.getsignal(signal.SIGINT)
+        _sigint_count = 0
+
+        def _graceful_handler(signum, frame):
+            nonlocal _sigint_count
+            _sigint_count += 1
+            if _sigint_count == 1:
+                logger.warning(
+                    "Ctrl+C received — finishing in-flight tasks and saving state. "
+                    "Press Ctrl+C again to force quit."
+                )
+                cancel_token.cancel()
+            else:
+                signal.signal(signal.SIGINT, _original_handler)
+                raise KeyboardInterrupt
+
+        signal.signal(signal.SIGINT, _graceful_handler)
 
         try:
             result = await doc_generator.run()
         except Exception as e:
             raise APIError(f"Documentation generation failed: {e}")
+        finally:
+            signal.signal(signal.SIGINT, _original_handler)
 
         if result.status == "failed":
             raise APIError("; ".join(result.warnings) or "Documentation generation failed")
 
         if result.status == "cancelled":
-            raise APIError("Generation cancelled by user")
+            logger.info("Generation gracefully stopped — progress saved. Re-run to resume.")
+            return
 
         if result.status == "degraded":
             logger.warning("Generation completed with issues:")
