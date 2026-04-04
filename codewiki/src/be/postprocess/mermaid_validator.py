@@ -88,11 +88,35 @@ def _record_failure(
         )
 
 
+def _expand_escaped_newlines(text: str) -> str:
+    """Expand literal ``\\n`` with minimal Mermaid awareness."""
+
+    out: list[str] = []
+    i = 0
+    bracket_depth = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "[":
+            bracket_depth += 1
+        elif ch == "]" and bracket_depth > 0:
+            bracket_depth -= 1
+
+        if ch == "\\" and i + 1 < len(text) and text[i + 1] == "n":
+            out.append("<br/>" if bracket_depth > 0 else "\n")
+            i += 2
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
+
+
 def cleanup_mermaid(text: str) -> str:
     """Apply lightweight cleanup rules before validation/repair."""
 
     cleaned = text.translate(_SMART_QUOTES)
-    cleaned = cleaned.replace("\\n", "<br/>")
+    cleaned = _expand_escaped_newlines(cleaned)
 
     # Normalize compacted statements first so later rewrites operate line by line.
     cleaned = re.sub(r";\s*(?=[A-Za-z_][A-Za-z0-9_]*\s*(?:-->|---|-.->|==>))", "\n", cleaned)
@@ -151,7 +175,7 @@ def cleanup_mermaid(text: str) -> str:
     return cleaned.strip()
 
 
-def _validate_pylatex(text: str) -> list[str]:
+def _validate_structure(text: str) -> list[str]:
     """Lightweight structural validation for mermaid text."""
     issues: list[str] = []
     open_sq = 0
@@ -230,13 +254,11 @@ def _has_unquoted_nonascii(content: str) -> bool:
 
 
 def validate_with_regex(content: str) -> list[str]:
-    issues: list[str] = []
+    issues = _validate_structure(content)
     if _MERMAID_BAD_UNICODE_RE.search(content):
         issues.append("Unicode math operators in labels")
     if _MERMAID_SINGLE_QUOTE_RE.search(content):
         issues.append("Single-quote character inside a node label bracket")
-    if content.count("[") != content.count("]"):
-        issues.append("Unbalanced square brackets")
     if _has_unquoted_nonascii(content):
         issues.append("Non-ASCII characters outside quoted strings")
     return issues
@@ -309,6 +331,8 @@ def repair_batch_sync(
         return {}
 
     prompt = build_repair_prompt(issues)
+    expected_ids = {issue.issue_id for issue in issues}
+    merged: dict[str, str] = {}
     for model_name in _build_model_chain(pp_config, config.main_model):
         try:
             result = with_retry_sync(
@@ -328,12 +352,15 @@ def repair_batch_sync(
                     getattr(usage, "output_tokens", 0) or 0,
                 )
             parsed = parse_repair_response(content if isinstance(content, str) else str(content))
-            if parsed:
-                return parsed
+            if not parsed:
+                continue
+            merged.update({key: value for key, value in parsed.items() if key in expected_ids})
+            if expected_ids.issubset(merged):
+                break
         except Exception as exc:
             logger.warning("Mermaid batch repair failed with %s: %s", model_name, exc)
             continue
-    return {}
+    return merged
 
 
 def _apply_replacements(text: str, replacements: list[tuple[int, int, str]]) -> str:

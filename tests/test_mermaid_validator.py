@@ -19,6 +19,13 @@ class TestCleanupMermaid:
         assert "<br/>" in result
         assert "\\n" not in result
 
+    def test_escaped_newline_outside_label_becomes_real_newline(self):
+        from codewiki.src.be.postprocess.mermaid_validator import cleanup_mermaid
+
+        result = cleanup_mermaid("A -->|step\\nflow| B")
+        assert "<br/>" not in result
+        assert "step\nflow" in result
+
     def test_edge_label_repair(self):
         from codewiki.src.be.postprocess.mermaid_validator import cleanup_mermaid
 
@@ -122,3 +129,40 @@ class TestParseRepairResponse:
         from codewiki.src.be.postprocess.mermaid_validator import parse_repair_response
 
         assert parse_repair_response("not json") == {}
+
+
+class TestRepairBatchSync:
+    def test_accumulates_partial_results_across_models(self):
+        from codewiki.src.be.postprocess.mermaid_validator import (
+            MermaidIssue,
+            MermaidSpan,
+            repair_batch_sync,
+        )
+        from codewiki.src.codewiki_config import CodeWikiConfig, PostprocessConfig
+
+        issues = [
+            MermaidIssue("a:0", MermaidSpan(0, 10, "graph TD\nA-->B", 1), ["bad"]),
+            MermaidIssue("a:1", MermaidSpan(11, 20, "graph TD\nB-->C", 3), ["bad"]),
+        ]
+        config = CodeWikiConfig(
+            repo_path="/tmp",
+            docs_dir="/tmp/docs",
+            main_model="openai/gpt-4o-mini",
+            postprocess=PostprocessConfig(
+                repair_model="openai/gpt-4o-mini",
+                repair_fallback_1="openai/gpt-4o",
+            ),
+        )
+        first = MagicMock(content='{"items":[{"id":"a:0","mermaid":"graph TD\\nA-->B"}]}')
+        second = MagicMock(content='{"items":[{"id":"a:1","mermaid":"graph TD\\nB-->C"}]}')
+
+        with patch(
+            "codewiki.src.be.postprocess.mermaid_validator.with_retry_sync",
+            side_effect=[first, second],
+        ):
+            repaired = repair_batch_sync(issues, config, config.postprocess)
+
+        assert repaired == {
+            "a:0": "graph TD\nA-->B",
+            "a:1": "graph TD\nB-->C",
+        }

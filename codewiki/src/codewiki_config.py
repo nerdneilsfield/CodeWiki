@@ -28,6 +28,10 @@ class ProviderConfig(BaseModel):
     _model_stream: dict[str, bool] = PrivateAttr(default_factory=dict)
 
     def model_post_init(self, __context: Any) -> None:
+        # Direct construction in tests and local helpers may bypass config_loader,
+        # so normalize model_list here as a fallback. The loader still performs
+        # the same normalization when reading TOML so downstream code only relies
+        # on provider.model_list + provider._model_stream, never raw dict items.
         normalized_model_list: list[str | dict[str, Any]] = []
         model_stream: dict[str, bool] = {}
         for item in self.model_list:
