@@ -94,3 +94,210 @@ async def test_cli_backend_generation_consumes_generation_result(tmp_path):
     assert adapter.job.statistics.total_tokens_used == 5
     assert adapter.job.module_count == 1
     assert set(adapter.job.files_generated) == {"overview.md", "metadata.json"}
+
+
+@pytest.mark.asyncio
+async def test_cli_backend_generation_cancelled_raises_api_error(tmp_path):
+    from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
+    from codewiki.cli.utils.errors import APIError
+    from codewiki.src.be.pipeline import GenerationResult
+    from codewiki.src.codewiki_config import CodeWikiConfig
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    output_dir = tmp_path / "docs"
+    output_dir.mkdir()
+
+    adapter = CLIDocumentationGenerator(
+        repo_path=repo_dir,
+        output_dir=output_dir,
+        config=CodeWikiConfig(
+            repo_path=str(repo_dir),
+            docs_dir=str(output_dir),
+            main_model="test/main",
+            cluster_model="test/cluster",
+            llm_base_url="http://localhost",
+        ),
+    )
+
+    fake_doc_generator = MagicMock()
+    fake_doc_generator.run = AsyncMock(
+        return_value=GenerationResult(status="cancelled", warnings=["cancelled"])
+    )
+
+    with patch(
+        "codewiki.cli.adapters.doc_generator.DocumentationGenerator",
+        return_value=fake_doc_generator,
+    ):
+        with pytest.raises(APIError, match="cancelled"):
+            await adapter._run_backend_generation(adapter.config)
+
+
+def test_finalize_job_writes_fallback_metadata_when_missing(tmp_path):
+    import json
+
+    from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
+    from codewiki.src.codewiki_config import CodeWikiConfig
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    output_dir = tmp_path / "docs"
+    output_dir.mkdir()
+
+    adapter = CLIDocumentationGenerator(
+        repo_path=repo_dir,
+        output_dir=output_dir,
+        config=CodeWikiConfig(
+            repo_path=str(repo_dir),
+            docs_dir=str(output_dir),
+            main_model="test/main",
+            cluster_model="test/cluster",
+            llm_base_url="http://localhost",
+        ),
+    )
+    adapter.job.repository_name = repo_dir.name
+
+    adapter._finalize_job()
+
+    metadata_path = output_dir / "metadata.json"
+    assert metadata_path.exists()
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["repository_name"] == repo_dir.name
+
+
+def test_run_html_generation_adds_index_file(tmp_path):
+    from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
+    from codewiki.src.codewiki_config import CodeWikiConfig
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    output_dir = tmp_path / "docs"
+    output_dir.mkdir()
+
+    adapter = CLIDocumentationGenerator(
+        repo_path=repo_dir,
+        output_dir=output_dir,
+        config=CodeWikiConfig(
+            repo_path=str(repo_dir),
+            docs_dir=str(output_dir),
+            main_model="test/main",
+            cluster_model="test/cluster",
+            llm_base_url="http://localhost",
+        ),
+        verbose=True,
+    )
+
+    fake_html_generator = MagicMock()
+    fake_html_generator.detect_repository_info.return_value = {
+        "name": "repo",
+        "url": "https://example.com/repo",
+        "github_pages_url": "https://example.github.io/repo",
+    }
+
+    with patch(
+        "codewiki.cli.html_generator.HTMLGenerator",
+        return_value=fake_html_generator,
+    ):
+        adapter._run_html_generation()
+
+    assert "index.html" in adapter.job.files_generated
+    fake_html_generator.generate.assert_called_once()
+
+
+def test_run_static_generation_records_written_files(tmp_path):
+    from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
+    from codewiki.src.codewiki_config import CodeWikiConfig
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    output_dir = tmp_path / "docs"
+    output_dir.mkdir()
+
+    adapter = CLIDocumentationGenerator(
+        repo_path=repo_dir,
+        output_dir=output_dir,
+        config=CodeWikiConfig(
+            repo_path=str(repo_dir),
+            docs_dir=str(output_dir),
+            main_model="test/main",
+            cluster_model="test/cluster",
+            llm_base_url="http://localhost",
+        ),
+        verbose=True,
+    )
+
+    fake_generator = MagicMock()
+    fake_generator.generate.return_value = ["a.html", "b.html"]
+
+    with patch(
+        "codewiki.cli.static_generator.StaticHTMLGenerator",
+        return_value=fake_generator,
+    ):
+        adapter._run_static_generation()
+
+    assert set(adapter.job.files_generated) == {"a.html", "b.html"}
+
+
+def test_generate_runs_optional_html_and_static_stages(tmp_path):
+    from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
+    from codewiki.src.codewiki_config import CodeWikiConfig
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    output_dir = tmp_path / "docs"
+
+    adapter = CLIDocumentationGenerator(
+        repo_path=repo_dir,
+        output_dir=output_dir,
+        config=CodeWikiConfig(
+            repo_path=str(repo_dir),
+            docs_dir=str(output_dir),
+            main_model="test/main",
+            cluster_model="test/cluster",
+        ),
+        generate_html=True,
+        generate_static=True,
+    )
+
+    with (
+        patch.object(adapter, "_run_backend_generation", new=AsyncMock()),
+        patch.object(adapter, "_run_html_generation") as run_html,
+        patch.object(adapter, "_run_static_generation") as run_static,
+        patch.object(adapter, "_finalize_job") as finalize,
+    ):
+        job = adapter.generate()
+
+    run_html.assert_called_once()
+    run_static.assert_called_once()
+    finalize.assert_called_once()
+    assert job.status.value == "completed"
+
+
+def test_generate_marks_job_failed_on_api_error(tmp_path):
+    from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
+    from codewiki.cli.utils.errors import APIError
+    from codewiki.src.codewiki_config import CodeWikiConfig
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    output_dir = tmp_path / "docs"
+
+    adapter = CLIDocumentationGenerator(
+        repo_path=repo_dir,
+        output_dir=output_dir,
+        config=CodeWikiConfig(
+            repo_path=str(repo_dir),
+            docs_dir=str(output_dir),
+            main_model="test/main",
+            cluster_model="test/cluster",
+        ),
+    )
+
+    with patch.object(
+        adapter, "_run_backend_generation", new=AsyncMock(side_effect=APIError("nope"))
+    ):
+        with pytest.raises(APIError):
+            adapter.generate()
+
+    assert adapter.job.status.value == "failed"
+    assert adapter.job.error_message == "nope"

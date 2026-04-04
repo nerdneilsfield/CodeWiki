@@ -322,3 +322,141 @@ def test_config_get_specific_key(tmp_path):
 
     assert result.exit_code == 0
     assert result.output.strip() == "openai/gpt-4o-mini"
+
+
+def test_config_get_unknown_key_fails(tmp_path):
+    config_file = _write_toml(tmp_path)
+
+    with patch("codewiki.cli.commands.config.load_config", return_value=_make_get_sentinel()):
+        result = _runner().invoke(
+            config_group, ["get", "--config", str(config_file), "generation.missing"]
+        )
+
+    assert result.exit_code != 0
+    assert "unknown config key" in result.output.lower()
+
+
+def test_config_set_updates_toml_values(tmp_path):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        "[runtime]\n"
+        "output_dir = 'docs'\n"
+        "[generation]\n"
+        "main_model = 'openai/gpt-4o-mini'\n"
+        "cluster_model = 'openai/gpt-4o-mini'\n"
+        "[[providers]]\n"
+        "name = 'openai'\n"
+        "type = 'openai_compatible'\n"
+        "model_list = ['gpt-4o-mini', 'gpt-4o']\n"
+        "api_keys = []\n",
+        encoding="utf-8",
+    )
+
+    with patch("codewiki.cli.commands.config.validate_llm_credentials"):
+        result = _runner().invoke(
+            config_group,
+            [
+                "set",
+                "--config",
+                str(config_file),
+                "--main-model",
+                "openai/gpt-4o",
+                "--fallback-model",
+                "openai/gpt-4o,openai/gpt-4o-mini",
+                "--language",
+                "ZH",
+                "--max-concurrent",
+                "5",
+            ],
+        )
+
+    assert result.exit_code == 0
+    content = config_file.read_text(encoding="utf-8")
+    assert 'main_model = "openai/gpt-4o"' in content
+    assert "fallback_models = [" in content
+    assert '"openai/gpt-4o"' in content
+    assert '"openai/gpt-4o-mini"' in content
+    assert 'output_language = "zh"' in content
+    assert "max_concurrent = 5" in content
+
+
+def test_config_set_requires_options(tmp_path):
+    config_file = _write_toml(tmp_path)
+
+    result = _runner().invoke(config_group, ["set", "--config", str(config_file)])
+
+    assert result.exit_code != 0
+    assert "no options provided" in result.output.lower()
+
+
+def test_config_set_rejects_api_key_flag(tmp_path):
+    config_file = _write_toml(tmp_path)
+
+    result = _runner().invoke(
+        config_group,
+        ["set", "--config", str(config_file), "--api-key", "sk-test"],
+    )
+
+    assert result.exit_code != 0
+    assert "keyring support was removed" in result.output.lower()
+
+
+def test_config_agent_updates_patterns_and_doc_type(tmp_path):
+    config_file = _write_toml(tmp_path)
+
+    result = _runner().invoke(
+        config_group,
+        [
+            "agent",
+            "--config",
+            str(config_file),
+            "--include",
+            "src/*.py,tests/*.py",
+            "--focus",
+            "src/core,src/api",
+            "--doc-type",
+            "architecture",
+            "--instructions",
+            "Focus on public APIs",
+        ],
+    )
+
+    assert result.exit_code == 0
+    content = config_file.read_text(encoding="utf-8")
+    assert "[agent]" in content
+    assert "include_patterns = [" in content
+    assert '"src/*.py"' in content
+    assert '"tests/*.py"' in content
+    assert "focus_modules = [" in content
+    assert '"src/core"' in content
+    assert '"src/api"' in content
+    assert 'doc_type = "architecture"' in content
+    assert 'custom_instructions = "Focus on public APIs"' in content
+
+
+def test_config_agent_clear_removes_section(tmp_path):
+    config_file = _write_toml(tmp_path)
+    config_file.write_text(
+        config_file.read_text(encoding="utf-8") + "\n[agent]\nfocus_modules = ['src/core']\n",
+        encoding="utf-8",
+    )
+
+    result = _runner().invoke(config_group, ["agent", "--config", str(config_file), "--clear"])
+
+    assert result.exit_code == 0
+    assert "[agent]" not in config_file.read_text(encoding="utf-8")
+
+
+def test_config_agent_reads_existing_instructions(tmp_path):
+    config_file = _write_toml(tmp_path)
+    config_file.write_text(
+        config_file.read_text(encoding="utf-8")
+        + "\n[agent]\nfocus_modules = ['src/core']\ncustom_instructions = 'Be concise'\n",
+        encoding="utf-8",
+    )
+
+    result = _runner().invoke(config_group, ["agent", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert "focus_modules" in result.output
+    assert "Be concise" in result.output
