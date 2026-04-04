@@ -137,15 +137,18 @@ In `CodeWikiConfig`:
 - [ ] **Step 4: Update config_loader.py to parse [postprocess]**
 
 In `codewiki/src/config_loader.py`:
-- Delete `postprocess_strict` from `RuntimeOverrides` dataclass
-- In the function that builds `CodeWikiConfig`, parse `data.get("postprocess", {})` into `PostprocessConfig`:
+- Delete `postprocess_strict` field from `RuntimeOverrides` dataclass (line 42)
+- Delete `postprocess_strict` resolution from `_resolve_runtime_section` and the kwargs that pass it to `CodeWikiConfig` (lines 300-303)
+- Add parsing of `[postprocess]` section into `PostprocessConfig`:
 
 ```python
 pp_data = data.get("postprocess", {})
 postprocess_config = PostprocessConfig(**pp_data)
 ```
 
-Pass `postprocess=postprocess_config` when constructing `CodeWikiConfig`. Remove old `postprocess_strict` resolution from `_resolve_runtime_section` and the kwargs that pass it.
+Pass `postprocess=postprocess_config` when constructing `CodeWikiConfig`.
+
+Note: both `postprocess_strict` AND `postprocess_fix_links` must be fully removed from the old paths — `RuntimeOverrides`, `_resolve_runtime_section`, and the `CodeWikiConfig(...)` constructor call. The old `runtime.get("postprocess_strict", ...)` read path is dead after this step.
 
 - [ ] **Step 5: Delete `postprocess_fix_links` constant from config.py**
 
@@ -171,7 +174,19 @@ fix_links          = true
 # repair_batch_size = 8
 # repair_max_retries = 2
 ```
-- Line 128: `"postprocess_strict": cfg.postprocess_strict,` → `"postprocess_strict": cfg.postprocess.strict,`
+- In `_config_to_dict()` / show command output: replace `"postprocess_strict": cfg.postprocess_strict` with a full `postprocess` sub-dict:
+```python
+"postprocess": {
+    "strict": cfg.postprocess.strict,
+    "fix_links": cfg.postprocess.fix_links,
+    "repair_model": cfg.postprocess.repair_model,
+    "repair_fallback_1": cfg.postprocess.repair_fallback_1,
+    "repair_fallback_2": cfg.postprocess.repair_fallback_2,
+    "repair_batch_size": cfg.postprocess.repair_batch_size,
+    "repair_max_retries": cfg.postprocess.repair_max_retries,
+},
+```
+Remove any old `"postprocess_strict"` or `"postprocess_fix_links"` keys from the dict.
 
 - [ ] **Step 8: Migrate tests**
 
@@ -628,9 +643,9 @@ git commit -m "feat(postprocess): add mermaid_validator with cleanup rules + bat
 - Modify: `codewiki/src/be/docs_fixer.py`
 - Modify: `tests/test_docs_fixer_helpers.py`
 
-- [ ] **Step 1: Write failing integration test**
+- [ ] **Step 1: Write integration tests**
 
-Add to `tests/test_docs_fixer_helpers.py`:
+These tests are written AFTER the wiring is done (step 3) because they patch the new import paths which only exist once `docs_fixer.py` imports from the new modules. Add to `tests/test_docs_fixer_helpers.py`:
 
 ```python
 def test_fix_docs_uses_new_math_validator(tmp_path):
@@ -646,7 +661,7 @@ def test_fix_docs_uses_new_math_validator(tmp_path):
         postprocess=PostprocessConfig(fix_links=False),
     )
 
-    with patch("codewiki.src.be.postprocess.math_validator.fix_math_in_text", return_value="$$\\frac{1}{2}$$") as mock_math:
+    with patch("codewiki.src.be.docs_fixer.fix_math", return_value="$$\\frac{1}{2}$$") as mock_math:
         fix_docs(str(tmp_path), config)
         mock_math.assert_called()
 
@@ -664,15 +679,12 @@ def test_fix_docs_uses_new_mermaid_validator(tmp_path):
         postprocess=PostprocessConfig(fix_links=False),
     )
 
-    with patch("codewiki.src.be.postprocess.mermaid_validator.fix_mermaid_in_text", return_value="```mermaid\ngraph TD\nA-->B\n```") as mock_mermaid:
+    with patch("codewiki.src.be.docs_fixer.fix_mermaid", return_value="```mermaid\ngraph TD\nA-->B\n```") as mock_mermaid:
         fix_docs(str(tmp_path), config)
         mock_mermaid.assert_called()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `uv run python -m pytest tests/test_docs_fixer_helpers.py::test_fix_docs_uses_new_math_validator -v`
-Expected: FAIL — still using old inline code
+Note: these patch `codewiki.src.be.docs_fixer.fix_math` and `codewiki.src.be.docs_fixer.fix_mermaid` — the names as imported in `docs_fixer.py` (via `from ... import fix_math_in_text as fix_math`). This avoids the problem of patching a module that doesn't exist yet at test collection time.
 
 - [ ] **Step 3: Gut old math/mermaid code from docs_fixer.py**
 
@@ -759,11 +771,19 @@ Expected: PASS
 
 - [ ] **Step 3: Update README.md**
 
-In the "Configuration Reference" section, update the TOML example to include the `[postprocess]` section. In the "Post Layer" details, mention dual-layer math validation (pylatexenc + KaTeX) and deterministic cleanup rules for both math and mermaid.
+Three locations must be updated:
+
+1. **"Post Layer" details section** (around line 219): replace `Config.postprocess_strict = True raises LintError` with `config.postprocess.strict = true raises LintError`. Add mentions of dual-layer math validation (pylatexenc + KaTeX), deterministic cleanup rules, and batch LLM repair for both math and mermaid.
+2. **"Configuration Reference" TOML example** (around line 276-317): remove old `postprocess_strict = false` from `[runtime]` section. Add full `[postprocess]` section with all 7 fields.
+3. **Quick Start config example** (around line 40-51): if `postprocess_strict` appears here, remove it.
 
 - [ ] **Step 4: Update README_ZH.md**
 
-Same changes as README.md but in Chinese.
+Same three locations as README.md but in Chinese:
+
+1. **"后处理层" details section** (around line 219): `Config.postprocess_strict = True` → `config.postprocess.strict = true`; add validation and repair descriptions
+2. **"配置参考" TOML example** (around line 273-316): remove old `postprocess_strict`, add `[postprocess]` section
+3. **Quick Start config example**: same cleanup if needed
 
 - [ ] **Step 5: Commit**
 
