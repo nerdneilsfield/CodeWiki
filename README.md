@@ -222,6 +222,28 @@ Validates and repairs generated documentation:
 
 ---
 
+## Resilience
+
+CodeWiki includes built-in error handling, retry logic, and cancellation support for LLM operations.
+
+**Structured error classification** — LLM SDK exceptions are classified into categories (transient, auth, client error, config error, resource exhausted) so the system can decide whether to retry, fall back to the next model, or fail fast.
+
+**Automatic retry with backoff** — Transient errors (429, 500, 502, 503, timeouts) trigger exponential backoff with jitter. `Retry-After` headers from rate-limited APIs are respected. Auth errors retry once. Non-retryable errors propagate immediately.
+
+**Streaming fallback** — For models marked with `stream = true` in config, timeout errors trigger a retry using streaming mode. This helps with providers that have aggressive non-streaming timeouts. Only `openai_compatible` providers support this in the current release.
+
+```toml
+# Enable streaming fallback for a specific model
+model_list = [
+  "gpt-4o-mini",
+  {name = "gpt-4.1", stream = true},
+]
+```
+
+**Cooperative cancellation** — Long-running generation jobs can be cancelled via the web API (`POST /api/jobs/{job_id}/cancel`). Cancellation is checked at pipeline stage boundaries, between scheduler tasks, during retry waits, and before each guide section LLM call.
+
+---
+
 ## Docker Deployment
 
 <details>
@@ -260,6 +282,7 @@ Submit a GitHub repository URL through the browser and view generated documentat
 - Syntax highlighting (highlight.js)
 - Math rendering (KaTeX)
 - Mobile-responsive layout
+- Job cancellation for in-progress generation
 
 ---
 
@@ -305,7 +328,10 @@ name       = "openai"
 type       = "openai_compatible"
 base_url   = "https://api.openai.com/v1"
 api_keys   = ["env:OPENAI_API_KEY"]
-model_list = ["gpt-4o-mini", "gpt-4o"]
+model_list = [
+  "gpt-4o-mini",                          # plain string: stream defaults to false
+  {name = "gpt-4o", stream = true},        # dict form: enables streaming fallback on timeout
+]
 
 # Multiple providers can coexist; models reference them by name.
 # [[providers]]
