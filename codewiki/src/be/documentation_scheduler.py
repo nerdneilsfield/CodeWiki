@@ -216,9 +216,6 @@ async def run_module_queue(
         active_tasks = leaf_count
         while active_tasks > 0:
             key, success, retried, error = await done_queue.get()
-            if cancel_token and cancel_token.is_cancelled:
-                logger.info("⏹ Scheduler cancelled — stopping work queue")
-                break
             active_tasks -= 1
             progress.update(1)
             if key != ROOT_KEY:
@@ -300,6 +297,9 @@ async def run_module_queue(
             if state_mgr:
                 await state_mgr.flush()
             done_queue.task_done()
+            if cancel_token and cancel_token.is_cancelled:
+                logger.info("⏹ Scheduler cancelled — stopping work queue")
+                break
         unresolved_keys = list(pending_count.keys())
         if unresolved_keys:
             unresolved_labels = [
@@ -323,9 +323,14 @@ async def run_module_queue(
 
     async def _worker(_worker_id: int):
         while True:
+            if cancel_token and cancel_token.is_cancelled:
+                return
             try:
                 key = await work_queue.get()
             except asyncio.CancelledError:
+                return
+            if cancel_token and cancel_token.is_cancelled:
+                work_queue.task_done()
                 return
             label = "overview" if key == ROOT_KEY else all_tasks[key][1]
             success = False
@@ -355,8 +360,12 @@ async def run_module_queue(
                             actual_delay = (
                                 retry_after if retry_after is not None else _jitter(delay)
                             )
+                            if cancel_token:
+                                cancel_token.check()
                             await asyncio.sleep(actual_delay)
                     try:
+                        if cancel_token:
+                            cancel_token.check()
                         if key == ROOT_KEY:
                             if state_mgr:
                                 await state_mgr.mark_running("overview:root")
@@ -415,7 +424,8 @@ async def run_module_queue(
     coordinator = asyncio.create_task(_coordinator())
     try:
         await coordinator
-        await work_queue.join()
+        if not (cancel_token and cancel_token.is_cancelled):
+            await work_queue.join()
     finally:
         for w in workers:
             w.cancel()
