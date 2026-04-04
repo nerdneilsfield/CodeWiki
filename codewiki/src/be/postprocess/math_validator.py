@@ -420,6 +420,8 @@ def fix_math_in_text(
         cleaned = cleaned_by_id[issue_id]
         issue = issue_lookup.get(issue_id)
         if issue is None:
+            if cleaned == span.content:
+                continue
             replacements.append(
                 (
                     span.start,

@@ -28,8 +28,8 @@ from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.postprocess.lint_report import LintError, LintReport
 from codewiki.src.be.postprocess.math_validator import fix_math_in_text as fix_math
 from codewiki.src.be.postprocess.mermaid_validator import (
-    _find_mmdc,
     fix_mermaid_in_text as fix_mermaid,
+    is_mmdc_available,
 )
 from codewiki.src.codewiki_config import CodeWikiConfig
 
@@ -185,7 +185,7 @@ def fix_docs(
     if not md_files:
         return FixStats()
 
-    mmdc_available = _find_mmdc() is not None
+    mmdc_available = is_mmdc_available()
     validation_mode = "mmdc" if mmdc_available else "regex heuristics"
     logger.info(
         f"\U0001f527 Post-processing {len(md_files)} file(s): markdown + math + mermaid "

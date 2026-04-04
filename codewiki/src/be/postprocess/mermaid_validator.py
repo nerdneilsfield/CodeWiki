@@ -5,7 +5,6 @@ from __future__ import annotations
 import atexit
 import json
 import logging
-import os
 import re
 import shutil
 import subprocess
@@ -150,21 +149,11 @@ def cleanup_mermaid(text: str) -> str:
         cleaned,
     )
 
-    # Convert labels with literal line breaks into Mermaid HTML breaks.
-    cleaned = re.sub(
-        r'\[(?P<prefix>"[^\"]*|\'[^\']*|)(?P<label>[^"\]]*<br/>?[^"\]]*)(?P<suffix>"[^\"]*|\'[^\']*|)\]',
-        lambda m: f"[{m.group('prefix')}{m.group('label').replace('<br/>', '<br/>')}{m.group('suffix')}]",
-        cleaned,
-    )
-
     # Keep square brackets balanced at a minimum.
     open_sq = cleaned.count("[")
     close_sq = cleaned.count("]")
     if open_sq > close_sq:
         cleaned += "]" * (open_sq - close_sq)
-
-    # Make bracketed labels easier to parse when quotes are mixed in.
-    cleaned = cleaned.replace('["', '["').replace("']", "']")
 
     # Normalize simple HTML-ish labels and cylinder labels.
     cleaned = cleaned.replace("<<", "<").replace(">>", ">")
@@ -209,6 +198,10 @@ def _find_mmdc() -> str | None:
     _MMDC_CHECKED = True
     _MMDC_PATH = shutil.which("mmdc")
     return _MMDC_PATH
+
+
+def is_mmdc_available() -> bool:
+    return _find_mmdc() is not None
 
 
 def _cleanup_temp_dir(path: Path) -> None:
