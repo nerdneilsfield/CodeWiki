@@ -319,6 +319,8 @@ class BackgroundWorker:
                     result.module_summary.to_dict() if result.module_summary else None
                 )
 
+            if result.status == "cancelled":
+                raise CancellationError("; ".join(result.warnings) or "Operation cancelled")
             if result.status == "failed":
                 raise RuntimeError("; ".join(result.warnings) or "documentation generation failed")
             if result.status == "degraded":

@@ -137,3 +137,42 @@ class TestWithRetry:
         with pytest.raises(LLMRetryExhausted) as exc_info:
             await with_retry(always_fail, max_retries=2)
         assert exc_info.value.attempts == 3
+
+
+class TestWithRetrySync:
+    def test_retries_transient_error(self):
+        from codewiki.src.be.llm_retry import with_retry_sync
+
+        calls = []
+
+        def flaky():
+            calls.append(1)
+            if len(calls) < 3:
+                raise LLMError("timeout", ErrorCategory.RETRYABLE_TRANSIENT)
+            return "ok"
+
+        with patch("time.sleep"):
+            result = with_retry_sync(flaky, max_retries=5)
+
+        assert result == "ok"
+        assert len(calls) == 3
+
+    def test_cancellation_after_sleep_stops_before_next_attempt(self):
+        from codewiki.src.be.cancellation import CancellationToken
+        from codewiki.src.be.llm_retry import with_retry_sync
+
+        token = CancellationToken()
+        calls = []
+
+        def flaky():
+            calls.append(1)
+            raise LLMError("timeout", ErrorCategory.RETRYABLE_TRANSIENT)
+
+        def fake_sleep(_delay):
+            token.cancel()
+
+        with patch("time.sleep", side_effect=fake_sleep):
+            with pytest.raises(CancellationError):
+                with_retry_sync(flaky, max_retries=3, cancel_token=token)
+
+        assert len(calls) == 1

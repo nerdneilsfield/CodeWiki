@@ -29,6 +29,42 @@ class TestCallLlmRaisesLLMError:
                 call_llm("test", config)
             assert exc_info.value.category == ErrorCategory.RETRYABLE_TRANSIENT
 
+    def test_streaming_path_returns_estimated_usage(self):
+        from types import SimpleNamespace
+
+        from codewiki.src.be.llm_services import call_llm
+
+        config = MagicMock()
+        config.main_model = "openai/gpt-4o"
+        config.max_tokens = 100
+        config.long_context_model = None
+        config.long_context_threshold = 999999
+        config.providers = [object()]
+
+        chunk1 = SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="hello "))])
+        chunk2 = SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="world"))])
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = [chunk1, chunk2]
+
+        with (
+            patch(
+                "codewiki.src.be.llm_services._create_client_for_model",
+                return_value=(mock_client, "openai_compatible"),
+            ),
+            patch(
+                "codewiki.src.be.llm_services.resolve_model_ref",
+                return_value=SimpleNamespace(model_name="gpt-4o", stream=True),
+            ),
+            patch("codewiki.src.be.utils.count_tokens", side_effect=[12, 12, 34]),
+        ):
+            result = call_llm("test", config, model="openai/gpt-4o", stream=True)
+
+        assert result.content == "hello world"
+        assert result.usage is not None
+        assert result.usage.source == "estimated"
+        mock_client.chat.completions.create.assert_called_once()
+        assert mock_client.chat.completions.create.call_args.kwargs["stream"] is True
+
 
 class TestPipelineRunnerCancelled:
     @pytest.mark.asyncio
