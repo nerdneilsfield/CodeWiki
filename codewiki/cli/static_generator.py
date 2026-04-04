@@ -79,7 +79,7 @@ _CSS = """
 # Page template (uses string.Template — $var substitution)
 # ──────────────────────────────────────────────────────────────────────────────
 
-_PAGE_TEMPLATE = Template(r"""\
+_PAGE_TEMPLATE = Template("""\
 <!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
