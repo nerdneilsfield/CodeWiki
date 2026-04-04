@@ -26,90 +26,54 @@ from codewiki.src.utils import (
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# CSS (shared between all pages — inlined so each page is self-contained)
-# Uses the same design language as DOCS_VIEW_TEMPLATE in templates.py
+# Override CSS — fixes prose/hljs/katex/mermaid conflicts (inlined per page)
 # ──────────────────────────────────────────────────────────────────────────────
 
-_CSS = """
-:root{
-  --bg:#fff;--bg2:#f8fafc;--bg3:#f1f5f9;--bg-code:#f1f5f9;--bg-pre:#f8fafc;
-  --text:#1e293b;--text2:#475569;--text3:#64748b;
-  --primary:#2563eb;--primary-h:#1d4ed8;--primary-lt:#eff6ff;
-  --border:#e2e8f0;--shadow:rgba(0,0,0,.05);
-  --sb-w:272px;--tb-h:56px;--r:6px;--tr:.18s ease;
-}
-[data-theme=dark]{
-  --bg:#0f172a;--bg2:#1e293b;--bg3:#253047;--bg-code:#1e293b;--bg-pre:#162032;
-  --text:#e2e8f0;--text2:#cbd5e1;--text3:#94a3b8;
-  --primary:#60a5fa;--primary-h:#93c5fd;--primary-lt:#1e3a5f;
-  --border:#334155;--shadow:rgba(0,0,0,.3);
-}
-*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
-html{scroll-behavior:smooth;}
-body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;font-size:15px;transition:background var(--tr),color var(--tr);}
-a{color:var(--primary);text-decoration:none;}
-a:hover{text-decoration:underline;}
-.tb{position:fixed;top:0;left:0;right:0;height:var(--tb-h);background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;z-index:200;box-shadow:0 1px 4px var(--shadow);}
-.tb-logo{font-size:15px;font-weight:700;color:var(--primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;}
-.tb-logo:hover{opacity:.85;text-decoration:none;}
-.ib{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--text);cursor:pointer;font-size:14px;transition:var(--tr);flex-shrink:0;-webkit-appearance:none;appearance:none;}
-.ib:hover{background:var(--bg3);border-color:var(--primary);}
-.ov{display:none;position:fixed;inset:0;top:var(--tb-h);background:rgba(0,0,0,.45);z-index:150;}
-.ov.on{display:block;}
-.sb{position:fixed;top:var(--tb-h);left:0;width:var(--sb-w);height:calc(100vh - var(--tb-h));background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;z-index:160;transition:transform var(--tr);padding:14px 10px 60px;}
-.sb.off{transform:translateX(calc(-1 * var(--sb-w)));}
-.layout{display:flex;padding-top:var(--tb-h);transition:padding-left var(--tr);}
-.layout.sbon{padding-left:var(--sb-w);}
-.main{flex:1;min-width:0;display:flex;justify-content:center;}
-.cw{width:100%;max-width:1200px;padding:44px 48px;display:flex;gap:44px;align-items:flex-start;}
-article{flex:1;min-width:0;max-width:860px;}
-.toc{width:220px;flex-shrink:0;position:sticky;top:calc(var(--tb-h) + 20px);max-height:calc(100vh - var(--tb-h) - 40px);overflow-y:auto;display:none;}
-@media(min-width:1280px){.toc{display:block;}}
-.toc-h{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border);}
-.toc ul{list-style:none;}
-.toc li a{font-size:12.5px;color:var(--text3);display:block;padding:3px 0 3px 12px;border-left:2px solid transparent;transition:var(--tr);text-decoration:none;}
-.toc li a:hover{color:var(--primary);}
-.toc li.on a{color:var(--primary);border-left-color:var(--primary);}
-.toc li.h3 a{padding-left:24px;font-size:12px;}
-.nav-meta{font-size:11px;color:var(--text3);line-height:1.6;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);margin-bottom:12px;}
-.nav-meta b{color:var(--text2);}
-.nav-row{display:flex;align-items:center;}
-a.nv{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;padding:6px 10px;border-radius:var(--r);color:var(--text2);font-size:13.5px;transition:var(--tr);text-decoration:none;}
-a.nv:hover{background:var(--bg3);color:var(--primary);}
-a.nv.on{background:var(--primary-lt);color:var(--primary);font-weight:600;}
-.nvcaret{width:24px;height:28px;display:flex;align-items:center;justify-content:center;border:none;background:none;color:var(--text3);cursor:pointer;font-size:12px;border-radius:4px;transition:transform var(--tr);flex-shrink:0;}
-.nvcaret:hover{color:var(--primary);}
-.nvcaret.open{transform:rotate(90deg);}
-.nvsub{overflow:hidden;}
-.nv-missing{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;padding:6px 10px;border-radius:var(--r);color:var(--text3);font-size:13.5px;opacity:.5;cursor:default;}
-article h1{font-size:1.9rem;font-weight:700;border-bottom:2px solid var(--border);padding-bottom:.4rem;margin-bottom:1.2rem;line-height:1.3;}
-article h2{font-size:1.45rem;font-weight:600;margin-top:2.2rem;margin-bottom:.7rem;border-bottom:1px solid var(--border);padding-bottom:.2rem;}
-article h3{font-size:1.15rem;font-weight:600;margin-top:1.8rem;margin-bottom:.5rem;}
-article h4{font-size:1rem;font-weight:600;margin-top:1.4rem;margin-bottom:.4rem;}
-article p{margin-bottom:1rem;color:var(--text2);}
-article ul,article ol{margin-bottom:1rem;padding-left:1.6rem;}
-article li{margin-bottom:.3rem;color:var(--text2);}
-article a{color:var(--primary);}
-article a:hover{text-decoration:underline;}
-article code{font-family:'JetBrains Mono',Consolas,monospace;font-size:.82em;background:var(--bg-code);padding:.15em .4em;border-radius:4px;color:var(--text);}
-article pre{background:var(--bg-pre);border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;overflow-x:auto;margin-bottom:1.2rem;}
-article pre code{background:none;padding:0;font-size:.87em;}
-article blockquote{border-left:4px solid var(--primary);padding:.5rem 1rem;margin-bottom:1rem;color:var(--text3);background:var(--primary-lt);border-radius:0 var(--r) var(--r) 0;}
-article table{width:100%;border-collapse:collapse;margin-bottom:1rem;}
-article th,article td{border:1px solid var(--border);padding:.6rem .8rem;text-align:left;}
-article th{background:var(--bg2);font-weight:600;}
-article img{max-width:100%;border-radius:var(--r);}
-.mermaid{margin:1rem 0;}
-.math-block{margin:1rem 0;overflow-x:auto;}
-.math-inline{display:inline;}
-.math-err{color:#e11d48;font-style:italic;font-size:.85em;}
-.hljs{background:transparent!important;}
-#btt{position:fixed;bottom:24px;right:24px;width:40px;height:40px;background:var(--primary);color:#fff;border:none;border-radius:50%;font-size:16px;cursor:pointer;display:none;align-items:center;justify-content:center;box-shadow:0 4px 12px var(--shadow);z-index:100;transition:var(--tr);}
-#btt:hover{background:var(--primary-h);transform:translateY(-2px);}
-#btt.on{display:flex;}
-@media(max-width:767px){.cw{padding:24px 18px;gap:0;}}
-@media(min-width:768px){.sb{transform:none;}.sb.off{transform:translateX(calc(-1 * var(--sb-w)));}}
+_OVERRIDE_CSS = """
+/* Highlight.js: keep code bg transparent, let prose control outer */
+.prose pre code.hljs { background: transparent !important; }
+/* prose code pseudo-elements: exclude KaTeX internals */
+.prose .katex code::before,
+.prose .katex code::after { content: none; }
+/* Mermaid: not constrained by prose max-width */
+.prose .mermaid { max-width: none; }
+/* Math: both rendering paths */
+.prose .math-block,
+.prose .katex-display { overflow-x: auto; max-width: none; }
+/* Math error */
+.prose .math-err { color: oklch(var(--er)); font-style: italic; font-size: 0.85em; }
+/* Wide tables */
+.prose table { display: block; max-width: 100%; overflow-x: auto; }
+/* pre focus (a11y) */
+.prose pre:focus-visible { box-shadow: 0 0 0 3px oklch(var(--p)); }
 """.strip()
+
+# Fallback prose styles if @tailwindcss/typography CDN fails.
+# Uses DaisyUI CSS variables for theme consistency.
+# NOTE: When using fallback, remove "prose prose-lg" from <article> class
+# and use only "cw-article" to avoid conflicting with any residual prose rules.
+_PROSE_FALLBACK = """
+.cw-article h1{font-size:1.9rem;font-weight:700;border-bottom:2px solid oklch(var(--bc)/.2);padding-bottom:.4rem;margin-bottom:1.2rem;line-height:1.3;}
+.cw-article h2{font-size:1.45rem;font-weight:600;margin-top:2.2rem;margin-bottom:.7rem;border-bottom:1px solid oklch(var(--bc)/.15);padding-bottom:.2rem;}
+.cw-article h3{font-size:1.15rem;font-weight:600;margin-top:1.8rem;margin-bottom:.5rem;}
+.cw-article h4{font-size:1rem;font-weight:600;margin-top:1.4rem;margin-bottom:.4rem;}
+.cw-article p{margin-bottom:1rem;color:oklch(var(--bc)/.7);}
+.cw-article ul,.cw-article ol{margin-bottom:1rem;padding-left:1.6rem;}
+.cw-article li{margin-bottom:.3rem;color:oklch(var(--bc)/.7);}
+.cw-article a{color:oklch(var(--p));}
+.cw-article a:hover{text-decoration:underline;}
+.cw-article code{font-family:'JetBrains Mono',Consolas,monospace;font-size:.82em;background:oklch(var(--b2));padding:.15em .4em;border-radius:4px;}
+.cw-article pre{background:oklch(var(--b2));border:1px solid oklch(var(--bc)/.15);border-radius:8px;padding:1rem 1.2rem;overflow-x:auto;margin-bottom:1.2rem;}
+.cw-article pre code{background:none;padding:0;font-size:.87em;}
+.cw-article blockquote{border-left:4px solid oklch(var(--p));padding:.5rem 1rem;margin-bottom:1rem;color:oklch(var(--bc)/.5);background:oklch(var(--p)/.1);border-radius:0 6px 6px 0;}
+.cw-article table{width:100%;border-collapse:collapse;margin-bottom:1rem;}
+.cw-article th,.cw-article td{border:1px solid oklch(var(--bc)/.15);padding:.6rem .8rem;text-align:left;}
+.cw-article th{background:oklch(var(--b2));font-weight:600;}
+.cw-article img{max-width:100%;border-radius:6px;}
+""".strip()
+
+# Determined by Step 1 verification. Override via env var CODEWIKI_TYPOGRAPHY_CDN=0.
+_TYPOGRAPHY_CDN_WORKS = os.environ.get("CODEWIKI_TYPOGRAPHY_CDN", "1") != "0"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Page template (uses string.Template — $var substitution, no brace escaping)
@@ -117,7 +81,7 @@ article img{max-width:100%;border-radius:var(--r);}
 
 _PAGE_TEMPLATE = Template(r"""\
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -125,44 +89,65 @@ _PAGE_TEMPLATE = Template(r"""\
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 <link id="hljs-css" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11.9.0/dist/mermaid.min.js"></script>
 <script>(function(){var t=localStorage.getItem('cw-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);if(t==='dark'){document.getElementById('hljs-css').href='https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css';}})();</script>
+${typography_style}
 <style>
-${css}
+${override_css}
 </style>
 </head>
-<body>
-<header class="tb">
-  <button class="ib" id="sb-toggle" title="Toggle sidebar">&#9776;</button>
-  <a href="index.html" class="tb-logo">&#128218; ${repo_name}</a>
-  <a href="/" id="site-home-btn" class="ib" title="Back to main site">&#127968;</a>
-  <button class="ib" id="theme-btn" title="Toggle theme">&#127769;</button>
-</header>
-<div class="ov" id="ov"></div>
-<div class="layout" id="layout">
-  <nav class="sb" id="sb">
-${meta_html}
-${nav_html}
-  </nav>
-  <main class="main">
-    <div class="cw">
-      <article id="mc">
-${content}
-      </article>
-      <div class="toc" id="toc">
-        <div class="toc-h">On this page</div>
-        <ul id="toc-ul"></ul>
+<body class="bg-base-100 font-[Inter,system-ui,sans-serif]">
+<div class="drawer lg:drawer-open">
+  <input id="cw-drawer" type="checkbox" class="drawer-toggle" />
+  <div class="drawer-content flex flex-col">
+    <!-- Navbar -->
+    <header class="navbar bg-base-200 shadow-sm sticky top-0 z-50">
+      <div class="flex-none lg:hidden">
+        <label for="cw-drawer" class="btn btn-ghost btn-square btn-sm" aria-label="Toggle sidebar">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block h-5 w-5 stroke-current"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+        </label>
       </div>
+      <div class="flex-1 px-2">
+        <a href="index.html" class="btn btn-ghost text-primary font-bold text-base normal-case">&#128218; ${repo_name}</a>
+      </div>
+      <div class="flex-none gap-1">
+        <a href="/" id="site-home-btn" class="btn btn-ghost btn-square btn-sm" title="Back to main site" aria-label="Back to main site">&#127968;</a>
+        <button class="btn btn-ghost btn-square btn-sm" id="theme-btn" title="Toggle theme" aria-label="Toggle light/dark theme">&#127769;</button>
+      </div>
+    </header>
+    <!-- Main content -->
+    <main class="flex justify-center px-4 py-8 lg:px-8">
+      <div class="flex gap-8 w-full max-w-6xl items-start">
+        <article id="mc" class="${article_class} max-w-none flex-1 min-w-0">
+${content}
+        </article>
+        <aside class="hidden xl:block w-56 shrink-0 sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto" id="toc">
+          <div class="menu-title text-xs uppercase tracking-wider opacity-60">On this page</div>
+          <ul id="toc-ul" class="menu menu-sm"></ul>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <!-- Sidebar -->
+  <div class="drawer-side z-40">
+    <label for="cw-drawer" aria-label="close sidebar" class="drawer-overlay"></label>
+    <div class="bg-base-200 min-h-full w-72 p-4">
+${meta_html}
+      <ul class="menu w-full">
+${nav_html}
+      </ul>
     </div>
-  </main>
+  </div>
 </div>
-<button id="btt" title="Back to top">&#8679;</button>
+<button id="btt" class="btn btn-circle btn-primary btn-sm fixed bottom-6 right-6 z-50 hidden shadow-lg" title="Back to top">&#8679;</button>
 <script>
-// Site home button — navigate to the origin root regardless of subpath
+// Site home button
 document.getElementById('site-home-btn').href = window.location.origin + '/';
 // Theme
 var html=document.documentElement,themeBtn=document.getElementById('theme-btn');
@@ -171,25 +156,38 @@ var _hljsBase='https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles
 function setTheme(t){html.setAttribute('data-theme',t);localStorage.setItem('cw-theme',t);themeBtn.innerHTML=t==='dark'?'&#9728;&#65039;':'&#127769;';document.getElementById('hljs-css').href=_hljsBase+(t==='dark'?'github-dark':'github')+'.min.css';}
 setTheme(curTheme());
 themeBtn.addEventListener('click',function(){setTheme(curTheme()==='dark'?'light':'dark');});
-document.addEventListener('DOMContentLoaded',function(){hljs.highlightAll();});
-// Sidebar
-var sb=document.getElementById('sb'),layout=document.getElementById('layout'),ov=document.getElementById('ov');
-function isMob(){return window.innerWidth<768;}
-function sbShow(){sb.classList.remove('off');layout.classList.add('sbon');if(isMob())ov.classList.add('on');}
-function sbHide(){sb.classList.add('off');layout.classList.remove('sbon');ov.classList.remove('on');}
-if(isMob()){sbHide();}else{if(localStorage.getItem('cw-sb')==='off')sbHide();else sbShow();}
-document.getElementById('sb-toggle').addEventListener('click',function(){
-  if(sb.classList.contains('off')){sbShow();if(!isMob())localStorage.setItem('cw-sb','on');}
-  else{sbHide();if(!isMob())localStorage.setItem('cw-sb','off');}
+document.addEventListener('DOMContentLoaded',function(){
+  hljs.highlightAll();
+  document.querySelectorAll('article pre').forEach(function(pre){
+    pre.setAttribute('tabindex','0');
+    pre.setAttribute('role','region');
+    pre.setAttribute('aria-label','Code block');
+  });
 });
-ov.addEventListener('click',sbHide);
-window.addEventListener('resize',function(){if(!isMob()){ov.classList.remove('on');if(localStorage.getItem('cw-sb')!=='off')sbShow();}else sbHide();});
-// Nav collapse — hierarchy visible by default; caret toggles manual collapse
-document.querySelectorAll('.nvcaret').forEach(function(c){
-  var key=c.getAttribute('data-nav'),sub=document.querySelector('[data-nav-sub="'+key+'"]');
-  if(!sub)return;
-  c.classList.add('open');
-  c.addEventListener('click',function(){var h=sub.style.display==='none';sub.style.display=h?'':'none';c.classList.toggle('open',h);});
+// Sidebar persistence (desktop only — mobile uses drawer-toggle natively)
+var drawerCb=document.getElementById('cw-drawer');
+if(window.innerWidth>=1024 && localStorage.getItem('cw-sb')==='off'){
+  // lg:drawer-open forces open; override by removing the class
+  document.querySelector('.drawer').classList.remove('lg:drawer-open');
+}
+drawerCb.addEventListener('change',function(){
+  if(window.innerWidth>=1024){
+    localStorage.setItem('cw-sb',drawerCb.checked?'on':'off');
+    var d=document.querySelector('.drawer');
+    if(drawerCb.checked)d.classList.add('lg:drawer-open');
+    else d.classList.remove('lg:drawer-open');
+  }
+});
+// Escape key closes sidebar
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'&&drawerCb.checked){drawerCb.checked=false;drawerCb.dispatchEvent(new Event('change'));}
+});
+// Resize: restore drawer-open when returning to desktop if not manually closed
+window.addEventListener('resize',function(){
+  var d=document.querySelector('.drawer');
+  if(window.innerWidth>=1024){
+    if(localStorage.getItem('cw-sb')!=='off') d.classList.add('lg:drawer-open');
+  }
 });
 // TOC
 (function(){
@@ -199,20 +197,24 @@ document.querySelectorAll('.nvcaret').forEach(function(c){
   if(hs.length<2){if(toc)toc.style.display='none';return;}
   hs.forEach(function(h,i){
     if(!h.id)h.id='h-'+i;
-    var li=document.createElement('li');li.className=h.tagName==='H3'?'h3':'';
+    var li=document.createElement('li');
     var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;
+    if(h.tagName==='H3')a.classList.add('pl-4','text-xs');
     li.appendChild(a);ul.appendChild(li);
   });
   var obs=new IntersectionObserver(function(entries){
-    entries.forEach(function(e){var a=ul.querySelector('a[href="#'+e.target.id+'"]');if(a)a.closest('li').classList.toggle('on',e.isIntersecting);});
+    entries.forEach(function(e){
+      var a=ul.querySelector('a[href="#'+e.target.id+'"]');
+      if(a)a.classList.toggle('active',e.isIntersecting);
+    });
   },{rootMargin:'-15% 0% -75% 0%'});
   hs.forEach(function(h){obs.observe(h);});
 })();
 // Back to top
 var btt=document.getElementById('btt');
-window.addEventListener('scroll',function(){btt.classList.toggle('on',window.scrollY>300);});
+window.addEventListener('scroll',function(){btt.classList.toggle('hidden',window.scrollY<=300);});
 btt.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});
-// Mermaid — startOnLoad:false + manual render with error handling + theme-aware re-render
+// Mermaid
 async function cwRenderMermaid(){
   var theme=document.documentElement.getAttribute('data-theme')==='dark'?'dark':'default';
   mermaid.initialize({startOnLoad:false,theme:theme,themeVariables:{primaryColor:'#2563eb',lineColor:'#64748b'},flowchart:{htmlLabels:true,curve:'basis'},sequence:{mirrorActors:false,useMaxWidth:true}});
@@ -226,25 +228,17 @@ async function cwRenderMermaid(){
       var r=await mermaid.render('mermaid-'+Date.now()+'-'+i,src);
       el.innerHTML=r.svg;
     }catch(err){
-      el.innerHTML='<details open><summary style="color:#e11d48;cursor:pointer">&#9888; Mermaid error (click to expand)</summary><pre style="font-size:12px;margin-top:8px;white-space:pre-wrap">'+err.message+'</pre><pre style="font-size:11px;color:var(--tx2)">'+src.replace(/</g,'&lt;')+'</pre></details>';
+      el.innerHTML='<details open><summary class="text-error cursor-pointer">&#9888; Mermaid error</summary><pre class="text-xs mt-2 whitespace-pre-wrap">'+err.message+'</pre><pre class="text-xs opacity-60">'+src.replace(/</g,'&lt;')+'</pre></details>';
     }
   }
 }
 document.addEventListener('DOMContentLoaded',cwRenderMermaid);
 themeBtn.addEventListener('click',function(){setTimeout(cwRenderMermaid,50);});
-// Hybrid math rendering: KaTeX (fast, sync) for 90 % of formulas;
-// async MathJax fallback for anything KaTeX cannot handle
-// (e.g. \label/\eqref, exotic environments, custom macros).
-// Math is pre-extracted server-side into .math-block / .math-inline elements
-// containing \[...\] / \(...\) — no dollar-sign scanning needed.
+// Math: KaTeX fast path + MathJax async fallback
 var _mjReady=null;
 function _loadMathJax(){
   if(!_mjReady){
-    window.MathJax={
-      tex:{packages:{'[+]':['ams','newcommand']}},
-      svg:{fontCache:'global'},
-      startup:{typeset:false}
-    };
+    window.MathJax={tex:{packages:{'[+]':['ams','newcommand']}},svg:{fontCache:'global'},startup:{typeset:false}};
     _mjReady=new Promise(function(res,rej){
       var s=document.createElement('script');
       s.src='https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';
@@ -257,14 +251,12 @@ function _loadMathJax(){
 }
 async function cwRenderMath(root){
   if(typeof katex==='undefined')return;
-  // Guard: DOMContentLoaded passes an Event object — fall back to DOM lookup
   if(!root||typeof root.querySelectorAll!=='function')
     root=document.getElementById('mc')||document.body;
   var failed=[];
   root.querySelectorAll('.math-block,.math-inline').forEach(function(el){
     if(el.dataset.mathDone)return;
     var disp=el.classList.contains('math-block');
-    // Strip the \[...\] or \(...\) wrapper (each delimiter is exactly 2 chars)
     var src=el.textContent.trim().slice(2,-2).trim();
     el.dataset.mathSrc=src;
     el.dataset.mathDone='1';
@@ -275,7 +267,6 @@ async function cwRenderMath(root){
     }
   });
   if(!failed.length)return;
-  // Load MathJax on demand and process elements KaTeX could not handle
   try{
     await _loadMathJax();
     for(var i=0;i<failed.length;i++){
@@ -372,14 +363,9 @@ def _build_nav_html(
     parent_path: Optional[list[str]] = None,
     h1_titles: Optional[Dict[str, str]] = None,
 ) -> str:
-    """Recursively build sidebar nav HTML from the module tree.
-
-    When *h1_titles* is provided, nav labels are taken from the generated
-    docs' first heading (already in the target language).  Falls back to
-    the tree key when no H1 was extracted.
-    """
+    """Recursively build sidebar nav HTML from the module tree as DaisyUI menu items."""
     lines: list[str] = []
-    indent = "  " * (depth + 1)
+    indent = "  " * (depth + 3)
     base_path = parent_path or []
     titles = h1_titles or {}
 
@@ -392,39 +378,38 @@ def _build_nav_html(
             href = data.get("_doc_filename", module_doc_filename(module_path)).replace(
                 ".md", ".html"
             )
-        active = " on" if _normalize_for_match(current_html) == _normalize_for_match(href) else ""
-        pl = depth * 12
-        nav_key = f"{key}-d{depth}".replace(".", "-").replace("/", "-").replace(" ", "-")
+        is_active = _normalize_for_match(current_html) == _normalize_for_match(href)
+        active_cls = ' class="active"' if is_active else ""
         children = data.get("children") or {}
 
-        # Prefer localized H1 title from the generated doc, fall back to tree key
         doc_stem = href.removesuffix(".html") if href else ""
         label = titles.get(doc_stem, key.replace("_", " ").title())
 
-        lines.append(f"{indent}<div>")
-        lines.append(f'{indent}  <div class="nav-row" style="padding-left:{pl}px;">')
-        if has_page:
-            lines.append(f'{indent}    <a href="{href}" class="nv{active}">{label}</a>')
-        else:
-            lines.append(
-                f'{indent}    <span class="nv-missing" title="Documentation not yet generated">{label}</span>'
-            )
         if children:
-            lines.append(
-                f'{indent}    <button class="nvcaret" data-nav="{nav_key}" aria-label="Toggle">›</button>'
-            )
-        lines.append(f"{indent}  </div>")
-
-        if children:
-            lines.append(f'{indent}  <div class="nvsub" data-nav-sub="{nav_key}">')
+            lines.append(f"{indent}<li>")
+            lines.append(f"{indent}  <details open>")
+            if has_page:
+                lines.append(
+                    f'{indent}    <summary><a href="{href}"{active_cls}>{label}</a></summary>'
+                )
+            else:
+                lines.append(f'{indent}    <summary class="opacity-50">{label}</summary>')
+            lines.append(f"{indent}    <ul>")
             lines.append(
                 _build_nav_html(
                     children, current_html, depth + 1, resolved_hrefs, module_path, titles
                 )
             )
-            lines.append(f"{indent}  </div>")
-
-        lines.append(f"{indent}</div>")
+            lines.append(f"{indent}    </ul>")
+            lines.append(f"{indent}  </details>")
+            lines.append(f"{indent}</li>")
+        else:
+            if has_page:
+                lines.append(f'{indent}<li><a href="{href}"{active_cls}>{label}</a></li>')
+            else:
+                lines.append(
+                    f'{indent}<li class="disabled"><span class="opacity-50">{label}</span></li>'
+                )
 
     return "\n".join(lines)
 
@@ -436,40 +421,42 @@ def _build_meta_html(metadata: Optional[Dict[str, Any]], hide_repo_links: bool =
     st = metadata.get("statistics", {})
     parts = []
     if gi.get("main_model"):
-        parts.append(f"<b>Model:</b> {gi['main_model']}")
+        parts.append(f"<b class='opacity-70'>Model:</b> {gi['main_model']}")
     if gi.get("timestamp"):
-        parts.append(f"<b>Generated:</b> {gi['timestamp'][:16]}")
+        parts.append(f"<b class='opacity-70'>Generated:</b> {gi['timestamp'][:16]}")
     if gi.get("commit_id"):
-        parts.append(f"<b>Commit:</b> {gi['commit_id'][:8]}")
+        parts.append(f"<b class='opacity-70'>Commit:</b> {gi['commit_id'][:8]}")
     if st.get("total_components"):
-        parts.append(f"<b>Components:</b> {st['total_components']}")
+        parts.append(f"<b class='opacity-70'>Components:</b> {st['total_components']}")
 
-    # External links: repo URL + DeepWiki (suppressed when hide_repo_links=True)
     link_parts = []
     if not hide_repo_links:
         repo_url = gi.get("repo_url")
         if repo_url:
             link_parts.append(
-                f'<a href="{repo_url}" target="_blank" rel="noopener">&#128279; Repository</a>'
+                f'<a href="{repo_url}" target="_blank" rel="noopener" '
+                f'class="link link-primary text-xs">&#128279; Repository</a>'
             )
             if "github.com" in repo_url:
                 slug = repo_url.split("github.com/")[-1]
                 link_parts.append(
-                    f'<a href="https://deepwiki.com/{slug}" target="_blank" rel="noopener">'
-                    f"&#127760; DeepWiki</a>"
+                    f'<a href="https://deepwiki.com/{slug}" target="_blank" rel="noopener" '
+                    f'class="link link-primary text-xs">&#127760; DeepWiki</a>'
                 )
 
     if not parts and not link_parts:
         return ""
 
-    body = "\n".join(f"    {p}<br>" for p in parts)
+    body = "\n".join(f"        <div class='text-xs leading-relaxed'>{p}</div>" for p in parts)
     if link_parts:
-        body += (
-            '\n    <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">'
-            + "".join(link_parts)
-            + "</div>"
-        )
-    return '  <div class="nav-meta">\n' + body + "\n  </div>"
+        body += "\n        <div class='flex gap-2 flex-wrap mt-2'>" + "".join(link_parts) + "</div>"
+    return (
+        "      <li>\n"
+        '        <div class="card card-compact bg-base-100 shadow-sm mb-2">\n'
+        '          <div class="card-body p-3">\n' + body + "\n          </div>\n"
+        "        </div>\n"
+        "      </li>"
+    )
 
 
 def _rewrite_md_to_html_links(html: str) -> str:
@@ -547,7 +534,7 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
         # HTML-escape so & < > are safe in the DOM; KaTeX reads textContent
         # which the browser decodes back to the original LaTeX characters.
         escaped = _html.escape(inner, quote=False)
-        protected.append((ph, f'<div class="math-block">\\[{escaped}\\]</div>'))
+        protected.append((ph, f'<div class="math-block not-prose">\\[{escaped}\\]</div>'))
         return ph
 
     def _inline(m: re.Match) -> str:
@@ -561,7 +548,7 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
         idx = len(protected)
         ph = f"CWIKIMI{idx:06d}"
         escaped = _html.escape(inner, quote=False)
-        protected.append((ph, f'<span class="math-inline">\\({escaped}\\)</span>'))
+        protected.append((ph, f'<span class="math-inline not-prose">\\({escaped}\\)</span>'))
         return ph
 
     content = _DISPLAY_MATH_RE.sub(_display, content)
@@ -617,7 +604,7 @@ def _markdown_to_static_html(content: str) -> str:
 
     def _mermaid(m: re.Match) -> str:
         code = html_module.unescape(m.group(1))
-        return f'<div class="mermaid">{code}</div>'
+        return f'<div class="mermaid not-prose">{code}</div>'
 
     html = mermaid_re.sub(_mermaid, html)
 
@@ -713,16 +700,12 @@ class StaticHTMLGenerator:
             )
 
             # Build sidebar for this page
-            # 1. Overview (always present; use H1 from overview.md if available)
-            ov_active = " on" if html_name in ("overview.html", "index.html") else ""
+            # 1. Overview
+            ov_cls = ' class="active"' if html_name in ("overview.html", "index.html") else ""
             ov_label = h1_titles.get("overview", "Overview")
-            nav_html = (
-                f'  <div class="nav-row">\n'
-                f'    <a href="index.html" class="nv{ov_active}">{ov_label}</a>\n'
-                f"  </div>\n"
-            )
+            nav_html = f'        <li><a href="index.html"{ov_cls}>{ov_label}</a></li>\n'
 
-            # 2. Guide pages (fixed order, only if files exist; independent of module_tree)
+            # 2. Guide pages
             _GUIDE_FALLBACK_LABELS = {
                 "guide-getting-started": "Get Started",
                 "guide-beginners-guide": "Beginner's Guide",
@@ -734,13 +717,9 @@ class StaticHTMLGenerator:
                 if not md_file.exists():
                     continue
                 guide_html = slug + ".html"
-                active = " on" if html_name == guide_html else ""
+                guide_cls = ' class="active"' if html_name == guide_html else ""
                 label = h1_titles.get(slug, fallback_label)
-                nav_html += (
-                    f'  <div class="nav-row">\n'
-                    f'    <a href="{guide_html}" class="nv{active}">{label}</a>\n'
-                    f"  </div>\n"
-                )
+
                 # Sub-pages for multi-page guides
                 sub_prefix = slug + "-"
                 sub_pages = sorted(
@@ -751,15 +730,16 @@ class StaticHTMLGenerator:
                     ]
                 )
                 if sub_pages:
-                    nav_html += f'  <div class="nvsub" style="display:block">\n'
+                    nav_html += f"        <li>\n"
+                    nav_html += f"          <details open>\n"
+                    nav_html += f'            <summary><a href="{guide_html}"{guide_cls}>{label}</a></summary>\n'
+                    nav_html += f"            <ul>\n"
                     for sub_file in sub_pages:
                         sub_html = sub_file.replace(".md", ".html")
                         sub_stem = sub_file.removesuffix(".md")
-                        # Prefer localized H1 title from the generated doc
                         sub_label = h1_titles.get(sub_stem)
                         if not sub_label:
                             raw = sub_file[len(sub_prefix) : -3]
-                            # "01-some-title" → "1. Some Title"
                             m = re.match(r"^(\d+)-(.+)$", raw)
                             if m:
                                 sub_label = (
@@ -767,13 +747,13 @@ class StaticHTMLGenerator:
                                 )
                             else:
                                 sub_label = raw.replace("-", " ").title()
-                        sub_active = " on" if html_name == sub_html else ""
-                        nav_html += (
-                            f'    <div class="nav-row" style="padding-left:24px">\n'
-                            f'      <a href="{sub_html}" class="nv{sub_active}">{sub_label}</a>\n'
-                            f"    </div>\n"
-                        )
-                    nav_html += "  </div>\n"
+                        sub_cls = ' class="active"' if html_name == sub_html else ""
+                        nav_html += f'              <li><a href="{sub_html}"{sub_cls}>{sub_label}</a></li>\n'
+                    nav_html += f"            </ul>\n"
+                    nav_html += f"          </details>\n"
+                    nav_html += f"        </li>\n"
+                else:
+                    nav_html += f'        <li><a href="{guide_html}"{guide_cls}>{label}</a></li>\n'
 
             # 3. Module tree (only when present)
             if module_tree:
@@ -781,14 +761,32 @@ class StaticHTMLGenerator:
                     module_tree, html_name, resolved_hrefs=resolved_hrefs, h1_titles=h1_titles
                 )
 
+            # Determine typography style block and article class
+            if _TYPOGRAPHY_CDN_WORKS:
+                typography_style = '<style type="text/tailwindcss">\n@import "tailwindcss";\n@plugin "https://esm.sh/@tailwindcss/typography@0.5";\n</style>'
+                article_class = "prose prose-lg"
+            else:
+                typography_style = f"<style>\n{_PROSE_FALLBACK}\n</style>"
+                article_class = "cw-article"
+
             page = _PAGE_TEMPLATE.safe_substitute(
                 title=title,
-                css=_CSS,
+                override_css=_OVERRIDE_CSS,
+                typography_style=typography_style,
+                article_class=article_class,
                 repo_name=repo_name,
                 meta_html=meta_html,
                 nav_html=nav_html,
                 content=content_html,
             )
+
+            # Sanity check: safe_substitute silently ignores missing placeholders.
+            # Verify no un-substituted ${...} remain in output.
+            import re as _re
+
+            leftover = _re.findall(r"\$\{[a-z_]+\}", page)
+            if leftover:
+                logger.warning(f"Un-substituted placeholders in {html_name}: {leftover}")
 
             out_path = docs_dir / html_name
             # Strip lone surrogates that can appear in LLM-generated content
