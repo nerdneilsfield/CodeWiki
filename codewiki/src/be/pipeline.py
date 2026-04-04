@@ -131,4 +131,27 @@ class PipelineRunner:
                     break
                 logger.warning("⚠ %s (degraded_ok — continuing)", message)
                 ctx.result.add_warning(message)
+
+        # Persist all state on exit (cancel, fail, or success) so progress
+        # survives restarts.
+        await _flush_all_state(ctx)
         return ctx.result
+
+
+async def _flush_all_state(ctx: PipelineContext) -> None:
+    """Best-effort flush of all stateful managers."""
+    flushed: list[str] = []
+    try:
+        if ctx.state_mgr and hasattr(ctx.state_mgr, "flush"):
+            await ctx.state_mgr.flush()
+            flushed.append("generation_state")
+    except Exception as exc:
+        logger.warning("Failed to flush generation state: %s", exc)
+    try:
+        if ctx.tree_manager and hasattr(ctx.tree_manager, "flush"):
+            ctx.tree_manager.flush()
+            flushed.append("module_tree")
+    except Exception as exc:
+        logger.warning("Failed to flush module tree: %s", exc)
+    if flushed:
+        logger.info("💾 State saved: %s", ", ".join(flushed))
