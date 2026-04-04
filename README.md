@@ -42,6 +42,10 @@ The generated file looks like this (minimal single-provider example):
 main_model    = "openai/gpt-4o-mini"
 cluster_model = "openai/gpt-4o-mini"
 
+[postprocess]
+strict    = false
+fix_links = true
+
 [[providers]]
 name      = "openai"
 type      = "openai_compatible"
@@ -213,10 +217,12 @@ All three prompt paths (system, leaf, overview) receive evidence rules. Recursiv
 Validates and repairs generated documentation:
 - **Link validation** — scans internal `[text](file.md#anchor)` links, verifies file existence and heading anchor presence
 - **Heading anchors** — `heading_to_slug()` as single source of truth, used by both renderer and validator, with duplicate heading dedup (-1, -2 suffixes)
+- **Math validation** — `pylatexenc` structural parsing plus KaTeX render checks, deterministic cleanup rules, then batch LLM repair when needed
+- **Mermaid validation** — `mmdc` when available, regex fallback otherwise, deterministic cleanup rules, then batch LLM repair when needed
 - **Mermaid degradation** — unfixable diagrams replaced with `text` code blocks + error comments
 - **Math degradation** — inline math → backtick code; display math → `latex` fenced block
 - **LintReport** — JSON report saved to `_lint_report.json` with all failures
-- **Strict gate** — `Config.postprocess_strict = True` raises `LintError` on unfixable issues
+- **Strict gate** — `config.postprocess.strict = true` raises `LintError` on unfixable issues
 
 </details>
 
@@ -301,7 +307,6 @@ max_depth          = 2            # module-tree depth
 max_concurrent     = 3            # parallel LLM workers
 max_retries        = 2            # fill-pass retries for skipped modules
 output_language    = "en"         # "en" | "zh" | "ja" | …
-postprocess_strict = false        # block build on unfixable lint issues
 
 [tokens]
 max_tokens                = 32768
@@ -320,6 +325,15 @@ fallback_models    = ["openai/gpt-4o-mini"]
 # doc_type            = "architecture"   # api | architecture | user-guide | developer
 # focus_modules       = ["src/core"]
 # custom_instructions = ""
+
+[postprocess]
+strict             = false                 # true = block build on unfixable lint issues
+fix_links          = true                  # validate and rewrite internal links
+# repair_model     = "openai/gpt-4o-mini"  # empty = main_model
+# repair_fallback_1 = ""
+# repair_fallback_2 = ""
+# repair_batch_size = 8
+# repair_max_retries = 2
 
 # ── Providers ────────────────────────────────────────────────────────────────
 # API keys use env: references — the variable is read at generation time.

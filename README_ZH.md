@@ -42,6 +42,10 @@ $EDITOR config.toml           # 填写 API key 环境变量和模型名
 main_model    = "openai/gpt-4o-mini"
 cluster_model = "openai/gpt-4o-mini"
 
+[postprocess]
+strict    = false
+fix_links = true
+
 [[providers]]
 name      = "openai"
 type      = "openai_compatible"
@@ -213,10 +217,12 @@ CodeWiki 将仓库处理分为五个层次，每层基于前一层的产出：
 校验并修复生成的文档：
 - **链接校验** —— 扫描内部 `[text](file.md#anchor)` 链接，验证文件存在性和标题锚点
 - **标题锚点** —— `heading_to_slug()` 作为唯一规则源，渲染器和校验器共用，重复标题自动去重（-1、-2 后缀）
+- **数学公式校验** —— `pylatexenc` 结构解析加 KaTeX 渲染双层检查，先走确定性清理规则，再按批次调用 LLM 修复
+- **Mermaid 校验** —— 优先用 `mmdc`，不可用时退回正则启发式；同样先走确定性清理规则，再按批次调用 LLM 修复
 - **Mermaid 降级** —— 无法修复的图表替换为 `text` 代码块 + 错误注释
 - **Math 降级** —— 行内公式 → 反引号代码；展示公式 → `latex` 围栏代码块
 - **LintReport** —— JSON 报告保存到 `_lint_report.json`
-- **严格门禁** —— `Config.postprocess_strict = True` 时，无法修复的问题抛出 `LintError`
+- **严格门禁** —— `config.postprocess.strict = true` 时，无法修复的问题抛出 `LintError`
 
 </details>
 
@@ -300,7 +306,6 @@ max_depth          = 2            # 模块树深度
 max_concurrent     = 3            # 并行 LLM worker 数
 max_retries        = 2            # 遗漏模块的补填轮数
 output_language    = "zh"         # "en" | "zh" | "ja" | …
-postprocess_strict = false        # 是否在 lint 问题无法修复时阻断构建
 
 [tokens]
 max_tokens                = 32768
@@ -319,6 +324,15 @@ fallback_models = ["openai/gpt-4o-mini"]
 # doc_type            = "architecture"   # api | architecture | user-guide | developer
 # focus_modules       = ["src/core"]
 # custom_instructions = ""
+
+[postprocess]
+strict             = false                 # true = lint 问题无法修复时阻断构建
+fix_links          = true                  # 校验并重写内部链接
+# repair_model     = "openai/gpt-4o-mini"  # 为空时回退到 main_model
+# repair_fallback_1 = ""
+# repair_fallback_2 = ""
+# repair_batch_size = 8
+# repair_max_retries = 2
 
 # ── Providers ────────────────────────────────────────────────────────────────
 # api_keys 使用 env: 引用 —— 变量在生成时读取，不写入配置文件
