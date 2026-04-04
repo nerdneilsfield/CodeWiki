@@ -92,10 +92,16 @@ def resolve_cycles(graph: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
     cycles = detect_cycles(graph)
 
     if not cycles:
-        logger.debug("No cycles detected in the dependency graph")
+        logger.debug("No cycles detected in %d-node dependency graph", len(graph))
         return graph
 
-    logger.debug(f"Detected {len(cycles)} cycles in the dependency graph")
+    total_cycle_nodes = sum(len(c) for c in cycles)
+    logger.debug(
+        "Detected %d cycle(s) involving %d nodes in %d-node graph",
+        len(cycles),
+        total_cycle_nodes,
+        len(graph),
+    )
 
     # Create a copy of the graph to modify
     new_graph = {node: deps.copy() for node, deps in graph.items()}
@@ -131,6 +137,7 @@ def topological_sort(graph: Dict[str, Set[str]]) -> List[str]:
     Returns:
         A list of nodes in topological order (dependencies first)
     """
+    logger.debug("topological_sort: input %d nodes", len(graph))
     # First, check for and resolve cycles
     acyclic_graph = resolve_cycles(graph)
 
@@ -167,6 +174,7 @@ def topological_sort(graph: Dict[str, Set[str]]) -> List[str]:
         # Return all nodes in some order to avoid breaking the process
         return list(acyclic_graph.keys())
 
+    logger.debug("topological_sort: produced %d-node ordering", len(result))
     # Reverse the result to get dependencies first
     return result[::-1]
 
@@ -269,6 +277,13 @@ def build_graph_from_components(components: Dict[str, Any]) -> Dict[str, Set[str
             if dep_id in components:
                 graph[comp_id].add(dep_id)
 
+    total_edges = sum(len(deps) for deps in graph.values())
+    logger.debug(
+        "build_graph_from_components: %d components → %d nodes, %d edges",
+        len(components),
+        len(graph),
+        total_edges,
+    )
     return graph
 
 
@@ -288,6 +303,7 @@ def get_leaf_nodes(graph: Dict[str, Set[str]], components: Dict[str, Node]) -> L
     Returns:
         A list of leaf nodes
     """
+    logger.debug("get_leaf_nodes: input %d graph nodes, %d components", len(graph), len(components))
     # First, resolve cycles to ensure we have a DAG
     acyclic_graph = resolve_cycles(graph)
 
@@ -359,4 +375,5 @@ def get_leaf_nodes(graph: Dict[str, Set[str]], components: Dict[str, Node]) -> L
         logger.warning("No leaf nodes found in the graph")
         return []
 
+    logger.debug("get_leaf_nodes: %d leaf nodes selected", len(concise_leaf_nodes))
     return concise_leaf_nodes

@@ -61,6 +61,14 @@ class DependencyGraphBuilder:
 
         # Parse repository
         components = parser.parse_repository(filtered_folders)
+        comp_types = {}
+        for c in components.values():
+            comp_types[c.component_type] = comp_types.get(c.component_type, 0) + 1
+        logger.debug(
+            "Parsed %d components: %s",
+            len(components),
+            ", ".join(f"{t}={n}" for t, n in sorted(comp_types.items(), key=lambda x: -x[1])),
+        )
 
         # Save dependency graph
         parser.save_dependency_graph(dependency_graph_path)
@@ -134,4 +142,11 @@ class DependencyGraphBuilder:
             else:
                 logger.warning(f"Leaf node {leaf_node} not found in components, removing it")
 
+        logger.debug(
+            "GraphBuild complete: %d components, %d graph nodes, %d raw leaves → %d filtered leaves",
+            len(components),
+            len(graph),
+            len(leaf_nodes),
+            len(keep_leaf_nodes),
+        )
         return components, keep_leaf_nodes

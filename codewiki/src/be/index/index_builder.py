@@ -217,6 +217,29 @@ class IndexBuilder:
             f"Index built: {len(all_symbols)} symbols, {len(all_imports)} imports, "
             f"{len(edges)} edges, {len(cards)} cards"
         )
+
+        # Debug-level breakdowns
+        sym_kinds: dict[str, int] = {}
+        for s in all_symbols:
+            sym_kinds[s.kind.value] = sym_kinds.get(s.kind.value, 0) + 1
+        logger.debug(
+            "Symbols by kind: %s",
+            ", ".join(f"{k}={n}" for k, n in sorted(sym_kinds.items(), key=lambda x: -x[1])),
+        )
+        edge_types: dict[str, int] = {}
+        for e in edges:
+            edge_types[e.edge_type.value] = edge_types.get(e.edge_type.value, 0) + 1
+        logger.debug(
+            "Edges by type: %s",
+            ", ".join(f"{t}={n}" for t, n in sorted(edge_types.items(), key=lambda x: -x[1])),
+        )
+        lang_counts: dict[str, int] = {}
+        for s in all_symbols:
+            lang_counts[s.lang] = lang_counts.get(s.lang, 0) + 1
+        logger.debug(
+            "Symbols by language: %s",
+            ", ".join(f"{l}={n}" for l, n in sorted(lang_counts.items(), key=lambda x: -x[1])),
+        )
         products = IndexProducts(symbol_table, import_graph, edges, cards, stats=stats)
         self._save_cache(products)
         return products
