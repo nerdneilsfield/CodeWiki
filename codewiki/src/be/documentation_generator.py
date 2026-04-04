@@ -402,9 +402,22 @@ class DocumentationGenerator:
         )
 
     def _build_initial_context(self) -> PipelineContext:
+        # Pre-check cluster cache so GraphBuild/IndexBuild can skip when valid.
+        working_dir = os.path.abspath(self.config.docs_dir)
+        cluster_cache_hit = False
+        first_mt_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
+        state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
+        if os.path.exists(first_mt_path):
+            existing = GenerationState.load(state_path)
+            if existing.repo_commit == (
+                self.commit_id or ""
+            ) and existing.config_fingerprint == config_fingerprint(self.config):
+                cluster_cache_hit = True
+
         return PipelineContext(
             config=self.config,
-            working_dir=os.path.abspath(self.config.docs_dir),
+            working_dir=working_dir,
+            cluster_cache_hit=cluster_cache_hit,
             usage_stats=self.usage_stats,
             graph_builder=self.graph_builder,
             agent_orchestrator=self.agent_orchestrator,
@@ -454,7 +467,13 @@ class DocumentationGenerator:
 
         if not need_recluster:
             assert cached_tree is not None
-            module_tree = heal_module_tree_components(cached_tree, ctx.components)
+            ctx.cluster_cache_hit = True
+            if ctx.components:
+                # Components available (GraphBuild ran) — heal tree
+                module_tree = heal_module_tree_components(cached_tree, ctx.components)
+            else:
+                # GraphBuild was skipped (same commit) — use cached tree as-is
+                module_tree = cached_tree
             freeze_doc_filenames(module_tree)
             file_manager.save_json(module_tree, first_module_tree_path)
             if not os.path.exists(module_tree_path):

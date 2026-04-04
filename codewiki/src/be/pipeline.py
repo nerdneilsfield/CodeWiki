@@ -82,6 +82,7 @@ class PipelineContext:
     components: dict[str, Any] = field(default_factory=dict)
     leaf_nodes: list[str] = field(default_factory=list)
     module_tree: dict[str, Any] = field(default_factory=dict)
+    cluster_cache_hit: bool = False
     index_products: Any = None
     gen_state: Any = None
     state_mgr: Any = None
