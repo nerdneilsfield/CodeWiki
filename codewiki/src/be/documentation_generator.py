@@ -473,6 +473,12 @@ class DocumentationGenerator:
                 file_manager.save_json(module_tree, first_module_tree_path)
                 file_manager.save_json(module_tree, module_tree_path)
 
+        # Persist state fingerprint immediately after clustering so that
+        # Ctrl+C during later stages does not invalidate the cache.
+        existing_state.repo_commit = self.commit_id or ""
+        existing_state.config_fingerprint = current_config_fp
+        existing_state._save(state_path)
+
         try:
             glossary = build_glossary(ctx.index_products) if ctx.index_products else {}
             link_map = build_link_map(module_tree) if module_tree else {}
@@ -489,8 +495,6 @@ class DocumentationGenerator:
             logger.warning("Failed to set generation v2 context; continuing without", exc_info=True)
             ctx.result.add_warning(f"Generation context setup failed: {exc}")
 
-        existing_state.repo_commit = self.commit_id or ""
-        existing_state.config_fingerprint = current_config_fp
         self._gen_state = existing_state
 
         ctx.working_dir = working_dir
