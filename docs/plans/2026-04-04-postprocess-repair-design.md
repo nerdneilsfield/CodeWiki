@@ -16,7 +16,7 @@ The current postprocess pipeline (`docs_fixer.py`) has basic math and mermaid re
 
 ## 2. Goals
 
-1. Dual-layer math validation: pylatexenc + KaTeX (both optional with graceful fallback)
+1. Dual-layer math validation: pylatexenc (strong dependency) + KaTeX (optional, graceful fallback)
 2. Deterministic cleanup rules for math and mermaid (fix without LLM when possible)
 3. Batch LLM repair (multiple issues per prompt, JSON structured I/O)
 4. Dedicated `[postprocess]` config section with repair model, two fallbacks, batch size, max retries
@@ -50,16 +50,14 @@ class PostprocessConfig(BaseModel):
     repair_max_retries: int = 2
 ```
 
-`CodeWikiConfig` gains:
-- Field: `postprocess: PostprocessConfig = Field(default_factory=PostprocessConfig)`
-- Property `postprocess_strict` → delegates to `self.postprocess.strict` (backward compat)
-- Property `postprocess_fix_links` → delegates to `self.postprocess.fix_links` (backward compat)
-
-Old top-level `postprocess_strict` / `postprocess_fix_links` fields removed from direct field list; replaced by properties reading from `PostprocessConfig`.
+`CodeWikiConfig` changes:
+- **Delete** top-level fields `postprocess_strict` and `postprocess_fix_links` entirely — no properties, no backward compat shim.
+- **Add** field: `postprocess: PostprocessConfig = Field(default_factory=PostprocessConfig)`
+- All call sites and tests that referenced `config.postprocess_strict` or `config.postprocess_fix_links` are migrated to `config.postprocess.strict` / `config.postprocess.fix_links` in the same change. This is a breaking config change — old TOML files with top-level `postprocess_strict` will be silently ignored (pydantic `extra="ignore"`).
 
 ### 3.3 Config Loader
 
-`config_loader.py` parses `data.get("postprocess", {})` into `PostprocessConfig`. Backward compat: if `runtime.postprocess_strict` exists in old configs, it's merged into `postprocess.strict`.
+`config_loader.py` parses `data.get("postprocess", {})` into `PostprocessConfig`. No backward-compat merging from old `runtime.postprocess_strict` — users must move to `[postprocess] strict = true`.
 
 ### 3.4 Model Fallback Chain
 
@@ -71,10 +69,11 @@ Repair functions build a model chain: `[repair_model, repair_fallback_1, repair_
 
 **`validate_formula(text: str, display_mode: bool) -> list[str]`** — returns error list (empty = valid).
 
-Three layers in priority order:
-1. **pylatexenc** (`_validate_pylatex`): `LatexWalker(text).get_latex_nodes()`. Import-guarded; skipped if not installed.
-2. **KaTeX** (`_validate_katex`): persistent Node subprocess via `NodeKatexValidator`. Import-guarded; skipped if `node` or `katex` npm package unavailable.
-3. **Fallback**: existing bracket/env matching from current `_validate_math()` — kept as last resort when neither pylatexenc nor KaTeX is available.
+Two layers, both run when available:
+1. **pylatexenc** (`_validate_pylatex`): `LatexWalker(text).get_latex_nodes()`. Strong dependency — always available (added to `pyproject.toml` as required).
+2. **KaTeX** (`_validate_katex`): persistent Node subprocess via `NodeKatexValidator`. Optional — import-guarded; skipped if `node` binary or `katex` npm package unavailable.
+
+Both layers run independently; their error lists are concatenated. No fallback to the old bracket/env matching — pylatexenc subsumes it.
 
 **`NodeKatexValidator`**: identical to deepresearch-flow. Spawns `node katex_check.js` once, communicates via stdin/stdout JSON lines, auto-respawns on crash, `atexit` cleanup.
 
@@ -111,7 +110,11 @@ class FormulaIssue:
 
 ### 4.5 Top-level Entry
 
-**`extract_math_spans(text: str) -> list[FormulaSpan]`**: regex extraction with code-block masking (reuses existing `_CODE_FENCE_RE` pattern). Handles `$$`, `$`, `\[`, `\(`.
+**`extract_math_spans(text: str) -> list[FormulaSpan]`**: regex extraction with two masking layers:
+1. **Code-block masking** — fenced blocks (``` ``` ```, `~~~`) and inline code are replaced with placeholders before math regex runs, preventing false positives inside code.
+2. **Escaped-dollar masking** — literal `\$` sequences are masked before inline-math regex runs, then restored after. This preserves the fix from `docs_fixer.py:232` that prevents `\$` (backslash-dollar) from being misinterpreted as an inline-math delimiter. The masking uses `str.split` (not regex) because Python's `re` module treats `\$` as a literal-dollar pattern.
+
+Handles `$$`, `$`, `\[`, `\(`.
 
 **`fix_math_in_text(text, config, pp_config, stats, usage_stats, report, filename) -> str`**: full pipeline — extract → validate → cleanup → collect issues → batch repair → apply replacements → degrade failures.
 
@@ -203,12 +206,12 @@ Add `pylatexenc` to dependencies (not optional — it's lightweight).
 
 ## 10. Dependencies
 
-| Dependency | Required | Fallback |
-|-----------|----------|----------|
-| `pylatexenc` | pip install | Skip AST validation layer |
-| `katex` (npm) | `npm i katex` | Skip KaTeX rendering validation |
-| `node` | system | Skip KaTeX validation |
-| `mmdc` | `npm i -g @mermaid-js/mermaid-cli` | Fall back to regex heuristics (existing behavior) |
+| Dependency | Type | Fallback |
+|-----------|------|----------|
+| `pylatexenc` | **Required** (pip) | N/A — always installed |
+| `katex` (npm) | Optional | Skip KaTeX rendering validation; pylatexenc still runs |
+| `node` | Optional (system) | Skip KaTeX validation |
+| `mmdc` | Optional (`npm i -g @mermaid-js/mermaid-cli`) | Fall back to regex heuristics (existing behavior) |
 
 ## 11. File Manifest
 
