@@ -11,7 +11,16 @@ MERMAID SYNTAX SAFETY — violations cause parse errors visible to readers:
   "and", "or", "intersect", "union", "equiv", "approx", "neq", "implies".
   BAD:  E{{∃c: lower(d(c)) = q'?}}   ← ∃ and ' break the Mermaid lexer
   GOOD: E{{exists c: lower d c = q_low?}}
+- CJK / non-ASCII labels MUST be wrapped in double quotes:
+  BAD:  A[解析器] --> B[执行器]       ← bare CJK breaks the Mermaid lexer
+  GOOD: A["解析器"] --> B["执行器"]   ← quoted CJK works correctly
+  This applies to node labels, edge labels, subgraph titles, and any text
+  that contains characters outside basic ASCII (U+0000–U+007F).
 - No single-quote characters (') inside node labels — rewrite as "_low" suffix or omit.
+- Use ASCII arrows only: --> (solid), -.-> (dotted), ==> (thick).
+  NEVER use Unicode arrows: → ⇒ ↦ ← ↔.
+- One statement per line. Do not chain multiple edges on one line.
+- Node IDs must be alphanumeric/underscore only: [A-Za-z0-9_]+. No spaces or hyphens.
 - Math expressions belong in LaTeX blocks ($$...$$), NEVER inside diagram labels.
   A diagram shows flow and structure; LaTeX expresses the math. Keep them separate.\
 """
