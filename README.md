@@ -31,7 +31,7 @@ Requires Python 3.12+ and Node.js 14+ (for Mermaid validation).
 Create a TOML config file and fill in your provider credentials:
 
 ```bash
-codewiki config init          # writes config.toml in the current directory
+codewiki config gen > config.toml
 $EDITOR config.toml           # set your API key env vars and models
 ```
 
@@ -361,10 +361,11 @@ model_list = [
 **Config commands:**
 
 ```bash
+codewiki config gen                           # print starter config.toml to stdout
 codewiki config init                          # create starter config.toml
 codewiki config validate --config config.toml             # structural check
 codewiki config validate --config config.toml --check-secrets  # + verify env vars
-codewiki config show     --config config.toml             # display parsed config
+codewiki config get      --config config.toml             # display parsed config
 ```
 
 **Passing config to generate:**
@@ -378,11 +379,7 @@ export CODEWIKI_CONFIG=/path/to/config.toml
 codewiki generate /path/to/repo
 ```
 
-**Legacy path (deprecated):**
-
-`codewiki config set` and `codewiki config agent` still work and write to
-`~/.codewiki/config.json + system keychain`.  They will be removed in a future
-release.  Migrate by running `codewiki config init` and copying your settings.
+`codewiki config set` and `codewiki config agent` edit the TOML file in place.
 
 </details>
 

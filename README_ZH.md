@@ -31,7 +31,7 @@ pip install git+https://github.com/nerdneilsfield/CodeWiki.git
 创建一个 TOML 配置文件并填入 provider 凭证：
 
 ```bash
-codewiki config init          # 在当前目录生成 config.toml
+codewiki config gen > config.toml
 $EDITOR config.toml           # 填写 API key 环境变量和模型名
 ```
 
@@ -360,10 +360,11 @@ model_list = [
 **配置相关命令：**
 
 ```bash
+codewiki config gen                                       # 把模板输出到 stdout
 codewiki config init                                       # 生成 config.toml 模板
 codewiki config validate --config config.toml             # 结构校验
 codewiki config validate --config config.toml --check-secrets  # 同时验证 env 变量是否已设置
-codewiki config show     --config config.toml             # 显示已解析的配置
+codewiki config get      --config config.toml             # 显示已解析的配置
 ```
 
 **传递配置到 generate：**
@@ -377,11 +378,7 @@ export CODEWIKI_CONFIG=/path/to/config.toml
 codewiki generate /path/to/repo
 ```
 
-**旧版路径（已废弃）：**
-
-`codewiki config set` 和 `codewiki config agent` 仍然可用，写入
-`~/.codewiki/config.json + 系统钥匙链`，将在后续版本移除。
-迁移方式：运行 `codewiki config init` 后将原有设置复制进 TOML 文件。
+`codewiki config set` 和 `codewiki config agent` 会直接原地修改 TOML 文件。
 
 </details>
 
