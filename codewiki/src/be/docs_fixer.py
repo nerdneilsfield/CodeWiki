@@ -663,7 +663,7 @@ def fix_docs(
     _save_hash_cache(docs_path, updated_cache)
 
     # ── Phase 4a: Link rewriting ──────────────────────────────────────────────
-    if getattr(config, "postprocess_fix_links", True):
+    if config.postprocess.fix_links:
         try:
             from codewiki.src.be.postprocess.link_rewriter import rewrite_broken_links
 
@@ -711,7 +711,7 @@ def fix_docs(
         )
 
     # ── Strict gate ───────────────────────────────────────────────────────────
-    if getattr(config, "postprocess_strict", False) and report.has_failures:
+    if config.postprocess.strict and report.has_failures:
         raise LintError(report)
 
     return stats

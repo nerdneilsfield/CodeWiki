@@ -6,7 +6,7 @@ from typing import Any, Iterable, Optional, cast
 import os
 import tomllib
 
-from codewiki.src.codewiki_config import CodeWikiConfig, ProviderConfig
+from codewiki.src.codewiki_config import CodeWikiConfig, PostprocessConfig, ProviderConfig
 
 DEFAULT_MAX_TOKENS = 32_768
 DEFAULT_MAX_TOKEN_PER_MODULE = 36_369
@@ -39,7 +39,6 @@ class RuntimeOverrides:
     max_concurrent: Optional[int] = None
     max_retries: Optional[int] = None
     output_language: Optional[str] = None
-    postprocess_strict: Optional[bool] = None
     main_model: Optional[str] = None
     cluster_model: Optional[str] = None
     fallback_models: Optional[list[str]] = None
@@ -229,6 +228,7 @@ def _build_codewiki_config(
     runtime = cast(dict[str, Any], data.get("runtime", {}))
     tokens = cast(dict[str, Any], data.get("tokens", {}))
     generation = cast(dict[str, Any], data.get("generation", {}))
+    postprocess = cast(dict[str, Any], data.get("postprocess", {}))
     docs_dir = str(overrides.output_dir or runtime.get("output_dir", "docs"))
     output_dir = os.path.join(docs_dir, "temp")
     dependency_graph_dir = os.path.join(output_dir, DEPENDENCY_GRAPHS_DIR)
@@ -240,6 +240,7 @@ def _build_codewiki_config(
     agent_instructions = overrides.agent_instructions
     if agent_instructions is None:
         agent_instructions = _resolve_agent_instructions(data, RuntimeOverrides()) or None
+    postprocess_config = PostprocessConfig.model_validate(postprocess)
 
     return CodeWikiConfig(
         repo_path=repo_path,
@@ -297,11 +298,7 @@ def _build_codewiki_config(
             if overrides.output_language is not None
             else str(runtime.get("output_language", "en"))
         ),
-        postprocess_strict=(
-            overrides.postprocess_strict
-            if overrides.postprocess_strict is not None
-            else bool(runtime.get("postprocess_strict", False))
-        ),
+        postprocess=postprocess_config,
         agent_instructions=agent_instructions,
         providers=providers,
     )

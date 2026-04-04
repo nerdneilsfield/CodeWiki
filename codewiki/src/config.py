@@ -13,7 +13,6 @@ MODULE_TREE_FILENAME = "module_tree.json"
 OVERVIEW_FILENAME = "overview.md"
 GENERATION_STATE_FILENAME = "generation_state.json"
 INTERNAL_SUBDIR = ".codewiki"
-postprocess_fix_links = True
 MAX_DEPTH = 2
 DEFAULT_MAX_TOKENS = 32_768
 DEFAULT_MAX_TOKEN_PER_MODULE = 36_369

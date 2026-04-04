@@ -48,6 +48,16 @@ class ProviderConfig(BaseModel):
         self._model_stream = model_stream
 
 
+class PostprocessConfig(BaseModel):
+    strict: bool = False
+    fix_links: bool = True
+    repair_model: str = ""
+    repair_fallback_1: str = ""
+    repair_fallback_2: str = ""
+    repair_batch_size: int = 8
+    repair_max_retries: int = 2
+
+
 class CodeWikiConfig(BaseModel):
     """Canonical config shared by CLI, backend, and web entry points."""
 
@@ -74,8 +84,7 @@ class CodeWikiConfig(BaseModel):
     max_retries: int = 2
 
     output_language: str = "en"
-    postprocess_strict: bool = False
-    postprocess_fix_links: bool = True
+    postprocess: PostprocessConfig = Field(default_factory=PostprocessConfig)
 
     agent_instructions: dict[str, Any] | None = None
     providers: list[ProviderConfig] = Field(default_factory=list)

@@ -82,8 +82,9 @@ def test_fix_docs_strict_mode_raises_lint_error(tmp_path):
 
     (tmp_path / "overview.md").write_text("Hello", encoding="utf-8")
     config = MagicMock()
-    config.postprocess_fix_links = False
-    config.postprocess_strict = True
+    config.postprocess = MagicMock()
+    config.postprocess.fix_links = False
+    config.postprocess.strict = True
 
     with patch(
         "codewiki.src.be.docs_fixer._fix_mermaid_in_text",
@@ -140,8 +141,9 @@ def test_fix_docs_continues_when_link_rewriter_and_validator_fail(tmp_path):
 
     (tmp_path / "overview.md").write_text("# Overview\n", encoding="utf-8")
     config = MagicMock()
-    config.postprocess_fix_links = True
-    config.postprocess_strict = False
+    config.postprocess = MagicMock()
+    config.postprocess.fix_links = True
+    config.postprocess.strict = False
 
     with (
         patch(

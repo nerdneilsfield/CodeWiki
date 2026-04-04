@@ -43,7 +43,6 @@ max_depth = 2
 max_concurrent = 3
 max_retries = 2
 output_language = "en"
-postprocess_strict = false
 
 [tokens]
 max_tokens = 32768
@@ -63,6 +62,15 @@ fallback_models = [
 # doc_type = "architecture"  # api | architecture | user-guide | developer
 # focus_modules = ["src/core", "src/api"]
 # custom_instructions = ""
+
+[postprocess]
+strict = false
+fix_links = true
+# repair_model = ""
+# repair_fallback_1 = ""
+# repair_fallback_2 = ""
+# repair_batch_size = 8
+# repair_max_retries = 2
 
 [[providers]]
 name = "openai"
@@ -125,7 +133,15 @@ def _config_to_dict(config_path: str, cfg: CodeWikiConfig) -> dict[str, Any]:
             "max_concurrent": cfg.max_concurrent,
             "max_retries": cfg.max_retries,
             "output_language": cfg.output_language,
-            "postprocess_strict": cfg.postprocess_strict,
+        },
+        "postprocess": {
+            "strict": cfg.postprocess.strict,
+            "fix_links": cfg.postprocess.fix_links,
+            "repair_model": cfg.postprocess.repair_model,
+            "repair_fallback_1": cfg.postprocess.repair_fallback_1,
+            "repair_fallback_2": cfg.postprocess.repair_fallback_2,
+            "repair_batch_size": cfg.postprocess.repair_batch_size,
+            "repair_max_retries": cfg.postprocess.repair_max_retries,
         },
         "tokens": {
             "max_tokens": cfg.max_tokens,
@@ -161,6 +177,7 @@ def _render_config(payload: dict[str, Any]) -> None:
     _logger.info("CodeWiki Configuration", config_file=payload["config_file"])
     _logger.info("Models", **payload["generation"])
     _logger.info("Runtime", **payload["runtime"])
+    _logger.info("Postprocess", **payload["postprocess"])
     _logger.info("Tokens", **payload["tokens"])
     for provider in payload["providers"]:
         _logger.info("Provider", **provider)

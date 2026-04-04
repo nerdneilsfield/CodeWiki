@@ -21,7 +21,6 @@ max_depth          = 2          # module-tree decomposition depth
 max_concurrent     = 3          # parallel LLM workers per pass
 max_retries        = 2          # fill-pass retries for skipped modules
 output_language    = "en"       # "en" | "zh" | "ja" — output language
-postprocess_strict = false      # true = block build on unfixable lint issues
 
 [tokens]
 max_tokens                = 32768
@@ -43,6 +42,15 @@ long_context_model = "openai/gpt-4.1"   # used when prompt exceeds long_context_
 # doc_type            = "architecture"   # api | architecture | user-guide | developer
 # focus_modules       = ["src/core", "src/api"]
 # custom_instructions = "Prefer diagrams for component relationships."
+
+[postprocess]
+strict             = false       # true = block build on unfixable lint issues
+fix_links          = true        # validate and rewrite internal links
+# repair_model      = "openai/gpt-4o-mini"  # empty = main_model
+# repair_fallback_1 = ""
+# repair_fallback_2 = ""
+# repair_batch_size = 8
+# repair_max_retries = 2
 
 # ── Providers ────────────────────────────────────────────────────────────────
 

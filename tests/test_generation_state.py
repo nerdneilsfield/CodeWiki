@@ -13,12 +13,11 @@ from codewiki.src.be.generation_state import (
     GenerationStateManager,
     SCHEMA_VERSION,
 )
-from codewiki.src.config import GENERATION_STATE_FILENAME, internal_file_path, postprocess_fix_links
+from codewiki.src.config import GENERATION_STATE_FILENAME, internal_file_path
 
 
 def test_config_generation_state_constants_and_internal_path(tmp_path):
     assert GENERATION_STATE_FILENAME == "generation_state.json"
-    assert postprocess_fix_links is True
 
     path = internal_file_path(str(tmp_path), GENERATION_STATE_FILENAME)
 

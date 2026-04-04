@@ -127,7 +127,7 @@ class TestRewriteBrokenLinks:
 
         fix_docs(
             str(docs_dir),
-            SimpleNamespace(postprocess_strict=False, postprocess_fix_links=True),
+            SimpleNamespace(postprocess=SimpleNamespace(strict=False, fix_links=True)),
         )
 
         assert seen["content"].strip() == "See [IO](cli-io_abstractions.md)."
