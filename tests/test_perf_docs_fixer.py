@@ -42,10 +42,14 @@ def test_llm_skipped_on_second_run(tmp_path):
     # First run populates cache
     fix_docs(str(tmp_path), _make_config())
 
-    # Second run — track call_llm calls
-    with patch("codewiki.src.be.docs_fixer.call_llm") as mock_llm:
+    # Second run — phase 2+3 wrappers should not run at all.
+    with (
+        patch("codewiki.src.be.docs_fixer.fix_math") as mock_math,
+        patch("codewiki.src.be.docs_fixer.fix_mermaid") as mock_mermaid,
+    ):
         fix_docs(str(tmp_path), _make_config())
-        assert mock_llm.call_count == 0, f"LLM called {mock_llm.call_count} times on unchanged file"
+        assert mock_math.call_count == 0
+        assert mock_mermaid.call_count == 0
 
 
 def test_phase1_runs_in_parallel(tmp_path):

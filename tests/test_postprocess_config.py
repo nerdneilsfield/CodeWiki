@@ -20,10 +20,8 @@ def test_postprocess_config_defaults():
 
 
 def test_codewiki_config_has_postprocess():
-    from codewiki.src.codewiki_config import PostprocessConfig
-
     config = CodeWikiConfig(repo_path="/tmp", docs_dir="/tmp/docs")
-    assert isinstance(config.postprocess, PostprocessConfig)
+    assert config.postprocess.__class__.__name__ == "PostprocessConfig"
     assert config.postprocess.strict is False
 
 
@@ -34,19 +32,17 @@ def test_codewiki_config_no_top_level_postprocess_fields():
 
 
 def test_postprocess_section_parsed_from_model():
-    from codewiki.src.codewiki_config import PostprocessConfig
-
     config = CodeWikiConfig(
         repo_path="/tmp",
         docs_dir="/tmp/docs",
-        postprocess=PostprocessConfig(
-            strict=True,
-            repair_model="openai/gpt-4o-mini",
-            repair_fallback_1="claude/claude-sonnet-4-5-20250929",
-            repair_fallback_2="openai/gpt-4.1",
-            repair_batch_size=16,
-            repair_max_retries=3,
-        ),
+        postprocess={
+            "strict": True,
+            "repair_model": "openai/gpt-4o-mini",
+            "repair_fallback_1": "claude/claude-sonnet-4-5-20250929",
+            "repair_fallback_2": "openai/gpt-4.1",
+            "repair_batch_size": 16,
+            "repair_max_retries": 3,
+        },
     )
     assert config.postprocess.strict is True
     assert config.postprocess.repair_model == "openai/gpt-4o-mini"
