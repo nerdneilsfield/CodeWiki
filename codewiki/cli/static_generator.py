@@ -486,6 +486,7 @@ def _fix_markdown_links(content: str) -> str:
 
 # Pre-compiled regex for server-side math delimiter normalisation.
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
+_LATEX_CMD_RE = re.compile(r"\\[A-Za-z]")  # detects real LaTeX commands
 _DISPLAY_MATH_RE = re.compile(r"\$\$(.+?)\$\$", re.DOTALL)
 _INLINE_MATH_RE = re.compile(r"\$(?!\s)([^$\n]+?)\$(?!\$)")
 # Backslash-delimited math: \[...\] and \(...\) — generated directly by some LLMs.
@@ -521,9 +522,17 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
         # But keep \\\\ (literal double-backslash = LaTeX line-break)
         return re.sub(r"\\\\(?=[A-Za-z])", r"\\", s)
 
+    def _is_cjk_prose(inner: str) -> bool:
+        """Return True only when CJK chars appear but NO LaTeX commands exist.
+
+        ``$100$`` next to Chinese text → skip (CJK prose with dollar signs).
+        ``$\\text{中文}$`` → real math, extract even though CJK is present.
+        """
+        return bool(_CJK_RE.search(inner)) and not _LATEX_CMD_RE.search(inner)
+
     def _display(m: re.Match) -> str:
         inner = m.group(1)
-        if _CJK_RE.search(inner):
+        if _is_cjk_prose(inner):
             return m.group(0)
         idx = len(protected)
         ph = f"CWIKIMD{idx:06d}"
@@ -536,12 +545,15 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
 
     def _inline(m: re.Match) -> str:
         inner = m.group(1)
-        if _CJK_RE.search(inner):
+        if _is_cjk_prose(inner):
             return m.group(0)
-        before = m.string[: m.start()].rstrip()
-        after = m.string[m.end() :].lstrip()
-        if (before and _CJK_RE.search(before[-1])) or (after and _CJK_RE.search(after[0])):
-            return m.group(0)
+        # Also skip when CJK chars are immediately adjacent (e.g. 价格$100$元)
+        # BUT allow if the content has LaTeX commands
+        if not _LATEX_CMD_RE.search(inner):
+            before = m.string[: m.start()].rstrip()
+            after = m.string[m.end() :].lstrip()
+            if (before and _CJK_RE.search(before[-1])) or (after and _CJK_RE.search(after[0])):
+                return m.group(0)
         idx = len(protected)
         ph = f"CWIKIMI{idx:06d}"
         normed = _norm_backslash(inner)
