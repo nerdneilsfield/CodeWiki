@@ -39,16 +39,12 @@ _CSS = """
 .cw-side.off{transform:translateX(-272px);}
 .cw-body{margin-left:272px;flex:1;min-width:0;transition:margin-left .2s;}
 .cw-body.full{margin-left:0;}
-.cw-content{display:flex;gap:2.5rem;max-width:1200px;margin:0 auto;padding:2.5rem 2rem;align-items:flex-start;}
-.cw-article{flex:1;min-width:0;max-width:860px;}
+.cw-content{max-width:900px;margin:0 auto;padding:2.5rem 2rem;}
 .cw-overlay{display:none;position:fixed;inset:0;top:3.25rem;background:rgba(0,0,0,.4);z-index:25;}
 .cw-overlay.on{display:block;}
-/* TOC */
-.cw-toc{width:220px;flex-shrink:0;position:sticky;top:calc(3.25rem + 1.5rem);max-height:calc(100vh - 3.25rem - 3rem);overflow-y:auto;display:none;}
-@media(min-width:1280px){.cw-toc{display:block;}}
-.cw-toc .menu-label{font-size:0.65rem;letter-spacing:0.08em;}
-.cw-toc .menu-list a{font-size:0.8rem;padding:0.25em 0.5em;}
-.cw-toc .menu-list .toc-h3 a{padding-left:1.5em;font-size:0.75rem;}
+/* TOC dropdown */
+#toc-dropdown .menu-list a{padding:0.3em 0.5em;border-radius:4px;}
+#toc-dropdown .toc-h3 a{padding-left:1.2em;font-size:0.8rem;}
 /* Sidebar nav */
 .cw-side .menu-list a{font-size:0.85rem;border-radius:4px;}
 .cw-side .card{margin-bottom:0.75rem;}
@@ -113,8 +109,24 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;}
   <div class="navbar-end">
     <div class="navbar-item">
       <div class="buttons are-small">
-        <a href="/" id="site-home-btn" class="button is-light" title="Back to main site" aria-label="Back to main site">&#127968;</a>
-        <button class="button is-light" id="theme-btn" title="Toggle theme" aria-label="Toggle theme">&#127769;</button>
+        {%- if not hide_repo_links and metadata and metadata.generation_info and metadata.generation_info.repo_url %}
+        <a href="{{ metadata.generation_info.repo_url }}" target="_blank" rel="noopener" class="button is-light is-small" title="Repository">&#128279; Repo</a>
+        {%- if 'github.com' in metadata.generation_info.repo_url %}
+        <a href="https://deepwiki.com/{{ metadata.generation_info.repo_url.split('github.com/')[-1] }}" target="_blank" rel="noopener" class="button is-light is-small" title="DeepWiki">&#127760; DeepWiki</a>
+        {%- endif %}
+        {%- endif %}
+        <div class="dropdown is-right is-hoverable" id="toc-dropdown">
+          <div class="dropdown-trigger">
+            <button class="button is-light is-small" aria-haspopup="true" aria-controls="toc-menu" title="Table of Contents">&#128209; TOC</button>
+          </div>
+          <div class="dropdown-menu" id="toc-menu" role="menu" style="min-width:220px;">
+            <div class="dropdown-content" style="max-height:60vh;overflow-y:auto;padding:0.5rem;">
+              <ul class="menu-list" id="toc-ul" style="font-size:0.85rem;"></ul>
+            </div>
+          </div>
+        </div>
+        <a href="/" id="site-home-btn" class="button is-light is-small" title="Back to main site" aria-label="Back to main site">&#127968;</a>
+        <button class="button is-light is-small" id="theme-btn" title="Toggle theme" aria-label="Toggle theme">&#127769;</button>
       </div>
     </div>
   </div>
@@ -176,12 +188,6 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;}
       <article id="mc" class="cw-article content">
 {{ content }}
       </article>
-      <div class="cw-toc" id="toc">
-        <aside class="menu">
-          <p class="menu-label">On this page</p>
-          <ul class="menu-list" id="toc-ul"></ul>
-        </aside>
-      </div>
     </div>
   </main>
 </div>
@@ -213,10 +219,10 @@ ov.addEventListener('click',sbHide);
 document.addEventListener('keydown',function(e){if(e.key==='Escape')sbHide();});
 window.addEventListener('resize',function(){if(!isMob()){ov.classList.remove('on');sb.classList.remove('on');if(localStorage.getItem('cw-sb')!=='off')sbShow();}else{sb.classList.remove('off');body.classList.remove('full');}});
 (function(){
-  var mc=document.getElementById('mc'),ul=document.getElementById('toc-ul'),toc=document.getElementById('toc');
+  var mc=document.getElementById('mc'),ul=document.getElementById('toc-ul'),tocDrop=document.getElementById('toc-dropdown');
   if(!mc||!ul)return;
   var hs=mc.querySelectorAll('h2,h3');
-  if(hs.length<2){if(toc)toc.style.display='none';return;}
+  if(hs.length<2){if(tocDrop)tocDrop.style.display='none';return;}
   hs.forEach(function(h,i){
     if(!h.id)h.id='h-'+i;
     var li=document.createElement('li');
