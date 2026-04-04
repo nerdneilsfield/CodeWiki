@@ -5,24 +5,53 @@
 # in LaTeX, not in diagrams.
 _MERMAID_SAFETY_RULES = """\
 MERMAID SYNTAX SAFETY — violations cause parse errors visible to readers:
-- Node and edge labels must be plain ASCII (or CJK for CJK-language repos).
+
+1. CHARACTER RULES
+- Node and edge labels must be plain ASCII (or quoted CJK — see rule 2).
   NEVER put Unicode math operators in labels: ∃ ∀ ∈ ∉ ⊂ ⊆ ⊇ ∧ ∨ ∩ ∪ ≡ ≈ ≠ → ⇒ ≤ ≥.
   Use plain-text equivalents: "exists", "forall", "in", "not in", "subset",
   "and", "or", "intersect", "union", "equiv", "approx", "neq", "implies".
-  BAD:  E{{∃c: lower(d(c)) = q'?}}   ← ∃ and ' break the Mermaid lexer
-  GOOD: E{{exists c: lower d c = q_low?}}
-- CJK / non-ASCII labels MUST be wrapped in double quotes:
-  BAD:  A[解析器] --> B[执行器]       ← bare CJK breaks the Mermaid lexer
-  GOOD: A["解析器"] --> B["执行器"]   ← quoted CJK works correctly
-  This applies to node labels, edge labels, subgraph titles, and any text
-  that contains characters outside basic ASCII (U+0000–U+007F).
-- No single-quote characters (') inside node labels — rewrite as "_low" suffix or omit.
+- No single-quote characters (') inside labels — rewrite or omit.
+- No smart quotes ("" ''), em/en dashes (— –), or non-breaking spaces.
 - Use ASCII arrows only: --> (solid), -.-> (dotted), ==> (thick).
   NEVER use Unicode arrows: → ⇒ ↦ ← ↔.
-- One statement per line. Do not chain multiple edges on one line.
-- Node IDs must be alphanumeric/underscore only: [A-Za-z0-9_]+. No spaces or hyphens.
+  BAD:  E{{∃c: lower(d(c)) = q'?}}   ← ∃ and ' break the Mermaid lexer
+  GOOD: E{{exists c: lower d c = q_low?}}
+
+2. CJK / NON-ASCII LABELS
+- ALL non-ASCII text MUST be wrapped in double quotes — node labels, edge labels,
+  subgraph titles, and any text containing characters outside U+0000–U+007F.
+  BAD:  A[解析器] --> B[执行器]       ← bare CJK breaks the Mermaid lexer
+  GOOD: A["解析器"] --> B["执行器"]   ← quoted CJK renders correctly
+  BAD:  A --> |处理请求| B            ← bare CJK edge label
+  GOOD: A --> |"处理请求"| B          ← quoted edge label
+  BAD:  subgraph 核心模块             ← bare CJK subgraph title
+  GOOD: subgraph CoreModules ["核心模块"]
+
+3. STRUCTURE RULES
+- One statement per line. Never chain edges: BAD: A-->B B-->C  GOOD: A-->B (newline) B-->C
+- Node IDs must be alphanumeric/underscore: [A-Za-z0-9_]+. No spaces or hyphens in IDs.
+  Use display labels for readable names: A["Build Job"] not Build-Job["Build Job"].
+- Every [ must have ], every ( must have ), every {{ must have }}.
+- subgraph headers on their own line; close with `end` on its own line.
 - Math expressions belong in LaTeX blocks ($$...$$), NEVER inside diagram labels.
-  A diagram shows flow and structure; LaTeX expresses the math. Keep them separate.\
+
+4. BEST PRACTICES
+- Keep diagrams focused: max ~10 nodes per diagram. Split large flows into multiple diagrams.
+- Always follow a diagram with a prose walkthrough — diagrams supplement text, never replace it.
+- Use consistent node ID naming: CamelCase (BuildJob) or snake_case (build_job), not mixed.
+- Use subgraphs to group related nodes and reduce visual clutter:
+  subgraph Pipeline ["处理管线"]
+    A["输入"] --> B["处理"] --> C["输出"]
+  end
+- Choose the right diagram type:
+  * graph TD / flowchart TD — architecture, component relationships, decision trees
+  * sequenceDiagram — request traces, API call flows, time-ordered interactions
+  * classDiagram — data models, concept relationships (even if not literal classes)
+  * stateDiagram-v2 — state machines, lifecycle transitions
+- Label edges when the relationship isn't obvious: A -->|"validates"| B
+- For complex flows, use link styles sparingly to highlight the critical path.
+- Test your diagram in the Mermaid Live Editor (mermaid.live) before committing.\
 """
 # ──────────────────────────────────────────────────────────────────────────────
 
