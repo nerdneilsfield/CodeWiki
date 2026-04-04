@@ -402,16 +402,18 @@ class DocumentationGenerator:
         )
 
     def _build_initial_context(self) -> PipelineContext:
-        # Pre-check cluster cache so GraphBuild/IndexBuild can skip when valid.
+        # Pre-check: skip GraphBuild/IndexBuild only when BOTH commit and
+        # config are unchanged.  If commit changed but config didn't, we
+        # still reuse the cluster layout but need GraphBuild for heal.
         working_dir = os.path.abspath(self.config.docs_dir)
         cluster_cache_hit = False
         first_mt_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
         state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
         if os.path.exists(first_mt_path):
             existing = GenerationState.load(state_path)
-            if existing.repo_commit == (
-                self.commit_id or ""
-            ) and existing.config_fingerprint == config_fingerprint(self.config):
+            same_config = existing.config_fingerprint == config_fingerprint(self.config)
+            same_commit = existing.repo_commit == (self.commit_id or "")
+            if same_config and same_commit:
                 cluster_cache_hit = True
 
         return PipelineContext(
@@ -455,24 +457,28 @@ class DocumentationGenerator:
         )
 
         need_recluster = True
+        commit_changed = False
         if cached_tree:
-            if (
-                existing_state.repo_commit == (self.commit_id or "")
-                and existing_state.config_fingerprint == current_config_fp
-            ):
+            if existing_state.config_fingerprint == current_config_fp:
                 need_recluster = False
-                logger.debug("Module tree cache hit (same commit)")
+                commit_changed = existing_state.repo_commit != (self.commit_id or "")
+                if commit_changed:
+                    logger.info("Commit changed — reusing cluster layout, updating components")
+                else:
+                    logger.debug("Module tree cache hit (same commit + config)")
             else:
-                logger.info("Module tree cache invalidated (commit/config changed)")
+                logger.info("Module tree cache invalidated (config changed: language or max_depth)")
 
         if not need_recluster:
             assert cached_tree is not None
-            ctx.cluster_cache_hit = True
-            if ctx.components:
-                # Components available (GraphBuild ran) — heal tree
+            if not commit_changed:
+                # Same commit — skip GraphBuild entirely, use cached tree as-is
+                ctx.cluster_cache_hit = True
+                module_tree = cached_tree
+            elif ctx.components:
+                # Commit changed but layout reused — heal tree with new components
                 module_tree = heal_module_tree_components(cached_tree, ctx.components)
             else:
-                # GraphBuild was skipped (same commit) — use cached tree as-is
                 module_tree = cached_tree
             freeze_doc_filenames(module_tree)
             file_manager.save_json(module_tree, first_module_tree_path)
