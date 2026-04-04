@@ -27,57 +27,56 @@ from codewiki.src.utils import (
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Override CSS — fixes prose/hljs/katex/mermaid conflicts (inlined per page)
+# Layout CSS — compact inline styles for sidebar + article + overrides
+# Uses Bulma CSS variables for theme consistency
 # ──────────────────────────────────────────────────────────────────────────────
 
-_OVERRIDE_CSS = """
-/* Highlight.js: keep code bg transparent, let prose control outer */
-.prose pre code.hljs { background: transparent !important; }
-/* prose code pseudo-elements: exclude KaTeX internals */
-.prose .katex code::before,
-.prose .katex code::after { content: none; }
-/* Mermaid: not constrained by prose max-width */
-.prose .mermaid { max-width: none; }
-/* Math: both rendering paths */
-.prose .math-block,
-.prose .katex-display { overflow-x: auto; max-width: none; }
-/* Math error */
-.prose .math-err { color: oklch(var(--er)); font-style: italic; font-size: 0.85em; }
-/* Wide tables */
-.prose table { display: block; max-width: 100%; overflow-x: auto; }
-/* pre focus (a11y) */
-.prose pre:focus-visible { box-shadow: 0 0 0 3px oklch(var(--p)); }
+_CSS = """
+/* Layout */
+.cw-wrap{display:flex;min-height:100vh;padding-top:3.25rem;}
+.cw-side{position:fixed;top:3.25rem;left:0;width:272px;height:calc(100vh - 3.25rem);overflow-y:auto;background:var(--bulma-scheme-main-bis);border-right:1px solid var(--bulma-border);padding:1rem 0.75rem 3rem;z-index:30;transition:transform .2s;}
+.cw-side.off{transform:translateX(-272px);}
+.cw-body{margin-left:272px;flex:1;min-width:0;transition:margin-left .2s;}
+.cw-body.full{margin-left:0;}
+.cw-content{display:flex;gap:2.5rem;max-width:1200px;margin:0 auto;padding:2.5rem 2rem;align-items:flex-start;}
+.cw-article{flex:1;min-width:0;max-width:860px;}
+.cw-overlay{display:none;position:fixed;inset:0;top:3.25rem;background:rgba(0,0,0,.4);z-index:25;}
+.cw-overlay.on{display:block;}
+/* TOC */
+.cw-toc{width:220px;flex-shrink:0;position:sticky;top:calc(3.25rem + 1.5rem);max-height:calc(100vh - 3.25rem - 3rem);overflow-y:auto;display:none;}
+@media(min-width:1280px){.cw-toc{display:block;}}
+.cw-toc .menu-label{font-size:0.65rem;letter-spacing:0.08em;}
+.cw-toc .menu-list a{font-size:0.8rem;padding:0.25em 0.5em;}
+.cw-toc .menu-list .toc-h3 a{padding-left:1.5em;font-size:0.75rem;}
+/* Sidebar nav */
+.cw-side .menu-list a{font-size:0.85rem;border-radius:4px;}
+.cw-side .card{margin-bottom:0.75rem;}
+/* Content overrides for hljs/mermaid/math */
+.content pre code.hljs{background:transparent!important;}
+.content .mermaid{max-width:none;margin:1rem 0;}
+.content .math-block{overflow-x:auto;margin:1rem 0;}
+.content .math-inline{display:inline;}
+.content .math-err{color:var(--bulma-danger);font-style:italic;font-size:0.85em;}
+.content pre:focus-visible{box-shadow:0 0 0 3px var(--bulma-link);}
+.hljs{background:transparent!important;}
+/* Back to top */
+#btt{position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;display:none;}
+#btt.on{display:inline-flex;}
+/* Responsive */
+@media(max-width:768px){
+  .cw-side{transform:translateX(-272px);}
+  .cw-side.on{transform:translateX(0);}
+  .cw-body{margin-left:0;}
+  .cw-content{padding:1.5rem 1rem;gap:0;}
+}
+@media(min-width:769px){
+  .cw-side{transform:none;}
+  .cw-side.off{transform:translateX(-272px);}
+}
 """.strip()
-
-# Fallback prose styles if @tailwindcss/typography CDN fails.
-# Uses DaisyUI CSS variables for theme consistency.
-# NOTE: When using fallback, remove "prose prose-lg" from <article> class
-# and use only "cw-article" to avoid conflicting with any residual prose rules.
-_PROSE_FALLBACK = """
-.cw-article h1{font-size:1.9rem;font-weight:700;border-bottom:2px solid oklch(var(--bc)/.2);padding-bottom:.4rem;margin-bottom:1.2rem;line-height:1.3;}
-.cw-article h2{font-size:1.45rem;font-weight:600;margin-top:2.2rem;margin-bottom:.7rem;border-bottom:1px solid oklch(var(--bc)/.15);padding-bottom:.2rem;}
-.cw-article h3{font-size:1.15rem;font-weight:600;margin-top:1.8rem;margin-bottom:.5rem;}
-.cw-article h4{font-size:1rem;font-weight:600;margin-top:1.4rem;margin-bottom:.4rem;}
-.cw-article p{margin-bottom:1rem;color:oklch(var(--bc)/.7);}
-.cw-article ul,.cw-article ol{margin-bottom:1rem;padding-left:1.6rem;}
-.cw-article li{margin-bottom:.3rem;color:oklch(var(--bc)/.7);}
-.cw-article a{color:oklch(var(--p));}
-.cw-article a:hover{text-decoration:underline;}
-.cw-article code{font-family:'JetBrains Mono',Consolas,monospace;font-size:.82em;background:oklch(var(--b2));padding:.15em .4em;border-radius:4px;}
-.cw-article pre{background:oklch(var(--b2));border:1px solid oklch(var(--bc)/.15);border-radius:8px;padding:1rem 1.2rem;overflow-x:auto;margin-bottom:1.2rem;}
-.cw-article pre code{background:none;padding:0;font-size:.87em;}
-.cw-article blockquote{border-left:4px solid oklch(var(--p));padding:.5rem 1rem;margin-bottom:1rem;color:oklch(var(--bc)/.5);background:oklch(var(--p)/.1);border-radius:0 6px 6px 0;}
-.cw-article table{width:100%;border-collapse:collapse;margin-bottom:1rem;}
-.cw-article th,.cw-article td{border:1px solid oklch(var(--bc)/.15);padding:.6rem .8rem;text-align:left;}
-.cw-article th{background:oklch(var(--b2));font-weight:600;}
-.cw-article img{max-width:100%;border-radius:6px;}
-""".strip()
-
-# Determined by Step 1 verification. Override via env var CODEWIKI_TYPOGRAPHY_CDN=0.
-_TYPOGRAPHY_CDN_WORKS = os.environ.get("CODEWIKI_TYPOGRAPHY_CDN", "1") != "0"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Page template (uses string.Template — $var substitution, no brace escaping)
+# Page template (uses string.Template — $var substitution)
 # ──────────────────────────────────────────────────────────────────────────────
 
 _PAGE_TEMPLATE = Template(r"""\
@@ -90,66 +89,63 @@ _PAGE_TEMPLATE = Template(r"""\
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
-<link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
-<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
 <link id="hljs-css" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11.9.0/dist/mermaid.min.js"></script>
 <script>(function(){var t=localStorage.getItem('cw-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);if(t==='dark'){document.getElementById('hljs-css').href='https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css';}})();</script>
-${typography_style}
 <style>
-${override_css}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;}
+${css}
 </style>
 </head>
-<body class="bg-base-100 font-[Inter,system-ui,sans-serif]">
-<div class="drawer lg:drawer-open">
-  <input id="cw-drawer" type="checkbox" class="drawer-toggle" />
-  <div class="drawer-content flex flex-col">
-    <!-- Navbar -->
-    <header class="navbar bg-base-200 shadow-sm sticky top-0 z-50">
-      <div class="flex-none lg:hidden">
-        <label for="cw-drawer" class="btn btn-ghost btn-square btn-sm" aria-label="Toggle sidebar">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block h-5 w-5 stroke-current"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
-        </label>
-      </div>
-      <div class="flex-1 px-2">
-        <a href="index.html" class="btn btn-ghost text-primary font-bold text-base normal-case">&#128218; ${repo_name}</a>
-      </div>
-      <div class="flex-none gap-1">
-        <a href="/" id="site-home-btn" class="btn btn-ghost btn-square btn-sm" title="Back to main site" aria-label="Back to main site">&#127968;</a>
-        <button class="btn btn-ghost btn-square btn-sm" id="theme-btn" title="Toggle theme" aria-label="Toggle light/dark theme">&#127769;</button>
-      </div>
-    </header>
-    <!-- Main content -->
-    <main class="flex justify-center px-4 py-8 lg:px-8">
-      <div class="flex gap-8 w-full max-w-6xl items-start">
-        <article id="mc" class="${article_class} max-w-none flex-1 min-w-0">
-${content}
-        </article>
-        <aside class="hidden xl:block w-56 shrink-0 sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto" id="toc">
-          <div class="menu-title text-xs uppercase tracking-wider opacity-60">On this page</div>
-          <ul id="toc-ul" class="menu menu-sm"></ul>
-        </aside>
-      </div>
-    </main>
+<body>
+<nav class="navbar is-fixed-top has-shadow" role="navigation" aria-label="main navigation">
+  <div class="navbar-brand">
+    <button class="navbar-burger" id="sb-toggle" aria-label="Toggle sidebar" aria-expanded="false">
+      <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+    </button>
+    <a href="index.html" class="navbar-item has-text-link has-text-weight-bold">&#128218; ${repo_name}</a>
   </div>
-  <!-- Sidebar -->
-  <div class="drawer-side z-40">
-    <label for="cw-drawer" aria-label="close sidebar" class="drawer-overlay"></label>
-    <div class="bg-base-200 min-h-full w-72 p-4">
-${meta_html}
-      <ul class="menu w-full">
-${nav_html}
-      </ul>
+  <div class="navbar-end">
+    <div class="navbar-item">
+      <div class="buttons are-small">
+        <a href="/" id="site-home-btn" class="button is-light" title="Back to main site" aria-label="Back to main site">&#127968;</a>
+        <button class="button is-light" id="theme-btn" title="Toggle theme" aria-label="Toggle theme">&#127769;</button>
+      </div>
     </div>
   </div>
+</nav>
+<div class="cw-wrap">
+  <aside class="cw-side" id="sb">
+${meta_html}
+    <aside class="menu">
+      <ul class="menu-list">
+${nav_html}
+      </ul>
+    </aside>
+  </aside>
+  <div class="cw-overlay" id="ov"></div>
+  <main class="cw-body" id="body">
+    <div class="cw-content">
+      <article id="mc" class="cw-article content">
+${content}
+      </article>
+      <div class="cw-toc" id="toc">
+        <aside class="menu">
+          <p class="menu-label">On this page</p>
+          <ul class="menu-list" id="toc-ul"></ul>
+        </aside>
+      </div>
+    </div>
+  </main>
 </div>
-<button id="btt" class="btn btn-circle btn-primary btn-sm fixed bottom-6 right-6 z-50 hidden shadow-lg" title="Back to top">&#8679;</button>
+<button id="btt" class="button is-primary is-rounded" title="Back to top">&#8679;</button>
 <script>
 // Site home button
-document.getElementById('site-home-btn').href = window.location.origin + '/';
+document.getElementById('site-home-btn').href=window.location.origin+'/';
 // Theme
 var html=document.documentElement,themeBtn=document.getElementById('theme-btn');
 function curTheme(){return html.getAttribute('data-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');}
@@ -160,36 +156,22 @@ themeBtn.addEventListener('click',function(){setTheme(curTheme()==='dark'?'light
 document.addEventListener('DOMContentLoaded',function(){
   hljs.highlightAll();
   document.querySelectorAll('article pre').forEach(function(pre){
-    pre.setAttribute('tabindex','0');
-    pre.setAttribute('role','region');
-    pre.setAttribute('aria-label','Code block');
+    pre.setAttribute('tabindex','0');pre.setAttribute('role','region');pre.setAttribute('aria-label','Code block');
   });
 });
-// Sidebar persistence (desktop only — mobile uses drawer-toggle natively)
-var drawerCb=document.getElementById('cw-drawer');
-if(window.innerWidth>=1024 && localStorage.getItem('cw-sb')==='off'){
-  // lg:drawer-open forces open; override by removing the class
-  document.querySelector('.drawer').classList.remove('lg:drawer-open');
-}
-drawerCb.addEventListener('change',function(){
-  if(window.innerWidth>=1024){
-    localStorage.setItem('cw-sb',drawerCb.checked?'on':'off');
-    var d=document.querySelector('.drawer');
-    if(drawerCb.checked)d.classList.add('lg:drawer-open');
-    else d.classList.remove('lg:drawer-open');
-  }
+// Sidebar
+var sb=document.getElementById('sb'),body=document.getElementById('body'),ov=document.getElementById('ov'),burger=document.getElementById('sb-toggle');
+function isMob(){return window.innerWidth<769;}
+function sbShow(){if(isMob()){sb.classList.add('on');ov.classList.add('on');}else{sb.classList.remove('off');body.classList.remove('full');}}
+function sbHide(){if(isMob()){sb.classList.remove('on');ov.classList.remove('on');}else{sb.classList.add('off');body.classList.add('full');}}
+if(!isMob()&&localStorage.getItem('cw-sb')==='off'){sb.classList.add('off');body.classList.add('full');}
+burger.addEventListener('click',function(){
+  if(isMob()){if(sb.classList.contains('on'))sbHide();else sbShow();}
+  else{if(sb.classList.contains('off')){sbShow();localStorage.setItem('cw-sb','on');}else{sbHide();localStorage.setItem('cw-sb','off');}}
 });
-// Escape key closes sidebar
-document.addEventListener('keydown',function(e){
-  if(e.key==='Escape'&&drawerCb.checked){drawerCb.checked=false;drawerCb.dispatchEvent(new Event('change'));}
-});
-// Resize: restore drawer-open when returning to desktop if not manually closed
-window.addEventListener('resize',function(){
-  var d=document.querySelector('.drawer');
-  if(window.innerWidth>=1024){
-    if(localStorage.getItem('cw-sb')!=='off') d.classList.add('lg:drawer-open');
-  }
-});
+ov.addEventListener('click',sbHide);
+document.addEventListener('keydown',function(e){if(e.key==='Escape')sbHide();});
+window.addEventListener('resize',function(){if(!isMob()){ov.classList.remove('on');sb.classList.remove('on');if(localStorage.getItem('cw-sb')!=='off')sbShow();}else{sb.classList.remove('off');body.classList.remove('full');}});
 // TOC
 (function(){
   var mc=document.getElementById('mc'),ul=document.getElementById('toc-ul'),toc=document.getElementById('toc');
@@ -199,21 +181,18 @@ window.addEventListener('resize',function(){
   hs.forEach(function(h,i){
     if(!h.id)h.id='h-'+i;
     var li=document.createElement('li');
+    li.className=h.tagName==='H3'?'toc-h3':'';
     var a=document.createElement('a');a.href='#'+h.id;a.textContent=h.textContent;
-    if(h.tagName==='H3')a.classList.add('pl-4','text-xs');
     li.appendChild(a);ul.appendChild(li);
   });
   var obs=new IntersectionObserver(function(entries){
-    entries.forEach(function(e){
-      var a=ul.querySelector('a[href="#'+e.target.id+'"]');
-      if(a)a.classList.toggle('active',e.isIntersecting);
-    });
+    entries.forEach(function(e){var a=ul.querySelector('a[href="#'+e.target.id+'"]');if(a)a.classList.toggle('is-active',e.isIntersecting);});
   },{rootMargin:'-15% 0% -75% 0%'});
   hs.forEach(function(h){obs.observe(h);});
 })();
 // Back to top
 var btt=document.getElementById('btt');
-window.addEventListener('scroll',function(){btt.classList.toggle('hidden',window.scrollY<=300);});
+window.addEventListener('scroll',function(){btt.classList.toggle('on',window.scrollY>300);});
 btt.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});
 // Mermaid
 async function cwRenderMermaid(){
@@ -225,68 +204,30 @@ async function cwRenderMermaid(){
     var src=el.getAttribute('data-mermaid-src');
     if(!src){src=el.textContent.trim();el.setAttribute('data-mermaid-src',src);}
     else{el.textContent=src;}
-    try{
-      var r=await mermaid.render('mermaid-'+Date.now()+'-'+i,src);
-      el.innerHTML=r.svg;
-    }catch(err){
-      el.innerHTML='<details open><summary class="text-error cursor-pointer">&#9888; Mermaid error</summary><pre class="text-xs mt-2 whitespace-pre-wrap">'+err.message+'</pre><pre class="text-xs opacity-60">'+src.replace(/</g,'&lt;')+'</pre></details>';
-    }
+    try{var r=await mermaid.render('mermaid-'+Date.now()+'-'+i,src);el.innerHTML=r.svg;}
+    catch(err){el.innerHTML='<details open><summary style="color:var(--bulma-danger);cursor:pointer">&#9888; Mermaid error</summary><pre style="font-size:12px;margin-top:8px;white-space:pre-wrap">'+err.message+'</pre><pre style="font-size:11px;opacity:.6">'+src.replace(/</g,'&lt;')+'</pre></details>';}
   }
 }
 document.addEventListener('DOMContentLoaded',cwRenderMermaid);
 themeBtn.addEventListener('click',function(){setTimeout(cwRenderMermaid,50);});
-// Math: KaTeX fast path + MathJax async fallback
+// Math
 var _mjReady=null;
 function _loadMathJax(){
-  if(!_mjReady){
-    window.MathJax={tex:{packages:{'[+]':['ams','newcommand']}},svg:{fontCache:'global'},startup:{typeset:false}};
-    _mjReady=new Promise(function(res,rej){
-      var s=document.createElement('script');
-      s.src='https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';
-      s.onload=function(){MathJax.startup.promise.then(res,rej);};
-      s.onerror=rej;
-      document.head.appendChild(s);
-    });
-  }
+  if(!_mjReady){window.MathJax={tex:{packages:{'[+]':['ams','newcommand']}},svg:{fontCache:'global'},startup:{typeset:false}};_mjReady=new Promise(function(res,rej){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';s.onload=function(){MathJax.startup.promise.then(res,rej);};s.onerror=rej;document.head.appendChild(s);});}
   return _mjReady;
 }
 async function cwRenderMath(root){
   if(typeof katex==='undefined')return;
-  if(!root||typeof root.querySelectorAll!=='function')
-    root=document.getElementById('mc')||document.body;
+  if(!root||typeof root.querySelectorAll!=='function')root=document.getElementById('mc')||document.body;
   var failed=[];
   root.querySelectorAll('.math-block,.math-inline').forEach(function(el){
-    if(el.dataset.mathDone)return;
-    var disp=el.classList.contains('math-block');
-    var src=el.textContent.trim().slice(2,-2).trim();
-    el.dataset.mathSrc=src;
-    el.dataset.mathDone='1';
-    try{
-      el.innerHTML=katex.renderToString(src,{displayMode:disp,throwOnError:true,output:'html'});
-    }catch(e){
-      failed.push([el,disp]);
-    }
+    if(el.dataset.mathDone)return;var disp=el.classList.contains('math-block');
+    var src=el.textContent.trim().slice(2,-2).trim();el.dataset.mathSrc=src;el.dataset.mathDone='1';
+    try{el.innerHTML=katex.renderToString(src,{displayMode:disp,throwOnError:true,output:'html'});}catch(e){failed.push([el,disp]);}
   });
   if(!failed.length)return;
-  try{
-    await _loadMathJax();
-    for(var i=0;i<failed.length;i++){
-      var el=failed[i][0],disp=failed[i][1];
-      try{
-        var node=await MathJax.tex2svgPromise(el.dataset.mathSrc,{display:disp});
-        el.innerHTML='';el.appendChild(node);
-      }catch(e2){
-        el.innerHTML='<code class="math-err" title="'+
-          el.dataset.mathSrc.replace(/"/g,'&#34;')+'">'+
-          el.dataset.mathSrc+'</code>';
-      }
-    }
-  }catch(loadErr){
-    failed.forEach(function(p){
-      var el=p[0];
-      el.innerHTML='<code class="math-err">'+el.dataset.mathSrc+'</code>';
-    });
-  }
+  try{await _loadMathJax();for(var i=0;i<failed.length;i++){var el=failed[i][0],disp=failed[i][1];try{var node=await MathJax.tex2svgPromise(el.dataset.mathSrc,{display:disp});el.innerHTML='';el.appendChild(node);}catch(e2){el.innerHTML='<code class="math-err" title="'+el.dataset.mathSrc.replace(/"/g,'&#34;')+'">'+el.dataset.mathSrc+'</code>';}}}
+  catch(loadErr){failed.forEach(function(p){p[0].innerHTML='<code class="math-err">'+p[0].dataset.mathSrc+'</code>';});}
 }
 document.addEventListener('DOMContentLoaded',cwRenderMath);
 </script>
@@ -364,9 +305,9 @@ def _build_nav_html(
     parent_path: Optional[list[str]] = None,
     h1_titles: Optional[Dict[str, str]] = None,
 ) -> str:
-    """Recursively build sidebar nav HTML from the module tree as DaisyUI menu items."""
+    """Recursively build sidebar nav HTML from the module tree as Bulma menu items."""
     lines: list[str] = []
-    indent = "  " * (depth + 3)
+    indent = "  " * (depth + 4)
     base_path = parent_path or []
     titles = h1_titles or {}
 
@@ -380,7 +321,7 @@ def _build_nav_html(
                 ".md", ".html"
             )
         is_active = _normalize_for_match(current_html) == _normalize_for_match(href)
-        active_cls = ' class="active"' if is_active else ""
+        active_cls = ' class="is-active"' if is_active else ""
         children = data.get("children") or {}
 
         doc_stem = href.removesuffix(".html") if href else ""
@@ -388,28 +329,26 @@ def _build_nav_html(
 
         if children:
             lines.append(f"{indent}<li>")
-            lines.append(f"{indent}  <details open>")
             if has_page:
-                lines.append(
-                    f'{indent}    <summary><a href="{href}"{active_cls}>{label}</a></summary>'
-                )
+                lines.append(f'{indent}  <a href="{href}"{active_cls}>{label}</a>')
             else:
-                lines.append(f'{indent}    <summary class="opacity-50">{label}</summary>')
-            lines.append(f"{indent}    <ul>")
+                lines.append(
+                    f'{indent}  <span style="opacity:.5;padding:0.5em 0.75em;display:block">{label}</span>'
+                )
+            lines.append(f"{indent}  <ul>")
             lines.append(
                 _build_nav_html(
                     children, current_html, depth + 1, resolved_hrefs, module_path, titles
                 )
             )
-            lines.append(f"{indent}    </ul>")
-            lines.append(f"{indent}  </details>")
+            lines.append(f"{indent}  </ul>")
             lines.append(f"{indent}</li>")
         else:
             if has_page:
                 lines.append(f'{indent}<li><a href="{href}"{active_cls}>{label}</a></li>')
             else:
                 lines.append(
-                    f'{indent}<li class="disabled"><span class="opacity-50">{label}</span></li>'
+                    f'{indent}<li><span style="opacity:.5;padding:0.5em 0.75em;display:block">{label}</span></li>'
                 )
 
     return "\n".join(lines)
@@ -420,45 +359,45 @@ def _build_meta_html(metadata: Optional[Dict[str, Any]], hide_repo_links: bool =
         return ""
     gi = metadata.get("generation_info", {})
     st = metadata.get("statistics", {})
-    _esc = _html.escape
     parts = []
     if gi.get("main_model"):
-        parts.append(f"<b class='opacity-70'>Model:</b> {_esc(str(gi['main_model']))}")
+        parts.append(f"<b>Model:</b> {_html.escape(str(gi['main_model']))}")
     if gi.get("timestamp"):
-        parts.append(f"<b class='opacity-70'>Generated:</b> {_esc(str(gi['timestamp'][:16]))}")
+        parts.append(f"<b>Generated:</b> {_html.escape(gi['timestamp'][:16])}")
     if gi.get("commit_id"):
-        parts.append(f"<b class='opacity-70'>Commit:</b> {_esc(str(gi['commit_id'][:8]))}")
+        parts.append(f"<b>Commit:</b> {_html.escape(gi['commit_id'][:8])}")
     if st.get("total_components"):
-        parts.append(f"<b class='opacity-70'>Components:</b> {_esc(str(st['total_components']))}")
+        parts.append(f"<b>Components:</b> {_html.escape(str(st['total_components']))}")
 
     link_parts = []
     if not hide_repo_links:
         repo_url = gi.get("repo_url")
         if repo_url:
-            safe_url = _esc(str(repo_url))
+            safe_url = _html.escape(repo_url)
             link_parts.append(
-                f'<a href="{safe_url}" target="_blank" rel="noopener" '
-                f'class="link link-primary text-xs">&#128279; Repository</a>'
+                f'<a href="{safe_url}" target="_blank" rel="noopener">&#128279; Repository</a>'
             )
             if "github.com" in repo_url:
-                slug = _esc(repo_url.split("github.com/")[-1])
+                slug = _html.escape(repo_url.split("github.com/")[-1])
                 link_parts.append(
-                    f'<a href="https://deepwiki.com/{slug}" target="_blank" rel="noopener" '
-                    f'class="link link-primary text-xs">&#127760; DeepWiki</a>'
+                    f'<a href="https://deepwiki.com/{slug}" target="_blank" rel="noopener">'
+                    f"&#127760; DeepWiki</a>"
                 )
 
     if not parts and not link_parts:
         return ""
 
-    body = "\n".join(f"        <div class='text-xs leading-relaxed'>{p}</div>" for p in parts)
+    body = "\n".join(f"      <p class='is-size-7'>{p}</p>" for p in parts)
     if link_parts:
-        body += "\n        <div class='flex gap-2 flex-wrap mt-2'>" + "".join(link_parts) + "</div>"
+        body += (
+            "\n      <p class='is-size-7' style='margin-top:0.5rem'>"
+            + " &middot; ".join(link_parts)
+            + "</p>"
+        )
     return (
-        "      <li>\n"
-        '        <div class="card card-compact bg-base-100 shadow-sm mb-2">\n'
-        '          <div class="card-body p-3">\n' + body + "\n          </div>\n"
-        "        </div>\n"
-        "      </li>"
+        '    <div class="card">\n'
+        '      <div class="card-content" style="padding:0.75rem;">\n' + body + "\n      </div>\n"
+        "    </div>"
     )
 
 
@@ -704,7 +643,7 @@ class StaticHTMLGenerator:
 
             # Build sidebar for this page
             # 1. Overview
-            ov_cls = ' class="active"' if html_name in ("overview.html", "index.html") else ""
+            ov_cls = ' class="is-active"' if html_name in ("overview.html", "index.html") else ""
             ov_label = h1_titles.get("overview", "Overview")
             nav_html = f'        <li><a href="index.html"{ov_cls}>{ov_label}</a></li>\n'
 
@@ -720,7 +659,7 @@ class StaticHTMLGenerator:
                 if not md_file.exists():
                     continue
                 guide_html = slug + ".html"
-                guide_cls = ' class="active"' if html_name == guide_html else ""
+                guide_cls = ' class="is-active"' if html_name == guide_html else ""
                 label = h1_titles.get(slug, fallback_label)
 
                 # Sub-pages for multi-page guides
@@ -734,9 +673,8 @@ class StaticHTMLGenerator:
                 )
                 if sub_pages:
                     nav_html += f"        <li>\n"
-                    nav_html += f"          <details open>\n"
-                    nav_html += f'            <summary><a href="{guide_html}"{guide_cls}>{label}</a></summary>\n'
-                    nav_html += f"            <ul>\n"
+                    nav_html += f'          <a href="{guide_html}"{guide_cls}>{label}</a>\n'
+                    nav_html += f"          <ul>\n"
                     for sub_file in sub_pages:
                         sub_html = sub_file.replace(".md", ".html")
                         sub_stem = sub_file.removesuffix(".md")
@@ -750,10 +688,11 @@ class StaticHTMLGenerator:
                                 )
                             else:
                                 sub_label = raw.replace("-", " ").title()
-                        sub_cls = ' class="active"' if html_name == sub_html else ""
-                        nav_html += f'              <li><a href="{sub_html}"{sub_cls}>{sub_label}</a></li>\n'
-                    nav_html += f"            </ul>\n"
-                    nav_html += f"          </details>\n"
+                        sub_cls = ' class="is-active"' if html_name == sub_html else ""
+                        nav_html += (
+                            f'            <li><a href="{sub_html}"{sub_cls}>{sub_label}</a></li>\n'
+                        )
+                    nav_html += f"          </ul>\n"
                     nav_html += f"        </li>\n"
                 else:
                     nav_html += f'        <li><a href="{guide_html}"{guide_cls}>{label}</a></li>\n'
@@ -764,30 +703,14 @@ class StaticHTMLGenerator:
                     module_tree, html_name, resolved_hrefs=resolved_hrefs, h1_titles=h1_titles
                 )
 
-            # Determine typography style block and article class
-            if _TYPOGRAPHY_CDN_WORKS:
-                typography_style = '<style type="text/tailwindcss">\n@import "tailwindcss";\n@plugin "https://esm.sh/@tailwindcss/typography@0.5";\n</style>'
-                article_class = "prose prose-lg"
-            else:
-                typography_style = f"<style>\n{_PROSE_FALLBACK}\n</style>"
-                article_class = "cw-article"
-
             page = _PAGE_TEMPLATE.safe_substitute(
                 title=title,
-                override_css=_OVERRIDE_CSS,
-                typography_style=typography_style,
-                article_class=article_class,
+                css=_CSS,
                 repo_name=repo_name,
                 meta_html=meta_html,
                 nav_html=nav_html,
                 content=content_html,
             )
-
-            # Sanity check: safe_substitute silently ignores missing placeholders.
-            # Verify no un-substituted ${...} remain in output.
-            leftover = re.findall(r"\$\{[a-z_]+\}", page)
-            if leftover:
-                logger.warning(f"Un-substituted placeholders in {html_name}: {leftover}")
 
             out_path = docs_dir / html_name
             # Strip lone surrogates that can appear in LLM-generated content
