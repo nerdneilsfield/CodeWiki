@@ -7,10 +7,12 @@
     <!-- CSS first, JS after (consistent CDN order across all templates) -->
     <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <link id="hljs-css" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11.9.0/dist/mermaid.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@11.0.0/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <style type="text/tailwindcss">
     @import "tailwindcss";
     @plugin "https://esm.sh/@tailwindcss/typography@0.5";
@@ -23,6 +25,7 @@
     .prose .math-err { color: oklch(var(--er)); font-style: italic; font-size: 0.85em; }
     .prose table { display: block; max-width: 100%; overflow-x: auto; }
     </style>
+    <script>(function(){var t=localStorage.getItem('cw-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script>
 </head>
 <body class="bg-base-100">
     <div class="drawer lg:drawer-open">
@@ -175,6 +178,14 @@
                 await renderMermaidDiagrams();
                 await cwRenderMath(content);
                 setupMarkdownLinks();
+                // Syntax highlighting
+                hljs.highlightAll();
+                // a11y for code blocks
+                document.querySelectorAll('#content pre').forEach(function(pre) {
+                    pre.setAttribute('tabindex', '0');
+                    pre.setAttribute('role', 'region');
+                    pre.setAttribute('aria-label', 'Code block');
+                });
                 window.scrollTo(0, 0);
             } catch (error) {
                 console.error('Error loading document:', error);
@@ -336,19 +347,29 @@
         // Escape key closes sidebar (consistent with other templates)
         document.addEventListener('keydown', function(e) {
             var cb = document.getElementById('gp-drawer');
-            if (e.key === 'Escape' && cb.checked) { cb.checked = false; }
+            if (e.key === 'Escape' && cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
         });
 
-        // a11y: make code blocks keyboard-focusable after content loads
-        const _origLoadDoc = loadDocument;
-        loadDocument = async function(filename) {
-            await _origLoadDoc(filename);
-            document.querySelectorAll('#content pre').forEach(function(pre) {
-                pre.setAttribute('tabindex', '0');
-                pre.setAttribute('role', 'region');
-                pre.setAttribute('aria-label', 'Code block');
-            });
-        };
+        // Sidebar persistence (desktop)
+        var gpDrawerCb = document.getElementById('gp-drawer');
+        if (window.innerWidth >= 1024 && localStorage.getItem('cw-sb') === 'off') {
+            document.querySelector('.drawer').classList.remove('lg:drawer-open');
+        }
+        gpDrawerCb.addEventListener('change', function() {
+            if (window.innerWidth >= 1024) {
+                localStorage.setItem('cw-sb', gpDrawerCb.checked ? 'on' : 'off');
+                var d = document.querySelector('.drawer');
+                if (gpDrawerCb.checked) d.classList.add('lg:drawer-open');
+                else d.classList.remove('lg:drawer-open');
+            }
+        });
+        // Resize: restore drawer-open when returning to desktop
+        window.addEventListener('resize', function() {
+            var d = document.querySelector('.drawer');
+            if (window.innerWidth >= 1024) {
+                if (localStorage.getItem('cw-sb') !== 'off') d.classList.add('lg:drawer-open');
+            }
+        });
     </script>
 </body>
 </html>

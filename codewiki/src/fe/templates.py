@@ -216,14 +216,14 @@ DOCS_VIEW_TEMPLATE = """
         </li>
         {% endif %}
         {% if navigation %}
-        <li><a href="/static-docs/{{ job_id }}/overview.md" class="{% if current_page == 'overview.md' %}active{% endif %}">Overview</a></li>
+        <li><a href="/static-docs/{{ job_id }}/overview.md"{% if current_page == 'overview.md' %} class="active"{% endif %}>Overview</a></li>
         {% macro render_nav_item(key, data, depth=0) %}
           {% set has_ch = data.children and data.children|length > 0 %}
           {% if has_ch %}
           <li>
             <details open>
               {% if data.doc_exists is not defined or data.doc_exists %}
-              <summary><a href="/static-docs/{{ job_id }}/{{ data.doc_filename }}" class="{% if current_page == data.doc_filename %}active{% endif %}">{{ key.replace('_', ' ').title() }}</a></summary>
+              <summary><a href="/static-docs/{{ job_id }}/{{ data.doc_filename }}"{% if current_page == data.doc_filename %} class="active"{% endif %}>{{ key.replace('_', ' ').title() }}</a></summary>
               {% else %}
               <summary class="opacity-50">{{ key.replace('_', ' ').title() }}</summary>
               {% endif %}
@@ -235,7 +235,7 @@ DOCS_VIEW_TEMPLATE = """
           {% else %}
           <li>
             {% if data.doc_exists is not defined or data.doc_exists %}
-            <a href="/static-docs/{{ job_id }}/{{ data.doc_filename }}" class="{% if current_page == data.doc_filename %}active{% endif %}">{{ key.replace('_', ' ').title() }}</a>
+            <a href="/static-docs/{{ job_id }}/{{ data.doc_filename }}"{% if current_page == data.doc_filename %} class="active"{% endif %}>{{ key.replace('_', ' ').title() }}</a>
             {% else %}
             <span class="opacity-50">{{ key.replace('_', ' ').title() }}</span>
             {% endif %}

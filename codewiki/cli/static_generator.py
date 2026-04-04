@@ -9,6 +9,7 @@ markdown rendering.
 
 from __future__ import annotations
 
+import html as _html
 import os
 import re
 import logging
@@ -419,26 +420,28 @@ def _build_meta_html(metadata: Optional[Dict[str, Any]], hide_repo_links: bool =
         return ""
     gi = metadata.get("generation_info", {})
     st = metadata.get("statistics", {})
+    _esc = _html.escape
     parts = []
     if gi.get("main_model"):
-        parts.append(f"<b class='opacity-70'>Model:</b> {gi['main_model']}")
+        parts.append(f"<b class='opacity-70'>Model:</b> {_esc(str(gi['main_model']))}")
     if gi.get("timestamp"):
-        parts.append(f"<b class='opacity-70'>Generated:</b> {gi['timestamp'][:16]}")
+        parts.append(f"<b class='opacity-70'>Generated:</b> {_esc(str(gi['timestamp'][:16]))}")
     if gi.get("commit_id"):
-        parts.append(f"<b class='opacity-70'>Commit:</b> {gi['commit_id'][:8]}")
+        parts.append(f"<b class='opacity-70'>Commit:</b> {_esc(str(gi['commit_id'][:8]))}")
     if st.get("total_components"):
-        parts.append(f"<b class='opacity-70'>Components:</b> {st['total_components']}")
+        parts.append(f"<b class='opacity-70'>Components:</b> {_esc(str(st['total_components']))}")
 
     link_parts = []
     if not hide_repo_links:
         repo_url = gi.get("repo_url")
         if repo_url:
+            safe_url = _esc(str(repo_url))
             link_parts.append(
-                f'<a href="{repo_url}" target="_blank" rel="noopener" '
+                f'<a href="{safe_url}" target="_blank" rel="noopener" '
                 f'class="link link-primary text-xs">&#128279; Repository</a>'
             )
             if "github.com" in repo_url:
-                slug = repo_url.split("github.com/")[-1]
+                slug = _esc(repo_url.split("github.com/")[-1])
                 link_parts.append(
                     f'<a href="https://deepwiki.com/{slug}" target="_blank" rel="noopener" '
                     f'class="link link-primary text-xs">&#127760; DeepWiki</a>'
@@ -782,9 +785,7 @@ class StaticHTMLGenerator:
 
             # Sanity check: safe_substitute silently ignores missing placeholders.
             # Verify no un-substituted ${...} remain in output.
-            import re as _re
-
-            leftover = _re.findall(r"\$\{[a-z_]+\}", page)
+            leftover = re.findall(r"\$\{[a-z_]+\}", page)
             if leftover:
                 logger.warning(f"Un-substituted placeholders in {html_name}: {leftover}")
 
