@@ -637,6 +637,7 @@ Return ONLY valid JSON wrapped in <OUTLINE>...</OUTLINE>:
   ]
 }}
 </OUTLINE>
+{language_instruction}
 """.strip()
 
 BEGINNER_SECTION_PROMPT = (
@@ -824,6 +825,7 @@ Return ONLY valid JSON wrapped in <ALGORITHMS>...</ALGORITHMS>:
   ]
 }}
 </ALGORITHMS>
+{language_instruction}
 """.strip()
 
 ALGORITHM_DEEPDIVE_PROMPT = (

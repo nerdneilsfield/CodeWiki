@@ -878,10 +878,12 @@ class GuideGenerator:
         logger.info("📝 Generating Beginner's Guide — Phase A: outline")
 
         # ── Phase A: generate outline ─────────────────────────────────
+        lang_inst = format_language_instruction(self.config.output_language)
         outline_prompt = BEGINNER_OUTLINE_PROMPT.format(
             repo_name=repo_name,
             module_tree=module_tree_str,
             module_summaries=self._build_module_summaries(),
+            language_instruction=lang_inst,
         )
         outline_response = await self._call_llm_with_fallback(outline_prompt)
         raw_outline = self._parse_json_response(outline_response, "OUTLINE")
@@ -904,7 +906,6 @@ class GuideGenerator:
 
         output_files = []
         carry_forward = ""
-        lang_inst = format_language_instruction(self.config.output_language)
 
         for i, section in enumerate(sections):
             section_id = section_slugs[i]
@@ -1146,11 +1147,13 @@ class GuideGenerator:
         logger.info("📝 Generating Core Algorithms — Phase A: identification")
 
         # ── Phase A: identify algorithms ──────────────────────────────
+        lang_inst = format_language_instruction(self.config.output_language)
         id_prompt = ALGORITHM_IDENTIFY_PROMPT.format(
             repo_name=repo_name,
             components_summary=self._build_components_summary(),
             dependency_summary=self._build_dependency_summary(),
             module_summaries=self._build_module_summaries(max_chars_per_module=200),
+            language_instruction=lang_inst,
         )
         id_response = await self._call_llm_with_fallback(id_prompt)
         raw_algo = self._parse_json_response(id_response, "ALGORITHMS")
