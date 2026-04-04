@@ -31,6 +31,32 @@ def test_safe_read_wraps_file_not_found(tmp_path):
         safe_read(tmp_path / "missing.txt")
 
 
+def test_safe_read_wraps_permission_error(tmp_path):
+    from codewiki.cli.utils.errors import FileSystemError
+    from codewiki.cli.utils.fs import safe_read
+
+    target = tmp_path / "blocked.txt"
+    target.write_text("x", encoding="utf-8")
+
+    with patch("builtins.open", side_effect=PermissionError):
+        with pytest.raises(FileSystemError, match="Permission denied"):
+            safe_read(target)
+
+
+def test_safe_write_cleans_up_temp_file_on_failure(tmp_path):
+    from codewiki.cli.utils.errors import FileSystemError
+    from codewiki.cli.utils.fs import safe_write
+
+    target = tmp_path / "out.txt"
+    temp_path = target.with_suffix(".txt.tmp")
+
+    with patch("pathlib.Path.replace", side_effect=OSError("rename failed")):
+        with pytest.raises(FileSystemError, match="Cannot write"):
+            safe_write(target, "content")
+
+    assert not temp_path.exists()
+
+
 def test_find_files_respects_extensions_and_non_recursive(tmp_path):
     from codewiki.cli.utils.fs import find_files
 
@@ -59,3 +85,15 @@ def test_cleanup_directory_keeps_hidden_entries(tmp_path):
     assert not (tmp_path / "visible.txt").exists()
     assert not visible_dir.exists()
     assert (tmp_path / ".hidden.txt").exists()
+
+
+def test_cleanup_directory_wraps_errors(tmp_path):
+    from codewiki.cli.utils.errors import FileSystemError
+    from codewiki.cli.utils.fs import cleanup_directory
+
+    target = tmp_path / "file.txt"
+    target.write_text("x", encoding="utf-8")
+
+    with patch.object(Path, "unlink", side_effect=OSError("boom")):
+        with pytest.raises(FileSystemError, match="Cannot clean directory"):
+            cleanup_directory(tmp_path, keep_hidden=False)
