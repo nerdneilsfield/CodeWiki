@@ -14,8 +14,9 @@ import os
 import re
 import logging
 from pathlib import Path
-from string import Template
 from typing import Dict, Any, Optional
+
+from jinja2 import Template
 
 from codewiki.src.utils import (
     file_manager,
@@ -76,7 +77,7 @@ _CSS = """
 """.strip()
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Page template (uses string.Template — $var substitution)
+# Page template (Jinja2 — nav/meta logic lives in the template itself)
 # ──────────────────────────────────────────────────────────────────────────────
 
 _PAGE_TEMPLATE = Template("""\
@@ -85,7 +86,7 @@ _PAGE_TEMPLATE = Template("""\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${title}</title>
+<title>{{ title }}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -98,7 +99,7 @@ _PAGE_TEMPLATE = Template("""\
 <script>(function(){var t=localStorage.getItem('cw-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);if(t==='dark'){document.getElementById('hljs-css').href='https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css';}})();</script>
 <style>
 body{font-family:'Inter',system-ui,-apple-system,sans-serif;}
-${css}
+{{ css }}
 </style>
 </head>
 <body>
@@ -107,7 +108,7 @@ ${css}
     <button class="navbar-burger" id="sb-toggle" aria-label="Toggle sidebar" aria-expanded="false">
       <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
     </button>
-    <a href="index.html" class="navbar-item has-text-link has-text-weight-bold">&#128218; ${repo_name}</a>
+    <a href="index.html" class="navbar-item has-text-link has-text-weight-bold">&#128218; {{ repo_name }}</a>
   </div>
   <div class="navbar-end">
     <div class="navbar-item">
@@ -120,10 +121,52 @@ ${css}
 </nav>
 <div class="cw-wrap">
   <aside class="cw-side" id="sb">
-${meta_html}
+    {%- if metadata and metadata.generation_info %}
+    <div class="card" style="margin-bottom:0.75rem;">
+      <div class="card-content" style="padding:0.75rem;">
+        {%- if metadata.generation_info.main_model %}
+        <p class="is-size-7"><b>Model:</b> {{ metadata.generation_info.main_model }}</p>
+        {%- endif %}
+        {%- if metadata.generation_info.timestamp %}
+        <p class="is-size-7"><b>Generated:</b> {{ metadata.generation_info.timestamp[:16] }}</p>
+        {%- endif %}
+        {%- if metadata.generation_info.commit_id %}
+        <p class="is-size-7"><b>Commit:</b> {{ metadata.generation_info.commit_id[:8] }}</p>
+        {%- endif %}
+        {%- if metadata.statistics and metadata.statistics.total_components %}
+        <p class="is-size-7"><b>Components:</b> {{ metadata.statistics.total_components }}</p>
+        {%- endif %}
+        {%- if not hide_repo_links and metadata.generation_info.repo_url %}
+        <p class="is-size-7" style="margin-top:0.5rem">
+          <a href="{{ metadata.generation_info.repo_url }}" target="_blank" rel="noopener">&#128279; Repository</a>
+          {%- if 'github.com' in metadata.generation_info.repo_url %}
+          &middot; <a href="https://deepwiki.com/{{ metadata.generation_info.repo_url.split('github.com/')[-1] }}" target="_blank" rel="noopener">&#127760; DeepWiki</a>
+          {%- endif %}
+        </p>
+        {%- endif %}
+      </div>
+    </div>
+    {%- endif %}
     <aside class="menu">
       <ul class="menu-list">
-${nav_html}
+        <li><a href="index.html"{% if current_page in ('overview.html', 'index.html') %} class="is-active"{% endif %}>{{ nav_labels.get('overview', 'Overview') }}</a></li>
+        {%- for guide in guides %}
+        {%- if guide.sub_pages %}
+        <li>
+          <a href="{{ guide.href }}"{% if current_page == guide.href %} class="is-active"{% endif %}>{{ guide.label }}</a>
+          <ul>
+            {%- for sub in guide.sub_pages %}
+            <li><a href="{{ sub.href }}"{% if current_page == sub.href %} class="is-active"{% endif %}>{{ sub.label }}</a></li>
+            {%- endfor %}
+          </ul>
+        </li>
+        {%- else %}
+        <li><a href="{{ guide.href }}"{% if current_page == guide.href %} class="is-active"{% endif %}>{{ guide.label }}</a></li>
+        {%- endif %}
+        {%- endfor %}
+        {%- if module_tree %}
+        {{ render_nav(module_tree, current_page, resolved_hrefs, [], nav_labels) }}
+        {%- endif %}
       </ul>
     </aside>
   </aside>
@@ -131,7 +174,7 @@ ${nav_html}
   <main class="cw-body" id="body">
     <div class="cw-content">
       <article id="mc" class="cw-article content">
-${content}
+{{ content }}
       </article>
       <div class="cw-toc" id="toc">
         <aside class="menu">
@@ -144,9 +187,7 @@ ${content}
 </div>
 <button id="btt" class="button is-primary is-rounded" title="Back to top">&#8679;</button>
 <script>
-// Site home button
 document.getElementById('site-home-btn').href=window.location.origin+'/';
-// Theme
 var html=document.documentElement,themeBtn=document.getElementById('theme-btn');
 function curTheme(){return html.getAttribute('data-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');}
 var _hljsBase='https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/';
@@ -159,7 +200,6 @@ document.addEventListener('DOMContentLoaded',function(){
     pre.setAttribute('tabindex','0');pre.setAttribute('role','region');pre.setAttribute('aria-label','Code block');
   });
 });
-// Sidebar
 var sb=document.getElementById('sb'),body=document.getElementById('body'),ov=document.getElementById('ov'),burger=document.getElementById('sb-toggle');
 function isMob(){return window.innerWidth<769;}
 function sbShow(){if(isMob()){sb.classList.add('on');ov.classList.add('on');}else{sb.classList.remove('off');body.classList.remove('full');}}
@@ -172,7 +212,6 @@ burger.addEventListener('click',function(){
 ov.addEventListener('click',sbHide);
 document.addEventListener('keydown',function(e){if(e.key==='Escape')sbHide();});
 window.addEventListener('resize',function(){if(!isMob()){ov.classList.remove('on');sb.classList.remove('on');if(localStorage.getItem('cw-sb')!=='off')sbShow();}else{sb.classList.remove('off');body.classList.remove('full');}});
-// TOC
 (function(){
   var mc=document.getElementById('mc'),ul=document.getElementById('toc-ul'),toc=document.getElementById('toc');
   if(!mc||!ul)return;
@@ -190,11 +229,9 @@ window.addEventListener('resize',function(){if(!isMob()){ov.classList.remove('on
   },{rootMargin:'-15% 0% -75% 0%'});
   hs.forEach(function(h){obs.observe(h);});
 })();
-// Back to top
 var btt=document.getElementById('btt');
 window.addEventListener('scroll',function(){btt.classList.toggle('on',window.scrollY>300);});
 btt.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});
-// Mermaid
 async function cwRenderMermaid(){
   var theme=document.documentElement.getAttribute('data-theme')==='dark'?'dark':'default';
   mermaid.initialize({startOnLoad:false,theme:theme,themeVariables:{primaryColor:'#2563eb',lineColor:'#64748b'},flowchart:{htmlLabels:true,curve:'basis'},sequence:{mirrorActors:false,useMaxWidth:true}});
@@ -210,7 +247,6 @@ async function cwRenderMermaid(){
 }
 document.addEventListener('DOMContentLoaded',cwRenderMermaid);
 themeBtn.addEventListener('click',function(){setTimeout(cwRenderMermaid,50);});
-// Math
 var _mjReady=null;
 function _loadMathJax(){
   if(!_mjReady){window.MathJax={tex:{packages:{'[+]':['ams','newcommand']}},svg:{fontCache:'global'},startup:{typeset:false}};_mjReady=new Promise(function(res,rej){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';s.onload=function(){MathJax.startup.promise.then(res,rej);};s.onerror=rej;document.head.appendChild(s);});}
@@ -297,108 +333,54 @@ def _extract_h1_titles(md_files: list) -> Dict[str, str]:
     return titles
 
 
-def _build_nav_html(
+def _render_nav(
     module_tree: Dict[str, Any],
-    current_html: str,
-    depth: int = 0,
-    resolved_hrefs: Optional[Dict[str, Optional[str]]] = None,
-    parent_path: Optional[list[str]] = None,
-    h1_titles: Optional[Dict[str, str]] = None,
+    current_page: str,
+    resolved_hrefs: Dict[str, Optional[str]],
+    parent_path: list[str],
+    nav_labels: Dict[str, str],
 ) -> str:
-    """Recursively build sidebar nav HTML from the module tree as Bulma menu items."""
+    """Recursively build sidebar nav HTML from the module tree (called from Jinja2 template)."""
     lines: list[str] = []
-    indent = "  " * (depth + 4)
-    base_path = parent_path or []
-    titles = h1_titles or {}
 
     for key, data in module_tree.items():
-        module_path = base_path + [key]
+        module_path = parent_path + [key]
         map_key = "/".join(module_path)
-        href = (resolved_hrefs or {}).get(map_key)
+        href = resolved_hrefs.get(map_key)
         has_page = href is not None
         if not href:
             href = data.get("_doc_filename", module_doc_filename(module_path)).replace(
                 ".md", ".html"
             )
-        is_active = _normalize_for_match(current_html) == _normalize_for_match(href)
-        active_cls = ' class="is-active"' if is_active else ""
+        is_active = _normalize_for_match(current_page) == _normalize_for_match(href)
+        active = ' class="is-active"' if is_active else ""
         children = data.get("children") or {}
-
         doc_stem = href.removesuffix(".html") if href else ""
-        label = titles.get(doc_stem, key.replace("_", " ").title())
+        label = nav_labels.get(doc_stem, key.replace("_", " ").title())
 
         if children:
-            lines.append(f"{indent}<li>")
+            lines.append("<li>")
             if has_page:
-                lines.append(f'{indent}  <a href="{href}"{active_cls}>{label}</a>')
+                lines.append(f'  <a href="{href}"{active}>{label}</a>')
             else:
                 lines.append(
-                    f'{indent}  <span style="opacity:.5;padding:0.5em 0.75em;display:block">{label}</span>'
+                    f'  <span style="opacity:.5;padding:0.5em 0.75em;display:block">{label}</span>'
                 )
-            lines.append(f"{indent}  <ul>")
+            lines.append("  <ul>")
             lines.append(
-                _build_nav_html(
-                    children, current_html, depth + 1, resolved_hrefs, module_path, titles
-                )
+                _render_nav(children, current_page, resolved_hrefs, module_path, nav_labels)
             )
-            lines.append(f"{indent}  </ul>")
-            lines.append(f"{indent}</li>")
+            lines.append("  </ul>")
+            lines.append("</li>")
         else:
             if has_page:
-                lines.append(f'{indent}<li><a href="{href}"{active_cls}>{label}</a></li>')
+                lines.append(f'<li><a href="{href}"{active}>{label}</a></li>')
             else:
                 lines.append(
-                    f'{indent}<li><span style="opacity:.5;padding:0.5em 0.75em;display:block">{label}</span></li>'
+                    f'<li><span style="opacity:.5;padding:0.5em 0.75em;display:block">{label}</span></li>'
                 )
 
     return "\n".join(lines)
-
-
-def _build_meta_html(metadata: Optional[Dict[str, Any]], hide_repo_links: bool = False) -> str:
-    if not metadata:
-        return ""
-    gi = metadata.get("generation_info", {})
-    st = metadata.get("statistics", {})
-    parts = []
-    if gi.get("main_model"):
-        parts.append(f"<b>Model:</b> {_html.escape(str(gi['main_model']))}")
-    if gi.get("timestamp"):
-        parts.append(f"<b>Generated:</b> {_html.escape(gi['timestamp'][:16])}")
-    if gi.get("commit_id"):
-        parts.append(f"<b>Commit:</b> {_html.escape(gi['commit_id'][:8])}")
-    if st.get("total_components"):
-        parts.append(f"<b>Components:</b> {_html.escape(str(st['total_components']))}")
-
-    link_parts = []
-    if not hide_repo_links:
-        repo_url = gi.get("repo_url")
-        if repo_url:
-            safe_url = _html.escape(repo_url)
-            link_parts.append(
-                f'<a href="{safe_url}" target="_blank" rel="noopener">&#128279; Repository</a>'
-            )
-            if "github.com" in repo_url:
-                slug = _html.escape(repo_url.split("github.com/")[-1])
-                link_parts.append(
-                    f'<a href="https://deepwiki.com/{slug}" target="_blank" rel="noopener">'
-                    f"&#127760; DeepWiki</a>"
-                )
-
-    if not parts and not link_parts:
-        return ""
-
-    body = "\n".join(f"      <p class='is-size-7'>{p}</p>" for p in parts)
-    if link_parts:
-        body += (
-            "\n      <p class='is-size-7' style='margin-top:0.5rem'>"
-            + " &middot; ".join(link_parts)
-            + "</p>"
-        )
-    return (
-        '    <div class="card">\n'
-        '      <div class="card-content" style="padding:0.75rem;">\n' + body + "\n      </div>\n"
-        "    </div>"
-    )
 
 
 def _rewrite_md_to_html_links(html: str) -> str:
@@ -442,7 +424,7 @@ def _fix_markdown_links(content: str) -> str:
 
 # Pre-compiled regex for server-side math delimiter normalisation.
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
-_DISPLAY_MATH_RE = re.compile(r"\$\$([^$]+?)\$\$", re.DOTALL)
+_DISPLAY_MATH_RE = re.compile(r"\$\$(.+?)\$\$", re.DOTALL)
 _INLINE_MATH_RE = re.compile(r"\$(?!\s)([^$\n]+?)\$(?!\$)")
 # Backslash-delimited math: \[...\] and \(...\) — generated directly by some LLMs.
 # Must be extracted before markdown-it, which otherwise escapes \[ → [ per CommonMark.
@@ -463,9 +445,19 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
 
     $$...$$ is processed first to avoid partial matches with $...$.
     """
-    import html as _html
 
     protected: list[tuple[str, str]] = []
+
+    def _norm_backslash(s: str) -> str:
+        r"""Normalize ``\\cmd`` → ``\cmd`` for LaTeX commands.
+
+        LLMs double backslashes for markdown escaping (``\\text`` means
+        ``\text``).  We normalise ``\\`` followed by a letter to a single
+        ``\``, but keep standalone ``\\`` (LaTeX line-break).
+        """
+        # \\<letter> → \<letter>  (e.g. \\text → \text, \\mathcal → \mathcal)
+        # But keep \\\\ (literal double-backslash = LaTeX line-break)
+        return re.sub(r"\\\\(?=[A-Za-z])", r"\\", s)
 
     def _display(m: re.Match) -> str:
         inner = m.group(1)
@@ -473,9 +465,10 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
             return m.group(0)
         idx = len(protected)
         ph = f"CWIKIMD{idx:06d}"
+        normed = _norm_backslash(inner)
         # HTML-escape so & < > are safe in the DOM; KaTeX reads textContent
         # which the browser decodes back to the original LaTeX characters.
-        escaped = _html.escape(inner, quote=False)
+        escaped = _html.escape(normed, quote=False)
         protected.append((ph, f'<div class="math-block not-prose">\\[{escaped}\\]</div>'))
         return ph
 
@@ -489,7 +482,8 @@ def _extract_math_blocks(content: str) -> tuple[str, list[tuple[str, str]]]:
             return m.group(0)
         idx = len(protected)
         ph = f"CWIKIMI{idx:06d}"
-        escaped = _html.escape(inner, quote=False)
+        normed = _norm_backslash(inner)
+        escaped = _html.escape(normed, quote=False)
         protected.append((ph, f'<span class="math-inline not-prose">\\({escaped}\\)</span>'))
         return ph
 
@@ -601,7 +595,6 @@ class StaticHTMLGenerator:
                 logger.warning(f"Could not load metadata.json: {e}")
 
         repo_name = docs_dir.parent.name or "Docs"
-        meta_html = _build_meta_html(metadata, hide_repo_links=hide_repo_links)
 
         # Collect all .md files
         md_files = sorted(f for f in docs_dir.glob("*.md") if not f.name.startswith("_"))
@@ -641,74 +634,55 @@ class StaticHTMLGenerator:
                 else stem.replace("_", " ").title()
             )
 
-            # Build sidebar for this page
-            # 1. Overview
-            ov_cls = ' class="is-active"' if html_name in ("overview.html", "index.html") else ""
-            ov_label = h1_titles.get("overview", "Overview")
-            nav_html = f'        <li><a href="index.html"{ov_cls}>{ov_label}</a></li>\n'
-
-            # 2. Guide pages
+            # Build guide pages data for template
             _GUIDE_FALLBACK_LABELS = {
                 "guide-getting-started": "Get Started",
                 "guide-beginners-guide": "Beginner's Guide",
                 "guide-build-and-organization": "Build & Code Organization",
                 "guide-core-algorithms": "Core Algorithms",
             }
+            guides: list[Dict[str, Any]] = []
             for slug, fallback_label in _GUIDE_FALLBACK_LABELS.items():
                 md_file = docs_dir / f"{slug}.md"
                 if not md_file.exists():
                     continue
-                guide_html = slug + ".html"
-                guide_cls = ' class="is-active"' if html_name == guide_html else ""
-                label = h1_titles.get(slug, fallback_label)
-
-                # Sub-pages for multi-page guides
+                guide: Dict[str, Any] = {
+                    "href": slug + ".html",
+                    "label": h1_titles.get(slug, fallback_label),
+                    "sub_pages": [],
+                }
                 sub_prefix = slug + "-"
-                sub_pages = sorted(
-                    [
-                        f
-                        for f in os.listdir(str(docs_dir))
-                        if f.startswith(sub_prefix) and f.endswith(".md")
-                    ]
-                )
-                if sub_pages:
-                    nav_html += f"        <li>\n"
-                    nav_html += f'          <a href="{guide_html}"{guide_cls}>{label}</a>\n'
-                    nav_html += f"          <ul>\n"
-                    for sub_file in sub_pages:
-                        sub_html = sub_file.replace(".md", ".html")
-                        sub_stem = sub_file.removesuffix(".md")
-                        sub_label = h1_titles.get(sub_stem)
-                        if not sub_label:
-                            raw = sub_file[len(sub_prefix) : -3]
-                            m = re.match(r"^(\d+)-(.+)$", raw)
-                            if m:
-                                sub_label = (
-                                    f"{int(m.group(1))}. {m.group(2).replace('-', ' ').title()}"
-                                )
-                            else:
-                                sub_label = raw.replace("-", " ").title()
-                        sub_cls = ' class="is-active"' if html_name == sub_html else ""
-                        nav_html += (
-                            f'            <li><a href="{sub_html}"{sub_cls}>{sub_label}</a></li>\n'
-                        )
-                    nav_html += f"          </ul>\n"
-                    nav_html += f"        </li>\n"
-                else:
-                    nav_html += f'        <li><a href="{guide_html}"{guide_cls}>{label}</a></li>\n'
+                for sub_file in sorted(
+                    f
+                    for f in os.listdir(str(docs_dir))
+                    if f.startswith(sub_prefix) and f.endswith(".md")
+                ):
+                    sub_stem = sub_file.removesuffix(".md")
+                    sub_label = h1_titles.get(sub_stem)
+                    if not sub_label:
+                        raw = sub_file[len(sub_prefix) : -3]
+                        m = re.match(r"^(\d+)-(.+)$", raw)
+                        if m:
+                            sub_label = f"{int(m.group(1))}. {m.group(2).replace('-', ' ').title()}"
+                        else:
+                            sub_label = raw.replace("-", " ").title()
+                    guide["sub_pages"].append(
+                        {"href": sub_file.replace(".md", ".html"), "label": sub_label}
+                    )
+                guides.append(guide)
 
-            # 3. Module tree (only when present)
-            if module_tree:
-                nav_html += _build_nav_html(
-                    module_tree, html_name, resolved_hrefs=resolved_hrefs, h1_titles=h1_titles
-                )
-
-            page = _PAGE_TEMPLATE.safe_substitute(
+            page = _PAGE_TEMPLATE.render(
                 title=title,
                 css=_CSS,
                 repo_name=repo_name,
-                meta_html=meta_html,
-                nav_html=nav_html,
+                metadata=metadata,
+                hide_repo_links=hide_repo_links,
+                current_page=html_name,
+                nav_labels=h1_titles,
+                guides=guides,
+                module_tree=module_tree,
+                resolved_hrefs=resolved_hrefs,
+                render_nav=_render_nav,
                 content=content_html,
             )
 

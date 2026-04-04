@@ -55,6 +55,7 @@ class ProviderConfig(BaseModel):
 class PostprocessConfig(BaseModel):
     strict: bool = False
     fix_links: bool = True
+    degrade_mermaid: bool = False
     repair_model: str = ""
     repair_fallback_1: str = ""
     repair_fallback_2: str = ""

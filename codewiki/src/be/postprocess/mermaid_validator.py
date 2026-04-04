@@ -455,16 +455,18 @@ def fix_mermaid_in_text(
                 filename=filename,
                 block_index=int(issue.issue_id.rsplit(":", 1)[-1]),
                 error=error_msg,
-                degraded=True,
+                degraded=config.postprocess.degrade_mermaid,
             )
-            degraded = (
-                "```text\n"
-                "[MERMAID DIAGRAM - RENDER FAILED]\n"
-                f"{span.content.strip()}\n"
-                "```\n"
-                f"<!-- mermaid-error: {error_msg} -->"
-            )
-            replacements.append((span.start, span.end, degraded))
+            if config.postprocess.degrade_mermaid:
+                degraded = (
+                    "```text\n"
+                    "[MERMAID DIAGRAM - RENDER FAILED]\n"
+                    f"{span.content.strip()}\n"
+                    "```\n"
+                    f"<!-- mermaid-error: {error_msg} -->"
+                )
+                replacements.append((span.start, span.end, degraded))
+            # else: keep original mermaid block, let browser-side renderer try
             continue
 
         _bump_stat(stats, "diagrams_repaired")
