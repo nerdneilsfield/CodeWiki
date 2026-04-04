@@ -47,6 +47,14 @@ def _compute_delay(attempt: int, retry_after: float | None) -> float:
 
 
 def _is_timeout(error: LLMError) -> bool:
+    cause = error.__cause__
+    try:
+        import openai
+
+        if isinstance(cause, openai.APITimeoutError):
+            return True
+    except ImportError:
+        pass
     msg = str(error).lower()
     return "timeout" in msg or "524" in msg or "cloudflare" in msg or "stream disconnected" in msg
 
@@ -91,6 +99,8 @@ async def with_retry(
             if cancel_token:
                 cancel_token.check()
             await asyncio.sleep(delay)
+            if cancel_token:
+                cancel_token.check()
         except Exception:
             raise
 
@@ -136,6 +146,8 @@ def with_retry_sync(
             if cancel_token:
                 cancel_token.check()
             time.sleep(delay)
+            if cancel_token:
+                cancel_token.check()
         except Exception:
             raise
 

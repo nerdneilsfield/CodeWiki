@@ -123,6 +123,8 @@ def _load_provider_configs(
                 "credentials_path": provider_data.get("credentials_path"),
             }
         )
+        # model_post_init() normalizes direct construction as well; overwrite here so TOML
+        # loading and direct instantiation converge on the same final representation.
         provider._model_stream = model_stream
         provider.model_list = list(model_stream.keys())
         providers.append(provider)

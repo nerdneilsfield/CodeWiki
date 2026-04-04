@@ -19,8 +19,8 @@ from typing import Any, Dict, List, Optional
 from codewiki.src.be.dependency_analyzer.utils.security import assert_safe_path
 from codewiki.src.be.cancellation import CancellationToken
 from codewiki.src.be.errors import CancellationError, LLMError
+from codewiki.src.be.llm_retry import LLMRetryExhausted, with_retry
 from codewiki.src.be.llm_services import call_llm
-from codewiki.src.be.llm_retry import with_retry
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.repo_docs_collector import RepoDocsCollector, DocsBundle
 from codewiki.src.codewiki_config import CodeWikiConfig
@@ -297,13 +297,17 @@ class GuideGenerator:
                             result.usage.output_tokens,
                         )
                     return result.content
+            except CancellationError:
+                raise
+            except LLMRetryExhausted as e:
+                logger.warning(f"Guide LLM call exhausted retries with model {model_name}: {e}")
+                last_exc = e
+                continue
             except LLMError as e:
                 logger.warning(f"Guide LLM call failed with model {model_name}: {e}")
                 last_exc = e
                 if not e.is_retryable:
                     continue
-                raise
-            except CancellationError:
                 raise
             except Exception as e:
                 logger.warning(f"Guide LLM call failed with model {model_name}: {e}")
@@ -685,6 +689,8 @@ class GuideGenerator:
         try:
             await gen_fn()
             self._results[name] = "success"
+        except CancellationError:
+            raise
         except Exception as e:
             logger.warning(f"Guide generation failed ({name}): {e}")
             self._results[name] = f"FAILED: {e}"

@@ -268,3 +268,26 @@ def test_run_continues_on_guide_failure():
             assert call_count["value"] == 3
 
     asyncio.run(_run())
+
+
+def test_safe_generate_reraises_cancellation():
+    import asyncio
+
+    from codewiki.src.be.errors import CancellationError
+
+    async def _run():
+        with tempfile.TemporaryDirectory() as wd:
+            gen = GuideGenerator(
+                config=_minimal_config(),
+                components={},
+                module_tree={},
+                working_dir=wd,
+            )
+
+            async def cancelled():
+                raise CancellationError("stop now")
+
+            with pytest.raises(CancellationError):
+                await gen._safe_generate(cancelled)
+
+    asyncio.run(_run())

@@ -107,6 +107,27 @@ class TestWithRetry:
         sleep_mock.assert_awaited_once_with(7.5)
 
     @pytest.mark.asyncio
+    async def test_cancellation_after_sleep_stops_before_next_attempt(self):
+        from codewiki.src.be.cancellation import CancellationToken
+        from codewiki.src.be.llm_retry import with_retry
+
+        token = CancellationToken()
+        calls = []
+
+        async def flaky():
+            calls.append(1)
+            raise LLMError("timeout", ErrorCategory.RETRYABLE_TRANSIENT)
+
+        async def fake_sleep(_delay):
+            token.cancel()
+
+        with patch("asyncio.sleep", side_effect=fake_sleep):
+            with pytest.raises(CancellationError):
+                await with_retry(flaky, max_retries=3, cancel_token=token)
+
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
     async def test_exhausted_raises_llm_retry_exhausted(self):
         from codewiki.src.be.llm_retry import LLMRetryExhausted, with_retry
 

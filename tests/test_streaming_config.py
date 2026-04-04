@@ -13,8 +13,6 @@ class TestPolymorphicModelList:
             api_keys=["key"],
             model_list=["gpt-4o"],
         )
-        provider._model_stream = {"gpt-4o": False}
-        provider.model_list = ["gpt-4o"]
         resolved = resolve_model_ref("openai/gpt-4o", [provider])
         assert resolved.stream is False
 
