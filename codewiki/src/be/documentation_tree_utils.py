@@ -118,15 +118,16 @@ def cleanup_legacy_internal_files(working_dir: str) -> list[str]:
 
 
 def config_fingerprint(config: CodeWikiConfig) -> str:
+    """Fingerprint for clustering cache — only structural params, no models.
+
+    Clustering depends on code structure (covered by commit hash) and
+    structural settings.  Model changes should NOT invalidate the cache:
+    cluster_model only affects naming, main_model only affects doc generation.
+    """
     return stable_hash(
         [
-            config.main_model,
-            config.cluster_model,
-            config.fallback_model or "",
-            config.long_context_model or "",
             config.output_language,
             str(config.max_depth),
-            str(config.max_concurrent),
             "naming-v7",
         ]
     )
