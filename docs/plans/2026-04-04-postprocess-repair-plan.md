@@ -102,7 +102,7 @@ class TestConfigLoaderPostprocess:
             ],
         }
         config_path = tmp_path / "config.toml"
-        config_path.write_bytes(tomli_w.dumps(toml_data))
+        config_path.write_text(tomli_w.dumps(toml_data), encoding="utf-8")
 
         config = load_config(str(config_path), repo_path=str(tmp_path))
         assert config.postprocess.strict is True
@@ -187,6 +187,10 @@ fix_links          = true
 },
 ```
 Remove any old `"postprocess_strict"` or `"postprocess_fix_links"` keys from the dict.
+- Update `_render_config()` to print the new section:
+```python
+_logger.info("Postprocess", **payload["postprocess"])
+```
 
 - [ ] **Step 8: Migrate tests**
 
@@ -222,7 +226,7 @@ fix_links          = true        # validate and rewrite internal links
 
 - [ ] **Step 10: Add pylatexenc to pyproject.toml**
 
-Add `"pylatexenc>=3.0"` to the `dependencies` list in `pyproject.toml`.
+Add `"pylatexenc>=2.10"` to the `dependencies` list in `pyproject.toml`.
 
 - [ ] **Step 11: Run all tests**
 
