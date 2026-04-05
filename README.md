@@ -24,7 +24,12 @@ CodeWiki parses your repository with language-aware analyzers (AST + tree-sitter
 pip install git+https://github.com/nerdneilsfield/CodeWiki.git
 ```
 
-Requires Python 3.12+ and Node.js 14+ (for Mermaid validation).
+Requires Python 3.12+ and Node.js 14+.
+
+```bash
+# Required: Mermaid CLI for diagram validation during post-processing
+npm install -g @mermaid-js/mermaid-cli
+```
 
 ### Configure
 
