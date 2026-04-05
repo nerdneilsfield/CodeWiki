@@ -27,7 +27,8 @@ max_tokens                = 32768
 max_token_per_module      = 36369
 max_token_per_leaf_module = 16000
 long_context_threshold    = 200000   # token count above this → long-context model
-max_input_tokens          = 800000   # source code truncation budget per module prompt
+max_input_tokens                = 800000   # source code truncation budget per module prompt
+long_context_max_input_tokens   = 800000   # token limit when using long-context model
 
 [generation]
 main_model         = "openai/gpt-4o-mini"

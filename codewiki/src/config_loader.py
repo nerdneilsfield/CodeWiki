@@ -290,6 +290,7 @@ def _build_codewiki_config(
             else int(tokens.get("max_token_per_leaf_module", DEFAULT_MAX_TOKEN_PER_LEAF_MODULE))
         ),
         max_input_tokens=int(tokens.get("max_input_tokens", 800_000)),
+        long_context_max_input_tokens=int(tokens.get("long_context_max_input_tokens", 800_000)),
         max_concurrent=(
             overrides.max_concurrent
             if overrides.max_concurrent is not None

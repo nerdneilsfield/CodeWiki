@@ -359,7 +359,8 @@ max_tokens                = 32768
 max_token_per_module      = 36369
 max_token_per_leaf_module = 16000
 long_context_threshold    = 200000
-max_input_tokens          = 800000   # truncation budget per prompt (chars/3)
+max_input_tokens              = 800000   # truncation budget per prompt
+long_context_max_input_tokens = 800000   # limit for long-context model requests
 
 [generation]
 # All model fields use "provider_name/model_name" format.

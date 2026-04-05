@@ -81,6 +81,7 @@ class CodeWikiConfig(BaseModel):
     long_context_model: str | None = None
     long_context_fallback: list[str] = Field(default_factory=list)
     long_context_threshold: int = 200_000
+    long_context_max_input_tokens: int = 800_000
 
     max_tokens: int = 32_768
     max_token_per_module: int = 36_369

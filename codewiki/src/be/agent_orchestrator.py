@@ -417,7 +417,7 @@ class AgentOrchestrator:
                 deps=deps,
                 usage_limits=UsageLimits(
                     request_limit=None,
-                    request_tokens_limit=None
+                    request_tokens_limit=self.config.long_context_max_input_tokens
                     if _use_long_context
                     else self.config.max_input_tokens,
                 ),
