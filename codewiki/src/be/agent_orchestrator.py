@@ -297,6 +297,7 @@ class AgentOrchestrator:
             core_component_ids=core_component_ids,
             components=components,
             module_tree=module_tree,
+            max_input_tokens=self.config.max_input_tokens,
         )
 
         # v2: append evidence-rich context pack to user prompt

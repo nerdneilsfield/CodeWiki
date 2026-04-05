@@ -85,6 +85,7 @@ class CodeWikiConfig(BaseModel):
     max_tokens: int = 32_768
     max_token_per_module: int = 36_369
     max_token_per_leaf_module: int = 16_000
+    max_input_tokens: int = 800_000
 
     max_concurrent: int = 3
     max_retries: int = 2

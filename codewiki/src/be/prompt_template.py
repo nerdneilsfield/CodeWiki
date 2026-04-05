@@ -1063,6 +1063,7 @@ def format_user_prompt(
     core_component_ids: list[str],
     components: Dict[str, Any],
     module_tree: dict[str, Any],
+    max_input_tokens: int = 800_000,
 ) -> str:
     """
     Format the user prompt with module name and organized core component codes.
@@ -1185,7 +1186,7 @@ def format_user_prompt(
     # ── Token budget enforcement ──────────────────────────────────────────
     # If total file content exceeds the budget, iteratively truncate the
     # longest files using a head (60%) + tail (40%) strategy.
-    _TOKEN_BUDGET = 800_000  # leave room for system prompt + response
+    _TOKEN_BUDGET = max_input_tokens
 
     def _estimate_tokens(text: str) -> int:
         return len(text) // 3  # rough estimate: 1 token ≈ 3 chars
@@ -1204,11 +1205,13 @@ def format_user_prompt(
         )
 
     total_file_tokens = sum(_estimate_tokens(c) for _, c in _file_contents.values())
+    _original_tokens = total_file_tokens
     if total_file_tokens > _TOKEN_BUDGET:
         logger.info(
-            "File content ~%dK tokens exceeds budget %dK — truncating",
+            "📏 File content ~%dK tokens exceeds budget %dK — truncating %d files",
             total_file_tokens // 1000,
             _TOKEN_BUDGET // 1000,
+            len(_file_contents),
         )
         # Iteratively truncate the longest files until under budget
         _MAX_ROUNDS = 10
@@ -1248,8 +1251,10 @@ def format_user_prompt(
             if not made_progress:
                 break  # all files at minimum size
         logger.info(
-            "After truncation: ~%dK tokens (%s budget)",
+            "✂️ Truncation complete: %dK → %dK tokens (%d rounds, %s budget)",
+            _original_tokens // 1000,
             total_file_tokens // 1000,
+            _round + 1,
             "within" if total_file_tokens <= _TOKEN_BUDGET else "STILL OVER",
         )
 

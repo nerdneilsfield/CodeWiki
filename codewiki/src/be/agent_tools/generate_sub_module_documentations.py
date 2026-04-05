@@ -306,6 +306,7 @@ async def generate_sub_module_documentation(
                         core_component_ids=core_component_ids,
                         components=sub_deps.components,
                         module_tree=sub_deps.module_tree,
+                        max_input_tokens=sub_deps.config.max_input_tokens,
                     )
                     + f"\n\nWrite your documentation to the file: {assigned_filename}",
                     deps=sub_deps,

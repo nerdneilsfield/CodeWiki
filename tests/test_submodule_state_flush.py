@@ -40,6 +40,7 @@ async def test_submodule_completion_flushes_state(tmp_path):
             output_language="en",
             max_token_per_leaf_module=16_000,
             long_context_threshold=200_000,
+            max_input_tokens=800_000,
         ),
         custom_instructions=None,
         module_tree_manager=None,
