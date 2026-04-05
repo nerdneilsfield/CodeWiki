@@ -1114,16 +1114,37 @@ def format_user_prompt(
             grouped_components[path] = []
         grouped_components[path].append(component_id)
 
+    # When there are too many components, use compact mode (name + type only)
+    # to avoid component metadata dominating the token budget.
+    # Reserve half the budget for metadata, half for file content.
+    _metadata_budget = max_input_tokens // 2
+    _total_components = len(core_component_ids)
+    _compact_mode = _total_components > 500  # heuristic: >500 components → compact
+    if _compact_mode:
+        logger.info(
+            "📦 Compact component mode: %d components (metadata budget %dK)",
+            _total_components,
+            _metadata_budget // 1000,
+        )
+
     core_component_codes = ""
     _file_contents: dict[str, tuple[str, str]] = {}  # path → (lang, content)
+    _metadata_tokens = 0
+    _metadata_overflow = False
     for path, component_ids_in_file in grouped_components.items():
         core_component_codes += f"# File: {path}\n\n"
         core_component_codes += f"## Core Components in this file:\n"
 
         for component_id in component_ids_in_file:
             node = components[component_id]
-            # Component identity
             comp_type = node.component_type or node.node_type or "unknown"
+
+            # In compact mode or when metadata budget is exceeded, only list name + type
+            if _compact_mode or _metadata_overflow:
+                core_component_codes += f"- {component_id} ({comp_type})\n"
+                continue
+
+            # Full metadata mode
             core_component_codes += f"- **{component_id}** ({comp_type})"
             if node.base_classes:
                 core_component_codes += f" extends {', '.join(node.base_classes)}"
@@ -1169,6 +1190,17 @@ def format_user_prompt(
             deps_external = node.depends_on - module_ids
             if deps_external:
                 core_component_codes += f"  External deps: {', '.join(sorted(deps_external))}\n"
+
+            # Check metadata budget
+            _metadata_tokens = len(core_component_codes) // 3  # fast estimate
+            if _metadata_tokens > _metadata_budget:
+                _metadata_overflow = True
+                logger.info(
+                    "📦 Switching to compact mode at component %d/%d (~%dK metadata tokens)",
+                    len([1 for p in grouped_components for _ in grouped_components[p]]),
+                    _total_components,
+                    _metadata_tokens // 1000,
+                )
 
         ext = "." + path.split(".")[-1] if "." in path else ""
         lang = EXTENSION_TO_LANGUAGE.get(ext, ext.lstrip(".") or "text")
