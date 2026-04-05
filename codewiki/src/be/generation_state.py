@@ -279,6 +279,17 @@ class GenerationStateManager:
             task.mark_completed(content_hash=content_hash, model=model, input_hash=input_hash)
             self._dirty = True
 
+    async def mark_ready(self, doc_id: str) -> None:
+        """Reset a task to 'ready' (e.g. after cancellation)."""
+        async with self._lock:
+            task = self._state.get_task(doc_id)
+            if task is None:
+                return  # task may not exist yet
+            if task.status == "running":
+                task.status = "ready"
+                task.updated_at = _utcnow()
+                self._dirty = True
+
     async def mark_failed(self, doc_id: str, error: str) -> None:
         async with self._lock:
             task = self._state.get_task(doc_id)

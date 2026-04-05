@@ -128,29 +128,28 @@ async def generate_sub_module_documentation(
             )
         sub_module_specs = filtered
 
-        # add the sub-module to the module tree (preserve existing entries)
-        value = deps.module_tree
-        for key in deps.path_to_current_module:
-            value = value[key]["children"]
-        for sub_module_name, core_component_ids in sub_module_specs.items():
-            if sub_module_name not in value:
-                value[sub_module_name] = {"components": core_component_ids, "children": {}}
-            else:
-                # Only refresh components; keep existing _completed / children
-                value[sub_module_name]["components"] = core_component_ids
-
-        # Persist the updated tree immediately so the sidebar stays accurate even if
-        # the agent fails later (after sub-module .md files have already been created).
+        # Persist sub-module tree entries via tree_manager (single write channel).
+        # Do NOT modify deps.module_tree directly — it's a shared snapshot.
+        new_children = {
+            name: {"components": ids, "children": {}} for name, ids in sub_module_specs.items()
+        }
         if deps.module_tree_manager:
-            new_children = {
-                name: {"components": ids, "children": {}} for name, ids in sub_module_specs.items()
-            }
             await deps.module_tree_manager.update_children(
                 deps.path_to_current_module, new_children
             )
         else:
+            # Fallback: load → merge → save (no tree_manager available)
             module_tree_path = os.path.join(deps.absolute_docs_path, MODULE_TREE_FILENAME)
-            file_manager.save_json(deps.module_tree, module_tree_path)
+            tree_copy = file_manager.load_json(module_tree_path) or deps.module_tree
+            node = tree_copy
+            for key in deps.path_to_current_module:
+                node = node[key]["children"]
+            for name, info in new_children.items():
+                if name not in node:
+                    node[name] = info
+                else:
+                    node[name]["components"] = info["components"]
+            file_manager.save_json(tree_copy, module_tree_path)
 
         if deps.state_mgr and deps.gen_state:
             discovered_parent_id = doc_id_for_path(deps.module_tree, deps.path_to_current_module)
@@ -279,6 +278,8 @@ async def generate_sub_module_documentation(
             path_to_current_module=list(deps.path_to_current_module) + [sub_module_name],
             current_depth=deps.current_depth + 1,
             assigned_doc_filename=assigned_filename,
+            registry={},  # H-1: isolate EditTool file_history per sub-agent
+            _dispatched_sub_modules=set(),  # C-2: isolate dedup set per sub-agent
         )
 
         _sub_retry_delays = [5, 15]

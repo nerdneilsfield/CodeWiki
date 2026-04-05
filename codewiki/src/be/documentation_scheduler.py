@@ -452,17 +452,13 @@ async def run_module_queue(
 
             except CancellationError:
                 logger.info("⏹ Task '%s' cancelled — resetting to ready", label)
-                # 取消后将 task 状态从 running 重置为 ready，避免状态停留在 running
-                if state_mgr and gen_state:
+                if state_mgr:
                     cancelled_doc_id = (
                         "overview:root"
                         if key == ROOT_KEY
                         else doc_id_for_path(graph_tree, all_tasks[key][0])
                     )
-                    task_obj = gen_state.get_task(cancelled_doc_id)
-                    if task_obj and task_obj.status == "running":
-                        task_obj.status = "ready"
-                        task_obj.updated_at = datetime.now(timezone.utc).isoformat()
+                    await state_mgr.mark_ready(cancelled_doc_id)
             except Exception as e:
                 logger.error("✗ Failed to process '%s' after all retries: %s", label, e)
                 logger.error(traceback.format_exc())
