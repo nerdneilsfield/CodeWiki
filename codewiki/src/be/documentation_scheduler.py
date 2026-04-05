@@ -201,6 +201,14 @@ async def run_module_queue(
         return base + random.uniform(0, base * 0.5)
 
     def _is_context_length_error(exc: Exception) -> bool:
+        # pydantic-ai's own token limit check
+        try:
+            from pydantic_ai.exceptions import UsageLimitExceeded
+
+            if isinstance(exc, UsageLimitExceeded):
+                return True
+        except ImportError:
+            pass
         if isinstance(exc, openai.APIStatusError) and exc.status_code == 400:
             msg = str(exc)
             return (

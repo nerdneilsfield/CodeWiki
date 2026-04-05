@@ -417,7 +417,9 @@ class AgentOrchestrator:
                 deps=deps,
                 usage_limits=UsageLimits(
                     request_limit=None,
-                    request_tokens_limit=_absolute_max,
+                    # Don't set request_tokens_limit — multi-turn tool calls
+                    # accumulate context naturally. Model's own context limit
+                    # will reject oversized requests, handled by _is_context_length_error.
                 ),
                 event_stream_handler=agent_progress_handler,
             )
