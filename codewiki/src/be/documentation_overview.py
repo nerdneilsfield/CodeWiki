@@ -21,59 +21,103 @@ from codewiki.src.utils import content_hash, doc_id_for_path, file_manager, find
 logger = logging.getLogger(__name__)
 
 
-def _truncate_child_doc(text: str, max_chars: int = 8000) -> str:
-    """Truncate a child module doc keeping first paragraph intact + tail.
+def _split_paragraphs(text: str) -> list[str]:
+    """Split text into paragraphs (separated by blank lines)."""
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for line in text.split("\n"):
+        if not line.strip() and current:
+            paragraphs.append("\n".join(current))
+            current = []
+        else:
+            current.append(line)
+    if current:
+        paragraphs.append("\n".join(current))
+    return paragraphs
 
-    Strategy: keep the first paragraph (everything up to the first blank
-    line after content starts) in full, then head (60%) + tail (40%) of
-    the remainder, capped at *max_chars* total.
+
+def _budget_child_docs(
+    docs: dict[str, str],
+    max_tokens: int,
+) -> dict[str, str]:
+    """Progressively fill child docs into a token budget.
+
+    Strategy (from minimal to full):
+    1. Start with first paragraph + last paragraph of each doc
+    2. If budget remains, add 2nd paragraph to each doc
+    3. Continue adding paragraphs until budget is full
+
+    This ensures every module gets at least its summary and conclusion,
+    then detail is added uniformly across all modules.
     """
-    if len(text) <= max_chars:
-        return text
 
-    lines = text.split("\n")
+    def _estimate_tokens(text: str) -> int:
+        return len(text) // 3
 
-    # Find end of first paragraph (first blank line after non-blank content)
-    first_para_end = 0
-    found_content = False
-    for i, line in enumerate(lines):
-        if line.strip():
-            found_content = True
-        elif found_content:
-            first_para_end = i
+    # Split all docs into paragraphs
+    doc_paras: dict[str, list[str]] = {}
+    for name, text in docs.items():
+        paras = _split_paragraphs(text)
+        doc_paras[name] = paras if paras else [""]
+
+    # Phase 1: first paragraph + last paragraph for each doc
+    included: dict[str, list[int]] = {}  # name → list of included paragraph indices
+    for name, paras in doc_paras.items():
+        if len(paras) <= 2:
+            included[name] = list(range(len(paras)))
+        else:
+            included[name] = [0, len(paras) - 1]
+
+    def _build_result() -> dict[str, str]:
+        result = {}
+        for name, paras in doc_paras.items():
+            idx_set = included[name]
+            parts = []
+            for i in sorted(idx_set):
+                parts.append(paras[i])
+            omitted = len(paras) - len(idx_set)
+            if omitted > 0:
+                # Insert truncation marker between included parts
+                text = "\n\n".join(parts)
+                text += f"\n\n_({omitted} sections omitted)_"
+            else:
+                text = "\n\n".join(parts)
+            result[name] = text
+        return result
+
+    def _total_tokens() -> int:
+        return sum(_estimate_tokens(t) for t in _build_result().values())
+
+    # Phase 2: progressively add middle paragraphs
+    # Find the max number of paragraphs across all docs
+    max_paras = max((len(p) for p in doc_paras.values()), default=0)
+
+    # Add paragraphs layer by layer: 2nd paragraph, then 3rd, etc.
+    # (index 1, then 2, ... skipping 0 and last which are already included)
+    for para_idx in range(1, max_paras - 1):
+        if _total_tokens() >= max_tokens:
             break
-    else:
-        first_para_end = len(lines)
+        for name, paras in doc_paras.items():
+            if para_idx >= len(paras) - 1:
+                continue  # skip: out of range or is the last paragraph
+            if para_idx in included[name]:
+                continue  # already included
+            # Try adding this paragraph
+            included[name] = sorted(set(included[name]) | {para_idx})
+            if _total_tokens() > max_tokens:
+                # Over budget — remove it and stop this layer
+                included[name] = [i for i in included[name] if i != para_idx]
+                break
 
-    first_para = "\n".join(lines[:first_para_end])
-    rest_lines = lines[first_para_end:]
-
-    if not rest_lines or len(first_para) >= max_chars:
-        return first_para[:max_chars] + "\n\n_(truncated)_"
-
-    # Budget for the rest after first paragraph
-    rest_budget_chars = max_chars - len(first_para)
-    rest_text = "\n".join(rest_lines)
-
-    if len(rest_text) <= rest_budget_chars:
-        return text
-
-    # head 60% + tail 40% of rest
-    budget_lines = max(rest_budget_chars // 80, 6)  # ~80 chars per line estimate
-    head_n = int(budget_lines * 0.6)
-    tail_n = budget_lines - head_n
-    omitted = len(rest_lines) - head_n - tail_n
-
-    if omitted <= 0:
-        return text
-
-    truncated_rest = (
-        "\n".join(rest_lines[:head_n])
-        + f"\n\n... ({omitted} lines truncated) ...\n\n"
-        + "\n".join(rest_lines[-tail_n:])
+    result = _build_result()
+    total = _total_tokens()
+    logger.info(
+        "📏 Overview docs: %d modules, ~%dK tokens (budget %dK)",
+        len(result),
+        total // 1000,
+        max_tokens // 1000,
     )
-
-    return first_para + "\n" + truncated_rest
+    return result
 
 
 @dataclass
@@ -111,6 +155,7 @@ def build_overview_structure(
 
     if len(module_path) == 0:
         result: Dict[str, Any] = {}
+        raw_docs: dict[str, str] = {}
         for name, info in module_tree.items():
             entry: Dict[str, Any] = {"is_target_for_overview_generation": True}
             children = info.get("children")
@@ -127,19 +172,15 @@ def build_overview_structure(
             if child_path is None:
                 child_path = find_module_doc(working_dir, [name])
             if child_path:
-                entry["docs"] = _truncate_child_doc(file_manager.load_text(child_path))
+                raw_docs[name] = file_manager.load_text(child_path)
             else:
                 logger.warning("Module docs not found for [%s]", name)
-                entry["docs"] = ""
+                raw_docs[name] = ""
             result[name] = entry
 
-        # Log total overview input size
-        total_chars = sum(len(e.get("docs", "")) for e in result.values())
-        logger.info(
-            "📏 Overview structure: %d children, ~%dK chars",
-            len(result),
-            total_chars // 1000,
-        )
+        budgeted = _budget_child_docs(raw_docs, ctx.config.max_input_tokens)
+        for name in result:
+            result[name]["docs"] = budgeted.get(name, "")
         return result
 
     result = strip_tree_for_overview(module_tree)
@@ -158,6 +199,7 @@ def build_overview_structure(
     children = target_original.get("children") or {}
     target_node = node[module_path[-1]]
     target_children = target_node.setdefault("children", {})
+    raw_docs: dict[str, str] = {}
     for child_name in children:
         if child_name not in target_children:
             target_children[child_name] = {}
@@ -172,20 +214,14 @@ def build_overview_structure(
         if child_path is None:
             child_path = find_module_doc(working_dir, module_path + [child_name])
         if child_path:
-            target_children[child_name]["docs"] = _truncate_child_doc(
-                file_manager.load_text(child_path)
-            )
+            raw_docs[child_name] = file_manager.load_text(child_path)
         else:
             logger.warning("Module docs not found for %s", module_path + [child_name])
-            target_children[child_name]["docs"] = ""
+            raw_docs[child_name] = ""
 
-    total_chars = sum(len(c.get("docs", "")) for c in target_children.values())
-    logger.info(
-        "📏 Overview structure for '%s': %d children, ~%dK chars",
-        "/".join(module_path),
-        len(target_children),
-        total_chars // 1000,
-    )
+    budgeted = _budget_child_docs(raw_docs, ctx.config.max_input_tokens)
+    for child_name in target_children:
+        target_children[child_name]["docs"] = budgeted.get(child_name, "")
     return result
 
 
