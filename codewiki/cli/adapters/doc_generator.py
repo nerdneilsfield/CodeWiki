@@ -148,6 +148,11 @@ class CLIDocumentationGenerator:
                         os.remove(os.path.join(internal_dir, fname))
                     except OSError:
                         pass
+            for tree_file in ("module_tree.json", "first_module_tree.json"):
+                tree_path = os.path.join(working_dir, tree_file)
+                if os.path.exists(tree_path):
+                    os.remove(tree_path)
+                    logging.getLogger(__name__).info("--no-cache: removed %s", tree_file)
 
         self.progress_tracker.start_stage(1, "Documentation Generation")
         if self.verbose:

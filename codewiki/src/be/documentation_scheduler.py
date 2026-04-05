@@ -5,6 +5,7 @@ import logging
 import random
 import time
 import traceback
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import openai
@@ -236,58 +237,74 @@ async def run_module_queue(
                 parent_key = child_to_parent.get(key)
                 if parent_key is not None:
                     pending_count[parent_key] -= 1
+                    # 防御性检查：pending_count 不应为负，可能是重复完成导致
+                    if pending_count[parent_key] < 0:
+                        logger.warning(
+                            "pending_count for '%s' went negative — possible duplicate completion",
+                            parent_key,
+                        )
+                        pending_count[parent_key] = 0
                     if pending_count[parent_key] == 0:
                         del pending_count[parent_key]
                         if gen_state and state_mgr:
-                            parent_doc_id = (
-                                "overview:root"
-                                if parent_key == ROOT_KEY
-                                else doc_id_for_path(graph_tree, all_tasks[parent_key][0])
-                            )
-                            parent_task = gen_state.get_task(parent_doc_id)
-                            if parent_task:
-                                if parent_key == ROOT_KEY:
-                                    parent_components: list[str] = []
-                                    child_keys = [
-                                        key
-                                        for key, value in child_to_parent.items()
-                                        if value == ROOT_KEY
-                                    ]
-                                else:
-                                    _, _, parent_info, _ = all_tasks[parent_key]
-                                    parent_components = sorted(parent_info.get("components", []))
-                                    child_keys = [
-                                        key
-                                        for key, value in child_to_parent.items()
-                                        if value == parent_key
-                                    ]
-                                child_doc_ids = [
+                            # 通过 state_mgr 的锁保护对 gen_state 的读取，避免并发竞态
+                            stale_update: dict[str, str] | None = None
+                            async with state_mgr._lock:
+                                parent_doc_id = (
                                     "overview:root"
-                                    if child_key == ROOT_KEY
-                                    else doc_id_for_path(graph_tree, all_tasks[child_key][0])
-                                    for child_key in child_keys
-                                ]
-                                child_content_hashes = []
-                                for child_doc_id in child_doc_ids:
-                                    child_task = gen_state.get_task(child_doc_id)
-                                    if child_task and child_task.content_hash:
-                                        child_content_hashes.append(child_task.content_hash)
-                                new_hash = stable_hash(
-                                    [
-                                        *parent_components,
-                                        *child_doc_ids,
-                                        *child_content_hashes,
-                                        parent_task.language,
-                                        "v7",
-                                    ]
+                                    if parent_key == ROOT_KEY
+                                    else doc_id_for_path(graph_tree, all_tasks[parent_key][0])
                                 )
-                                if (
-                                    parent_task.status == "completed"
-                                    and new_hash != parent_task.input_hash
-                                ):
-                                    await state_mgr.mark_stale({parent_doc_id: new_hash})
-                                elif parent_task.status != "completed":
-                                    parent_task.input_hash = new_hash
+                                parent_task = gen_state.get_task(parent_doc_id)
+                                if parent_task:
+                                    if parent_key == ROOT_KEY:
+                                        parent_components: list[str] = []
+                                        child_keys = [
+                                            key
+                                            for key, value in child_to_parent.items()
+                                            if value == ROOT_KEY
+                                        ]
+                                    else:
+                                        _, _, parent_info, _ = all_tasks[parent_key]
+                                        parent_components = sorted(
+                                            parent_info.get("components", [])
+                                        )
+                                        child_keys = [
+                                            key
+                                            for key, value in child_to_parent.items()
+                                            if value == parent_key
+                                        ]
+                                    child_doc_ids = [
+                                        "overview:root"
+                                        if child_key == ROOT_KEY
+                                        else doc_id_for_path(graph_tree, all_tasks[child_key][0])
+                                        for child_key in child_keys
+                                    ]
+                                    child_content_hashes = []
+                                    for child_doc_id in child_doc_ids:
+                                        child_task = gen_state.get_task(child_doc_id)
+                                        if child_task and child_task.content_hash:
+                                            child_content_hashes.append(child_task.content_hash)
+                                    new_hash = stable_hash(
+                                        [
+                                            *parent_components,
+                                            *child_doc_ids,
+                                            *child_content_hashes,
+                                            parent_task.language,
+                                            "v7",
+                                        ]
+                                    )
+                                    if (
+                                        parent_task.status == "completed"
+                                        and new_hash != parent_task.input_hash
+                                    ):
+                                        # mark_stale 内部也会获取锁，先记录，释放锁后再调用避免死锁
+                                        stale_update = {parent_doc_id: new_hash}
+                                    elif parent_task.status != "completed":
+                                        parent_task.input_hash = new_hash
+                            # mark_stale 自带锁，放在 async with 外面避免死锁
+                            if stale_update is not None:
+                                await state_mgr.mark_stale(stale_update)
                         if parent_key == ROOT_KEY:
                             logger.info("🔓 All top-level modules done — enqueueing root overview")
                         else:
@@ -362,7 +379,17 @@ async def run_module_queue(
                             )
                             if cancel_token:
                                 cancel_token.check()
-                            await asyncio.sleep(actual_delay)
+                                # Cancel-aware sleep：每秒检查一次取消信号，避免长时间阻塞
+                                remaining = actual_delay
+                                while remaining > 0:
+                                    await asyncio.sleep(min(1.0, remaining))
+                                    remaining -= 1.0
+                                    if cancel_token.is_cancelled:
+                                        raise CancellationError(
+                                            "Operation cancelled during retry wait"
+                                        )
+                            else:
+                                await asyncio.sleep(actual_delay)
                     try:
                         if cancel_token:
                             cancel_token.check()
@@ -399,6 +426,14 @@ async def run_module_queue(
                                 label,
                             )
                             break
+                        # 不可重试的 LLM 错误直接退出重试循环
+                        if isinstance(exc, LLMError) and not exc.is_retryable:
+                            logger.warning(
+                                "  ✗ '%s' non-retryable error — skipping retries: %s",
+                                label,
+                                exc,
+                            )
+                            break
 
                 if last_exc is not None:
                     raise last_exc
@@ -408,7 +443,18 @@ async def run_module_queue(
                 logger.info("✓ Task '%s' completed in %.1fs%s", label, task_elapsed, model_suffix)
 
             except CancellationError:
-                logger.info("⏹ Task '%s' cancelled — not marking as failed", label)
+                logger.info("⏹ Task '%s' cancelled — resetting to ready", label)
+                # 取消后将 task 状态从 running 重置为 ready，避免状态停留在 running
+                if state_mgr and gen_state:
+                    cancelled_doc_id = (
+                        "overview:root"
+                        if key == ROOT_KEY
+                        else doc_id_for_path(graph_tree, all_tasks[key][0])
+                    )
+                    task_obj = gen_state.get_task(cancelled_doc_id)
+                    if task_obj and task_obj.status == "running":
+                        task_obj.status = "ready"
+                        task_obj.updated_at = datetime.now(timezone.utc).isoformat()
             except Exception as e:
                 logger.error("✗ Failed to process '%s' after all retries: %s", label, e)
                 logger.error(traceback.format_exc())

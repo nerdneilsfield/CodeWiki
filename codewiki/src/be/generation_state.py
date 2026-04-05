@@ -217,6 +217,11 @@ class GenerationState:
                 continue
             state.tasks[task.doc_id] = task
             state._output_file_index[task.output_file] = task.doc_id
+        # 崩溃恢复：将上次运行中断的 task 重置为 ready，避免僵死
+        for task in state.tasks.values():
+            if task.status == "running":
+                task.status = "ready"
+                logger.info("Task %s was running at shutdown — reset to ready", task.doc_id)
         return state
 
 

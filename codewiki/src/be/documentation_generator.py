@@ -503,6 +503,8 @@ class DocumentationGenerator:
         # Ctrl+C during later stages does not invalidate the cache.
         existing_state.repo_commit = self.commit_id or ""
         existing_state.config_fingerprint = current_config_fp
+        # NOTE: _state_mgr not yet created (StateInitStage hasn't run),
+        # so direct _save() is safe here.
         existing_state._save(state_path)
 
         try:
@@ -618,6 +620,7 @@ class DocumentationGenerator:
             tree_manager = ModuleTreeManager(
                 module_tree, os.path.join(working_dir, MODULE_TREE_FILENAME)
             )
+            self._tree_manager = tree_manager  # expose for pipeline flush
             graph_tree = await tree_manager.get_snapshot()
             logger.info(
                 "📊 Running queue on %s top-level modules (concurrency=%s)",
@@ -632,10 +635,11 @@ class DocumentationGenerator:
                 desc="Generating docs",
                 include_root=False,
             )
-            fill_summary = await self._fill_missing_module_docs(
-                working_dir, components, tree_manager, self.config.max_retries
-            )
-            summary.extend(fill_summary)
+            if not (self.cancel_token and self.cancel_token.is_cancelled):
+                fill_summary = await self._fill_missing_module_docs(
+                    working_dir, components, tree_manager, self.config.max_retries
+                )
+                summary.extend(fill_summary)
 
             logger.info("📚 Generating repository overview")
             await self.generate_parent_module_docs([], working_dir, tree_manager)

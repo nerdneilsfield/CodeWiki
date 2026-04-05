@@ -141,15 +141,23 @@ class PipelineRunner:
 async def _flush_all_state(ctx: PipelineContext) -> None:
     """Best-effort flush of all stateful managers."""
     flushed: list[str] = []
+    # state_mgr may live on ctx directly or on the generator instance
+    state_mgr = ctx.state_mgr
+    if not state_mgr and ctx.generator:
+        state_mgr = getattr(ctx.generator, "_state_mgr", None)
     try:
-        if ctx.state_mgr and hasattr(ctx.state_mgr, "flush"):
-            await ctx.state_mgr.flush()
+        if state_mgr and hasattr(state_mgr, "flush"):
+            await state_mgr.flush()
             flushed.append("generation_state")
     except Exception as exc:
         logger.warning("Failed to flush generation state: %s", exc)
+
+    tree_manager = ctx.tree_manager
+    if not tree_manager and ctx.generator:
+        tree_manager = getattr(ctx.generator, "_tree_manager", None)
     try:
-        if ctx.tree_manager and hasattr(ctx.tree_manager, "flush"):
-            ctx.tree_manager.flush()
+        if tree_manager and hasattr(tree_manager, "flush"):
+            tree_manager.flush()  # synchronous method
             flushed.append("module_tree")
     except Exception as exc:
         logger.warning("Failed to flush module tree: %s", exc)

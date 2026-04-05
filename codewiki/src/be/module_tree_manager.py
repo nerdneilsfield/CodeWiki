@@ -7,6 +7,7 @@ an ``asyncio.Lock`` so concurrent saves never clobber each other.
 """
 
 import asyncio
+import threading
 from copy import deepcopy
 from typing import Dict, Any, List
 
@@ -20,6 +21,7 @@ class ModuleTreeManager:
         self._tree = tree
         self._persist_path = persist_path
         self._lock = asyncio.Lock()
+        self._sync_lock = threading.Lock()
 
     async def get_snapshot(self) -> Dict[str, Any]:
         """Return a deep copy of the entire tree (safe for the caller to mutate)."""
@@ -53,4 +55,9 @@ class ModuleTreeManager:
     async def save(self):
         """Force-persist the current in-memory tree to disk."""
         async with self._lock:
+            file_manager.save_json(self._tree, self._persist_path)
+
+    def flush(self) -> None:
+        """Synchronously persist the current in-memory tree to disk."""
+        with self._sync_lock:
             file_manager.save_json(self._tree, self._persist_path)
