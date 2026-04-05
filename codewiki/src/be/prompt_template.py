@@ -1252,16 +1252,31 @@ def format_user_prompt(
             if not made_progress:
                 break  # all files at minimum size
 
-        # Nuclear option: if still over, drop file contents entirely
+        # Selective removal: drop files one by one (smallest first, they
+        # contribute least unique info) until under budget.
         if total_file_tokens > _TOKEN_BUDGET:
-            logger.warning(
-                "⚠️ Still over budget after %d rounds — dropping file contents, keeping signatures only",
-                _round + 1,
+            # Sort by content length ascending — drop the smallest files first
+            # (they're already truncated to minimum, removing them frees space
+            # for the larger, more important files to keep their remaining content)
+            drop_candidates = sorted(
+                _file_contents.keys(),
+                key=lambda p: len(_file_contents[p][1]),
             )
-            for path in list(_file_contents.keys()):
-                lang, _ = _file_contents[path]
-                _file_contents[path] = (lang, "// (file content omitted — prompt too large)")
-            total_file_tokens = sum(_estimate_tokens(c) for _, c in _file_contents.values())
+            dropped = 0
+            for path in drop_candidates:
+                if total_file_tokens <= _TOKEN_BUDGET:
+                    break
+                lang, content = _file_contents[path]
+                saved = _estimate_tokens(content)
+                _file_contents[path] = (lang, f"// (content omitted — see {path} directly)")
+                total_file_tokens -= saved
+                dropped += 1
+            if dropped:
+                logger.warning(
+                    "⚠️ Dropped content of %d/%d files to fit budget",
+                    dropped,
+                    len(_file_contents),
+                )
 
         logger.info(
             "✂️ Truncation complete: %dK → %dK tokens (%d rounds)",
