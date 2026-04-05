@@ -57,7 +57,13 @@ class DependencyGraphBuilder:
                 and sorted(key.get("include", [])) == sorted(self.config.include_patterns or [])
                 and sorted(key.get("exclude", [])) == sorted(self.config.exclude_patterns or [])
             ):
-                components = {k: Node.model_validate(v) for k, v in data["components"].items()}
+                repo_path = os.path.abspath(self.config.repo_path)
+                components = {}
+                for k, v in data["components"].items():
+                    # Rebuild absolute file_path from relative_path + current repo_path
+                    if v.get("relative_path") and not os.path.isabs(v.get("file_path", "")):
+                        v["file_path"] = os.path.join(repo_path, v["relative_path"])
+                    components[k] = Node.model_validate(v)
                 leaf_nodes = data["leaf_nodes"]
                 logger.info(
                     "Graph cache hit — %d components, %d leaves",
@@ -78,7 +84,14 @@ class DependencyGraphBuilder:
                     "include": self.config.include_patterns or [],
                     "exclude": self.config.exclude_patterns or [],
                 },
-                "components": {k: v.model_dump() for k, v in components.items()},
+                "components": {
+                    k: {
+                        **v.model_dump(),
+                        # Store relative path only — portable across machines
+                        "file_path": v.relative_path or v.file_path,
+                    }
+                    for k, v in components.items()
+                },
                 "leaf_nodes": leaf_nodes,
             }
             file_manager.ensure_directory(self.config.dependency_graph_dir)
