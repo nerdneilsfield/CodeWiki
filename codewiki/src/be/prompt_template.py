@@ -1188,8 +1188,10 @@ def format_user_prompt(
     # longest files using a head (60%) + tail (40%) strategy.
     _TOKEN_BUDGET = max_input_tokens
 
+    from codewiki.src.be.utils import count_tokens as _count_tokens
+
     def _estimate_tokens(text: str) -> int:
-        return len(text) // 3  # rough estimate: 1 token ≈ 3 chars
+        return _count_tokens(text)
 
     def _truncate_file(content: str, target_lines: int) -> str:
         lines = content.split("\n")

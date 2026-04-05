@@ -51,8 +51,10 @@ def _budget_child_docs(
     then detail is added uniformly across all modules.
     """
 
+    from codewiki.src.be.utils import count_tokens
+
     def _estimate_tokens(text: str) -> int:
-        return len(text) // 3
+        return count_tokens(text)
 
     # Split all docs into paragraphs
     doc_paras: dict[str, list[str]] = {}
