@@ -317,7 +317,24 @@ class AgentOrchestrator:
         assigned_filename = self._assigned_doc_filename(module_tree, module_path)
         user_prompt += f"\n\nWrite your documentation to the file: {assigned_filename}"
 
-        estimated_tokens = count_tokens(user_prompt) + _TOKEN_OVERHEAD
+        prompt_tokens = count_tokens(user_prompt)
+        estimated_tokens = prompt_tokens + _TOKEN_OVERHEAD
+        file_count = len(
+            set(
+                getattr(components[c], "relative_path", "")
+                for c in core_component_ids
+                if c in components
+            )
+        )
+        logger.info(
+            "📝 Prompt for '%s': ~%dK tokens (prompt %dK + overhead %dK, %d components, %d files)",
+            module_name,
+            estimated_tokens // 1000,
+            prompt_tokens // 1000,
+            _TOKEN_OVERHEAD // 1000,
+            len(core_component_ids),
+            file_count,
+        )
 
         # Create agent
         agent = self.create_agent(module_name, components, core_component_ids, estimated_tokens)
@@ -403,6 +420,11 @@ class AgentOrchestrator:
             return deps.module_tree, models_used
 
         except Exception as e:
-            logger.error(f"Error processing module {module_name}: {str(e)}")
+            logger.error(
+                "Error processing module %s (~%dK input tokens): %s",
+                module_name,
+                estimated_tokens // 1000,
+                e,
+            )
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
