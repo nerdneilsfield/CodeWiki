@@ -112,7 +112,9 @@ def _build_runtime_overrides(
         main_model=_normalize_model_override(base_config, main_model),
         cluster_model=_normalize_model_override(base_config, cluster_model),
         long_context_model=_normalize_model_override(base_config, long_context_model),
-        long_context_fallback=long_context_fallback,
+        long_context_fallback=[m.strip() for m in long_context_fallback.split(",") if m.strip()]
+        if long_context_fallback
+        else None,
         long_context_threshold=long_context_threshold,
         agent_instructions=merged_agent if merged_agent is not None else None,
     )

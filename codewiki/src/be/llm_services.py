@@ -153,7 +153,7 @@ def create_main_model(config: CodeWikiConfig):
 def create_fallback_models(config: CodeWikiConfig) -> FallbackModel:
     main = create_main_model(config)
 
-    fallback_names = [n.strip() for n in config.fallback_model.split(",") if n.strip()]
+    fallback_names = [n.strip() for n in config.fallback_model if n.strip()]
     fallbacks = []
     for name in fallback_names:
         if _has_provider_registry(config):
@@ -196,9 +196,7 @@ def create_long_context_model(config: CodeWikiConfig):
         )
 
     # Build fallback chain if long_context_fallback is configured
-    fallback_names = [
-        n.strip() for n in (config.long_context_fallback or "").split(",") if n.strip()
-    ]
+    fallback_names = [n.strip() for n in (config.long_context_fallback or []) if n.strip()]
     if not fallback_names:
         return primary
 

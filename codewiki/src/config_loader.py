@@ -43,7 +43,7 @@ class RuntimeOverrides:
     cluster_model: Optional[str] = None
     fallback_models: Optional[list[str]] = None
     long_context_model: Optional[str] = None
-    long_context_fallback: Optional[str] = None
+    long_context_fallback: Optional[list[str]] = None
     long_context_threshold: Optional[int] = None
     agent_instructions: Optional[dict[str, Any]] = None
 
@@ -260,9 +260,7 @@ def _build_codewiki_config(
             if overrides.cluster_model is not None
             else str(generation.get("cluster_model", ""))
         ),
-        fallback_model=",".join(str(item) for item in fallback_models)
-        if fallback_models
-        else "glm-4p5",
+        fallback_model=[str(item) for item in fallback_models] if fallback_models else ["glm-4p5"],
         long_context_model=(
             overrides.long_context_model
             if overrides.long_context_model is not None
@@ -271,7 +269,7 @@ def _build_codewiki_config(
         long_context_fallback=(
             overrides.long_context_fallback
             if overrides.long_context_fallback is not None
-            else generation.get("long_context_fallback", "")
+            else list(generation.get("long_context_fallback", []))
         ),
         long_context_threshold=(
             overrides.long_context_threshold

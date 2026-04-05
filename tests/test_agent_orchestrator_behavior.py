@@ -18,7 +18,7 @@ def _make_config(tmp_path):
         llm_api_key="x",
         main_model="test/main",
         cluster_model="test/cluster",
-        fallback_model="test/fallback",
+        fallback_model=["test/fallback"],
         long_context_model="test/long",
         long_context_threshold=100,
     )

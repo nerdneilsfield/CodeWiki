@@ -273,7 +273,7 @@ class GuideGenerator:
         # Build fallback chain: main → fallback(s) → long_context (last resort)
         models = [self.config.main_model]
         if self.config.fallback_model:
-            models.extend(n.strip() for n in self.config.fallback_model.split(",") if n.strip())
+            models.extend(n.strip() for n in self.config.fallback_model if n.strip())
         if self.config.long_context_model and self.config.long_context_model not in models:
             models.append(self.config.long_context_model)
 

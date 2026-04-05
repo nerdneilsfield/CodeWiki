@@ -11,7 +11,7 @@ def test_generate_logs_effective_config(caplog):
     config = MagicMock()
     config.main_model = "gpt-4o"
     config.cluster_model = "gpt-4o"
-    config.fallback_model = "glm-4p5"
+    config.fallback_model = ["glm-4p5"]
     config.max_tokens = 32768
     config.max_concurrent = 3
     config.output_language = "zh"

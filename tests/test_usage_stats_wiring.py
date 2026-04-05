@@ -16,7 +16,7 @@ def test_usage_stats_created_on_generator():
     config.long_context_model = None
     config.main_model = "test-model"
     config.cluster_model = "test-cluster"
-    config.fallback_model = ""
+    config.fallback_model = []
     config.max_tokens = 1024
     config.max_concurrent = 2
 

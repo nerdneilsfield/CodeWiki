@@ -105,7 +105,7 @@ def test_create_fallback_models_supports_cross_provider_chain(runtime_config):
     llm_services = _load_module("codewiki.src.be.llm_services", "codewiki/src/be/llm_services.py")
 
     runtime_config.main_model = "openai/gpt-4o-mini"
-    runtime_config.fallback_model = "claude/claude-sonnet-4-5-20250929,openai/gpt-4.1"
+    runtime_config.fallback_model = ["claude/claude-sonnet-4-5-20250929", "openai/gpt-4.1"]
     runtime_config.long_context_model = None
 
     created = [object(), object(), object()]
@@ -140,7 +140,7 @@ def test_model_factories_do_not_emit_openai_model_deprecation_warnings():
         llm_api_key="sk-test",
         main_model="test-main",
         cluster_model="test-cluster",
-        fallback_model="test-fallback",
+        fallback_model=["test-fallback"],
         long_context_model="test-long",
     )
 

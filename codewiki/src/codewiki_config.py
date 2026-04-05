@@ -77,9 +77,9 @@ class CodeWikiConfig(BaseModel):
     llm_api_key: str = ""
     main_model: str = ""
     cluster_model: str = ""
-    fallback_model: str = "glm-4p5"
+    fallback_model: list[str] = Field(default_factory=lambda: ["glm-4p5"])
     long_context_model: str | None = None
-    long_context_fallback: str = ""
+    long_context_fallback: list[str] = Field(default_factory=list)
     long_context_threshold: int = 200_000
 
     max_tokens: int = 32_768

@@ -50,7 +50,7 @@ class TestGuideGeneratorCancelToken:
             llm_api_key="sk-test",
             main_model="openai/model-a",
             cluster_model="openai/model-a",
-            fallback_model="openai/model-b,openai/model-c",
+            fallback_model=["openai/model-b", "openai/model-c"],
         )
         token = CancellationToken()
         gen = GuideGenerator(

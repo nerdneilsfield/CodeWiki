@@ -120,7 +120,7 @@ def _load_runtime_config(config_path: Path, *, resolve_secrets: bool = False) ->
 
 
 def _config_to_dict(config_path: str, cfg: CodeWikiConfig) -> dict[str, Any]:
-    fallback_models = [item.strip() for item in cfg.fallback_model.split(",") if item.strip()]
+    fallback_models = [item.strip() for item in cfg.fallback_model if item.strip()]
     return {
         "config_file": config_path,
         "generation": {
