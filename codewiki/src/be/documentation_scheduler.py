@@ -405,6 +405,13 @@ async def run_module_queue(
                     try:
                         if cancel_token:
                             cancel_token.check()
+                        if attempt > 0:
+                            logger.info(
+                                "  ▶ Retrying '%s' now (attempt %s/%s)",
+                                label,
+                                attempt,
+                                len(retry_delays),
+                            )
                         if key == ROOT_KEY:
                             if state_mgr:
                                 await state_mgr.mark_running("overview:root")
