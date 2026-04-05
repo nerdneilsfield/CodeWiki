@@ -97,6 +97,9 @@ class DependencyGraphBuilder:
             file_manager.ensure_directory(self.config.dependency_graph_dir)
             with open(self._cache_path(), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
+            logger.info(
+                "💾 Graph cache saved (%d components, %d leaves)", len(components), len(leaf_nodes)
+            )
         except Exception as e:
             logger.debug("Failed to save graph cache: %s", e)
 
@@ -112,6 +115,7 @@ class DependencyGraphBuilder:
         if cached is not None:
             return cached
 
+        logger.info("Graph cache miss — rebuilding AST")
         # Ensure output directory exists
         file_manager.ensure_directory(self.config.dependency_graph_dir)
 

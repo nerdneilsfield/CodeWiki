@@ -175,6 +175,7 @@ class GenerationState:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             os.replace(tmp_path, path)
+            logger.debug("💾 Generation state saved to %s", path)
         except Exception:
             try:
                 os.unlink(tmp_path)
@@ -217,6 +218,7 @@ class GenerationState:
                 continue
             state.tasks[task.doc_id] = task
             state._output_file_index[task.output_file] = task.doc_id
+        logger.debug("📂 Generation state loaded: %d tasks", len(state.tasks))
         # 崩溃恢复：将上次运行中断的 task 重置为 ready，避免僵死
         for task in state.tasks.values():
             if task.status == "running":
@@ -245,6 +247,7 @@ class GenerationStateManager:
                 return
             self._state._save(self._persist_path)
             self._dirty = False
+            logger.debug("💾 Generation state flushed (%d tasks)", len(self._state.tasks))
 
     async def add_task(self, task: DocTask) -> None:
         async with self._lock:

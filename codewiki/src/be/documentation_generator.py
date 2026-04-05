@@ -159,6 +159,7 @@ class DocumentationGenerator:
 
         metadata_path = os.path.join(working_dir, "metadata.json")
         file_manager.save_json(metadata, metadata_path)
+        logger.info("💾 Metadata written to %s", metadata_path)
         return metadata
 
     def get_processing_levels(
@@ -487,6 +488,7 @@ class DocumentationGenerator:
         # NOTE: _state_mgr not yet created (StateInitStage hasn't run),
         # so direct _save() is safe here.
         existing_state._save(state_path)
+        logger.debug("💾 Clustering state persisted")
 
         try:
             glossary = build_glossary(ctx.index_products) if ctx.index_products else {}

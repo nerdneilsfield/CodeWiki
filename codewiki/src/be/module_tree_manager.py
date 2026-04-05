@@ -7,11 +7,14 @@ an ``asyncio.Lock`` so concurrent saves never clobber each other.
 """
 
 import asyncio
+import logging
 import threading
 from copy import deepcopy
 from typing import Dict, Any, List
 
 from codewiki.src.utils import file_manager
+
+logger = logging.getLogger(__name__)
 
 
 class ModuleTreeManager:
@@ -51,6 +54,7 @@ class ModuleTreeManager:
                         "components", node[name].get("components", [])
                     )
             file_manager.save_json(self._tree, self._persist_path)
+            logger.debug("💾 Module tree saved")
 
     async def save(self):
         """Force-persist the current in-memory tree to disk."""
@@ -61,3 +65,4 @@ class ModuleTreeManager:
         """Synchronously persist the current in-memory tree to disk."""
         with self._sync_lock:
             file_manager.save_json(self._tree, self._persist_path)
+            logger.debug("💾 Module tree saved")

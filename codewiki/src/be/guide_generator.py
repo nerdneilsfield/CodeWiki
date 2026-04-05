@@ -129,6 +129,7 @@ class GuideGenerator:
 
     def _save_cache(self):
         file_manager.save_json(self.cache, self._cache_path())
+        logger.debug("💾 Guide cache saved")
 
     @staticmethod
     def _compute_combined_hash(file_paths: List[str], extra: str = "") -> str:
