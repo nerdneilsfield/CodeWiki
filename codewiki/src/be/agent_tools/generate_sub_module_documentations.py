@@ -310,7 +310,10 @@ async def generate_sub_module_documentation(
                     )
                     + f"\n\nWrite your documentation to the file: {assigned_filename}",
                     deps=sub_deps,
-                    usage_limits=UsageLimits(request_limit=None),
+                    usage_limits=UsageLimits(
+                        request_limit=None,
+                        request_tokens_limit=sub_deps.config.max_input_tokens,
+                    ),
                     event_stream_handler=agent_progress_handler,
                 )
                 _sub_elapsed = time.time() - _sub_t0

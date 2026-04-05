@@ -369,7 +369,10 @@ class AgentOrchestrator:
             result = await agent.run(
                 user_prompt,
                 deps=deps,
-                usage_limits=UsageLimits(request_limit=None),
+                usage_limits=UsageLimits(
+                    request_limit=None,
+                    request_tokens_limit=self.config.max_input_tokens,
+                ),
                 event_stream_handler=agent_progress_handler,
             )
             elapsed = time.time() - t0
