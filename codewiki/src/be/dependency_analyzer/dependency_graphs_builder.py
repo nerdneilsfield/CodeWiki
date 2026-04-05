@@ -86,7 +86,8 @@ class DependencyGraphBuilder:
                 },
                 "components": {
                     k: {
-                        **v.model_dump(),
+                        # mode="json" converts Set → list for JSON serialization
+                        **v.model_dump(mode="json"),
                         # Store relative path only — portable across machines
                         "file_path": v.relative_path or v.file_path,
                     }
