@@ -85,15 +85,17 @@ def test_create_agent_does_not_call_create_fallback_models_per_module():
 
 
 def test_create_agent_reuses_long_context_model_for_large_prompts():
-    """create_agent() must not rebuild long_context_model per module."""
-    from unittest.mock import patch
+    """create_long_context_model is called only once during __init__."""
+    from unittest.mock import patch, MagicMock
     from codewiki.src.be.agent_orchestrator import AgentOrchestrator
     import codewiki.src.be.agent_orchestrator as orch_mod
 
     cfg = _make_dummy_config(long_context_model="long-ctx-model")
-    with patch.object(
-        orch_mod, "create_long_context_model", wraps=orch_mod.create_long_context_model
-    ) as mock_clcm:
+    mock_lc = MagicMock(name="long-context-model")
+    with (
+        patch.object(orch_mod, "create_long_context_model", return_value=mock_lc) as mock_clcm,
+        patch.object(orch_mod, "Agent", return_value=MagicMock()),
+    ):
         orch = AgentOrchestrator(cfg)
         calls_after_init = mock_clcm.call_count  # exactly 1 call from __init__
 

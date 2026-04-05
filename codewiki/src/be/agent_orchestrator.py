@@ -104,6 +104,17 @@ class AgentOrchestrator:
         self.long_context_model = (
             create_long_context_model(config) if config.long_context_model else None
         )
+        # Build a routing model that transparently selects long-context when needed
+        if self.long_context_model:
+            from codewiki.src.be.context_routing_model import ContextRoutingModel
+
+            self.routing_model = ContextRoutingModel(
+                self.fallback_models,
+                self.long_context_model,
+                threshold=config.long_context_threshold,
+            )
+        else:
+            self.routing_model = self.fallback_models
         self.custom_instructions = config.get_prompt_addition() if config else None
         self.output_language = config.output_language if config else "en"
         # v2: late-injected after index build + clustering
@@ -141,11 +152,12 @@ class AgentOrchestrator:
         core_component_ids: List[str],
         estimated_tokens: int = 0,
     ) -> Agent[CodeWikiDeps, str]:
-        """Create an appropriate agent based on module complexity."""
-        if self.long_context_model and estimated_tokens > self.config.long_context_threshold:
-            model = self.long_context_model
-        else:
-            model = self.fallback_models
+        """Create an appropriate agent based on module complexity.
+
+        Model selection is handled by ContextRoutingModel at the LLM layer —
+        it automatically routes to long-context model when input exceeds threshold.
+        """
+        model = self.routing_model
         custom_instructions = self.custom_instructions or ""
 
         if is_complex_module(components, core_component_ids):
@@ -336,33 +348,27 @@ class AgentOrchestrator:
         prompt_tokens = count_tokens(user_prompt)
         estimated_tokens = prompt_tokens + _SYSTEM_PROMPT_OVERHEAD
 
-        # Decide: use long-context model if over threshold, else truncate to fit
-        _use_long_context = (
-            self.long_context_model and estimated_tokens > self.config.long_context_threshold
+        # Hard-truncate if over the absolute max (long-context limit).
+        # Model routing (normal vs long-context) is handled transparently
+        # by ContextRoutingModel at the LLM layer based on actual message size.
+        _absolute_max = (
+            self.config.long_context_max_input_tokens
+            if self.long_context_model
+            else self.config.max_input_tokens
         )
+        _max_prompt_tokens = _absolute_max - _SYSTEM_PROMPT_OVERHEAD
+        if prompt_tokens > _max_prompt_tokens:
+            from codewiki.src.be.utils import _get_encoder
 
-        if not _use_long_context:
-            # No long-context model available or not needed — hard-truncate if over budget
-            _max_prompt_tokens = self.config.max_input_tokens - _SYSTEM_PROMPT_OVERHEAD
-            if prompt_tokens > _max_prompt_tokens:
-                from codewiki.src.be.utils import _get_encoder
-
-                enc = _get_encoder("gpt-4")
-                tokens = enc.encode(user_prompt)
-                user_prompt = enc.decode(tokens[:_max_prompt_tokens])
-                prompt_tokens = _max_prompt_tokens
-                estimated_tokens = prompt_tokens + _SYSTEM_PROMPT_OVERHEAD
-                logger.warning(
-                    "⚠️ Hard-truncated prompt for '%s' to %dK tokens (no long-context model)",
-                    module_name,
-                    estimated_tokens // 1000,
-                )
-        else:
-            logger.info(
-                "🔀 Routing '%s' to long-context model (~%dK tokens > %dK threshold)",
+            enc = _get_encoder("gpt-4")
+            tokens = enc.encode(user_prompt)
+            user_prompt = enc.decode(tokens[:_max_prompt_tokens])
+            prompt_tokens = _max_prompt_tokens
+            estimated_tokens = prompt_tokens + _SYSTEM_PROMPT_OVERHEAD
+            logger.warning(
+                "⚠️ Hard-truncated prompt for '%s' to %dK tokens",
                 module_name,
                 estimated_tokens // 1000,
-                self.config.long_context_threshold // 1000,
             )
 
         file_count = len(
@@ -417,9 +423,7 @@ class AgentOrchestrator:
                 deps=deps,
                 usage_limits=UsageLimits(
                     request_limit=None,
-                    request_tokens_limit=self.config.long_context_max_input_tokens
-                    if _use_long_context
-                    else self.config.max_input_tokens,
+                    request_tokens_limit=_absolute_max,
                 ),
                 event_stream_handler=agent_progress_handler,
             )
