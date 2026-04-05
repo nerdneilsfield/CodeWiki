@@ -1115,16 +1115,29 @@ def format_user_prompt(
         grouped_components[path].append(component_id)
 
     # When there are too many components, use compact mode (name + type only)
-    # to avoid component metadata dominating the token budget.
-    # Reserve half the budget for metadata, half for file content.
+    # for non-core components, keeping full metadata for the most connected ones.
     _metadata_budget = max_input_tokens // 2
     _total_components = len(core_component_ids)
-    _compact_mode = _total_components > 500  # heuristic: >500 components → compact
-    if _compact_mode:
+
+    # Identify core components by in-degree (most depended-on)
+    _core_ids: set[str] = set()
+    if _total_components > 500:
+        in_degree: dict[str, int] = {cid: 0 for cid in core_component_ids}
+        for cid in core_component_ids:
+            if cid not in components:
+                continue
+            for dep in components[cid].depends_on:
+                if dep in in_degree:
+                    in_degree[dep] += 1
+        # Keep top ~10% by in-degree as "core" (full metadata), rest compact
+        _core_count = max(_total_components // 10, 50)
+        _core_ids = set(
+            cid for cid, _ in sorted(in_degree.items(), key=lambda x: -x[1])[:_core_count]
+        )
         logger.info(
-            "📦 Compact component mode: %d components (metadata budget %dK)",
+            "📦 Large module: %d components, %d core (full metadata), rest compact",
             _total_components,
-            _metadata_budget // 1000,
+            len(_core_ids),
         )
 
     core_component_codes = ""
@@ -1139,8 +1152,9 @@ def format_user_prompt(
             node = components[component_id]
             comp_type = node.component_type or node.node_type or "unknown"
 
-            # In compact mode or when metadata budget is exceeded, only list name + type
-            if _compact_mode or _metadata_overflow:
+            # Compact mode for non-core components when module is large
+            _is_core = component_id in _core_ids
+            if (_core_ids and not _is_core) or _metadata_overflow:
                 core_component_codes += f"- {component_id} ({comp_type})\n"
                 continue
 
