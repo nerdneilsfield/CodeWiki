@@ -269,10 +269,17 @@ async def generate_sub_module_documentation(
                 tools=[read_code_components_tool, str_replace_editor_tool],
             )
 
-        deps.current_module_name = sub_module_name
-        deps.path_to_current_module.append(sub_module_name)
-        deps.current_depth += 1
-        deps.assigned_doc_filename = assigned_filename
+        # Create an isolated deps copy for the sub-agent so mutations
+        # (current_depth, path_to_current_module) don't leak across siblings.
+        import dataclasses
+
+        sub_deps = dataclasses.replace(
+            deps,
+            current_module_name=sub_module_name,
+            path_to_current_module=list(deps.path_to_current_module) + [sub_module_name],
+            current_depth=deps.current_depth + 1,
+            assigned_doc_filename=assigned_filename,
+        )
 
         _sub_retry_delays = [5, 15]
         _sub_last_exc = None
@@ -290,13 +297,13 @@ async def generate_sub_module_documentation(
                 _sub_t0 = time.time()
                 _sub_result = await sub_agent.run(
                     format_user_prompt(
-                        module_name=deps.current_module_name,
+                        module_name=sub_deps.current_module_name,
                         core_component_ids=core_component_ids,
-                        components=ctx.deps.components,
-                        module_tree=ctx.deps.module_tree,
+                        components=sub_deps.components,
+                        module_tree=sub_deps.module_tree,
                     )
                     + f"\n\nWrite your documentation to the file: {assigned_filename}",
-                    deps=ctx.deps,
+                    deps=sub_deps,
                     usage_limits=UsageLimits(request_limit=None),
                     event_stream_handler=agent_progress_handler,
                 )
@@ -336,8 +343,6 @@ async def generate_sub_module_documentation(
                 f"{indent}{arrow} Sub-module '{sub_module_name}' failed after all retries: "
                 f"{_sub_last_exc} — skipping (fill pass will retry)"
             )
-            deps.path_to_current_module.pop()
-            deps.current_depth -= 1
             continue
 
         # Mark this sub-module as completed so re-runs can skip it
@@ -348,14 +353,6 @@ async def generate_sub_module_documentation(
                 model=_sub_models_str,
             )
             await deps.state_mgr.flush()
-
-        # remove the sub-module name from the path to current module and the module tree
-        deps.path_to_current_module.pop()
-        deps.current_depth -= 1
-        deps.assigned_doc_filename = ""
-
-    # restore the previous module name
-    deps.current_module_name = previous_module_name
 
     doc_files = [
         module_doc_filename(deps.path_to_current_module + [name])
