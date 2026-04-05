@@ -294,6 +294,10 @@ async def generate_sub_module_documentation(
                     f"after: {_sub_last_exc}"
                 )
                 await asyncio.sleep(_delay)
+                logger.info(
+                    f"{indent}{arrow} Retrying sub-module '{sub_module_name}' now "
+                    f"(attempt {_sub_attempt}/{len(_sub_retry_delays)})"
+                )
             try:
                 _sub_t0 = time.time()
                 _sub_result = await sub_agent.run(

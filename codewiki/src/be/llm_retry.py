@@ -101,6 +101,7 @@ async def with_retry(
             await asyncio.sleep(delay)
             if cancel_token:
                 cancel_token.check()
+            _logger.info("▶ LLM retry %d/%d starting now", attempt, total_attempts)
         except Exception:
             raise
 
