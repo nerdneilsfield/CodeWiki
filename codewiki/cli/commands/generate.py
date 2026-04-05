@@ -132,6 +132,13 @@ def parse_patterns(patterns_str: str) -> List[str]:
     help="Path to TOML config file. Defaults to ./config.toml when omitted.",
 )
 @click.option(
+    "-C",
+    "repo_dir",
+    type=click.Path(exists=True, file_okay=False, path_type=str),
+    default=None,
+    help="Repository directory to document (default: current directory)",
+)
+@click.option(
     "--output",
     "-o",
     type=click.Path(),
@@ -275,6 +282,7 @@ def parse_patterns(patterns_str: str) -> List[str]:
 def generate_command(
     ctx,
     config_path: Optional[str],
+    repo_dir: Optional[str],
     output: str,
     create_branch: bool,
     github_pages: bool,
@@ -348,6 +356,11 @@ def generate_command(
     $ codewiki generate --static
 
     \b
+    # Specify repository directory
+    $ codewiki generate -C /path/to/repo
+    $ codewiki generate -C ../other-project -o ../other-project/docs
+
+    \b
     # Override model for this run only
     $ codewiki generate --main-model gpt-4o
     $ codewiki generate --main-model gpt-4o --long-context-model gpt-4o-128k --long-context-threshold 100000
@@ -363,7 +376,7 @@ def generate_command(
         # Validate repository
         logger.step("Validating repository...", 2, 4)
 
-        repo_path = Path.cwd()
+        repo_path = Path(repo_dir).resolve() if repo_dir else Path.cwd()
         repo_path, languages = validate_repository(repo_path)
 
         config_file = _resolve_generation_config_path(config_path)
