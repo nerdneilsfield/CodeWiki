@@ -11,7 +11,7 @@ import openai
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from tqdm import tqdm
 
-from codewiki.src.be.errors import ErrorCategory, LLMError
+from codewiki.src.be.errors import CancellationError, ErrorCategory, LLMError
 from codewiki.src.be.pipeline import ModuleFailure, ModuleSkip, ModuleSummary
 from codewiki.src.be.documentation_tree_utils import stable_hash
 from codewiki.src.utils import doc_id_for_path
@@ -389,6 +389,8 @@ async def run_module_queue(
                         last_exc = None
                         success = True
                         break
+                    except CancellationError:
+                        raise  # never retry cancellation
                     except Exception as exc:
                         last_exc = exc
                         if _is_context_length_error(exc):
@@ -405,6 +407,8 @@ async def run_module_queue(
                 model_suffix = f" (model: {task_models_used})" if task_models_used else ""
                 logger.info("✓ Task '%s' completed in %.1fs%s", label, task_elapsed, model_suffix)
 
+            except CancellationError:
+                logger.info("⏹ Task '%s' cancelled — not marking as failed", label)
             except Exception as e:
                 logger.error("✗ Failed to process '%s' after all retries: %s", label, e)
                 logger.error(traceback.format_exc())
@@ -446,6 +450,7 @@ async def fill_missing_module_docs(
     run_module_queue: Callable[..., Awaitable[ModuleSummary]],
     module_doc_exists: Callable[..., bool],
     gen_state=None,
+    cancel_token=None,
 ) -> ModuleSummary:
     """Retry missing module docs using the same dependency-aware queue."""
 
@@ -473,6 +478,9 @@ async def fill_missing_module_docs(
 
     summary = ModuleSummary()
     for attempt in range(config.max_retries):
+        if cancel_token and cancel_token.is_cancelled:
+            logger.info("⏹ Fill pass skipped (cancelled)")
+            return summary
         module_tree = await tree_manager.get_snapshot()
         missing_count = _count_missing(module_tree, [])
         if missing_count == 0:

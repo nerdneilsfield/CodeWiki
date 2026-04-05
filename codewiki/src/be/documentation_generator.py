@@ -361,6 +361,7 @@ class DocumentationGenerator:
             ),
             module_doc_exists=module_doc_exists,
             gen_state=self._gen_state,
+            cancel_token=getattr(self, "cancel_token", None),
         )
 
     # ── Parent / overview generation ─────────────────────────────────────
