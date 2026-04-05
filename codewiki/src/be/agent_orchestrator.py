@@ -336,21 +336,33 @@ class AgentOrchestrator:
         prompt_tokens = count_tokens(user_prompt)
         estimated_tokens = prompt_tokens + _SYSTEM_PROMPT_OVERHEAD
 
-        # Final guard: if assembled prompt still exceeds limit, hard-truncate
-        _max_prompt_tokens = self.config.max_input_tokens - _SYSTEM_PROMPT_OVERHEAD
-        if prompt_tokens > _max_prompt_tokens:
-            # Truncate user_prompt by encoding → slicing → decoding
-            from codewiki.src.be.utils import _get_encoder
+        # Decide: use long-context model if over threshold, else truncate to fit
+        _use_long_context = (
+            self.long_context_model and estimated_tokens > self.config.long_context_threshold
+        )
 
-            enc = _get_encoder("gpt-4")
-            tokens = enc.encode(user_prompt)
-            user_prompt = enc.decode(tokens[:_max_prompt_tokens])
-            prompt_tokens = _max_prompt_tokens
-            estimated_tokens = prompt_tokens + _SYSTEM_PROMPT_OVERHEAD
-            logger.warning(
-                "⚠️ Hard-truncated prompt for '%s' to %dK tokens (was over budget)",
+        if not _use_long_context:
+            # No long-context model available or not needed — hard-truncate if over budget
+            _max_prompt_tokens = self.config.max_input_tokens - _SYSTEM_PROMPT_OVERHEAD
+            if prompt_tokens > _max_prompt_tokens:
+                from codewiki.src.be.utils import _get_encoder
+
+                enc = _get_encoder("gpt-4")
+                tokens = enc.encode(user_prompt)
+                user_prompt = enc.decode(tokens[:_max_prompt_tokens])
+                prompt_tokens = _max_prompt_tokens
+                estimated_tokens = prompt_tokens + _SYSTEM_PROMPT_OVERHEAD
+                logger.warning(
+                    "⚠️ Hard-truncated prompt for '%s' to %dK tokens (no long-context model)",
+                    module_name,
+                    estimated_tokens // 1000,
+                )
+        else:
+            logger.info(
+                "🔀 Routing '%s' to long-context model (~%dK tokens > %dK threshold)",
                 module_name,
                 estimated_tokens // 1000,
+                self.config.long_context_threshold // 1000,
             )
 
         file_count = len(
