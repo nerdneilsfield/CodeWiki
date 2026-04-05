@@ -287,20 +287,21 @@ class AgentOrchestrator:
             module_tree = file_manager.load_json(module_tree_path) or {}
 
         # Estimate prompt tokens to pre-select long-context model if needed.
-        # The model receives system_prompt + tool_definitions + user_prompt, so we
-        # add a fixed overhead for the parts we don't measure here (~12 k tokens for
-        # the system prompt + pydantic_ai tool schemas).  Under-counting leads to
-        # the fallback chain being used when the long-context model should be chosen.
-        _TOKEN_OVERHEAD = 12_000
-        user_prompt = format_user_prompt(
-            module_name=module_name,
-            core_component_ids=core_component_ids,
-            components=components,
-            module_tree=module_tree,
-            max_input_tokens=self.config.max_input_tokens,
-        )
+        # The model receives system_prompt + tool_definitions + user_prompt.
+        # Compute overhead from actual system prompt + estimated tool schemas.
+        custom_instructions = self.custom_instructions or ""
+        if is_complex_module(components, core_component_ids):
+            _sys_prompt = format_system_prompt(
+                module_name, custom_instructions, self.output_language
+            )
+        else:
+            _sys_prompt = format_leaf_system_prompt(
+                module_name, custom_instructions, self.output_language
+            )
+        _TOOL_SCHEMA_ESTIMATE = 3_000  # pydantic-ai tool JSON schemas
+        _SYSTEM_PROMPT_OVERHEAD = count_tokens(_sys_prompt) + _TOOL_SCHEMA_ESTIMATE
 
-        # v2: append evidence-rich context pack to user prompt
+        # Pre-compute context pack so we can deduct its size from the budget
         glossary = self.global_assets.get("glossary") if self.global_assets else None
         link_map = self.global_assets.get("link_map") if self.global_assets else None
         context_pack = build_context_pack(
@@ -311,6 +312,21 @@ class AgentOrchestrator:
             link_map=link_map,
         )
         context_section = format_context_pack_section(context_pack)
+        context_tokens = count_tokens(context_section) if context_section else 0
+
+        # Budget for format_user_prompt = total limit - overhead - context pack
+        _prompt_budget = max(
+            self.config.max_input_tokens - _SYSTEM_PROMPT_OVERHEAD - context_tokens,
+            50_000,
+        )
+        user_prompt = format_user_prompt(
+            module_name=module_name,
+            core_component_ids=core_component_ids,
+            components=components,
+            module_tree=module_tree,
+            max_input_tokens=_prompt_budget,
+        )
+
         if context_section:
             user_prompt += "\n\n" + context_section
 
@@ -318,7 +334,7 @@ class AgentOrchestrator:
         user_prompt += f"\n\nWrite your documentation to the file: {assigned_filename}"
 
         prompt_tokens = count_tokens(user_prompt)
-        estimated_tokens = prompt_tokens + _TOKEN_OVERHEAD
+        estimated_tokens = prompt_tokens + _SYSTEM_PROMPT_OVERHEAD
         file_count = len(
             set(
                 getattr(components[c], "relative_path", "")
@@ -331,7 +347,7 @@ class AgentOrchestrator:
             module_name,
             estimated_tokens // 1000,
             prompt_tokens // 1000,
-            _TOKEN_OVERHEAD // 1000,
+            _SYSTEM_PROMPT_OVERHEAD // 1000,
             len(core_component_ids),
             file_count,
         )
