@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import sys
 import time
 import traceback
 from datetime import datetime, timezone
@@ -183,12 +184,15 @@ async def run_module_queue(
         ", 1 root overview" if include_root else "",
     )
 
+    # Use a fresh stderr reference — previous tqdm.close() may have left
+    # the cached file object in a broken state on some platforms.
     progress = progress_factory(
         total=total_tasks,
         desc=desc,
         unit="module",
         dynamic_ncols=True,
         leave=True,
+        file=sys.stderr,
     )
 
     retry_delays = [10, 30, 90]
@@ -487,7 +491,10 @@ async def run_module_queue(
         if not coordinator.done():
             coordinator.cancel()
         await asyncio.gather(coordinator, return_exceptions=True)
-        progress.close()
+        try:
+            progress.close()
+        except (ValueError, OSError):
+            pass  # stderr may already be closed (e.g. during shutdown)
     return summary
 
 
