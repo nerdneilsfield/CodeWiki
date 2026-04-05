@@ -1,3 +1,4 @@
+import dataclasses
 import time
 from typing import Any, Dict, List, cast
 
@@ -133,6 +134,26 @@ class AgentOrchestrator:
             return node.get("_doc_filename", module_doc_filename(module_path))
         except (KeyError, TypeError):
             return module_doc_filename(module_path)
+
+    @staticmethod
+    def _is_context_overflow(exc: Exception) -> bool:
+        """Check if exception is a context-length overflow (any source)."""
+        try:
+            from pydantic_ai.exceptions import UsageLimitExceeded, ModelHTTPError
+
+            if isinstance(exc, UsageLimitExceeded):
+                return True
+            if isinstance(exc, ModelHTTPError) and exc.status_code == 400:
+                msg = str(exc).lower()
+                return "context_length" in msg or "too long" in msg or "maximum context" in msg
+        except ImportError:
+            pass
+        import openai
+
+        if isinstance(exc, openai.APIStatusError) and exc.status_code == 400:
+            msg = str(exc).lower()
+            return "context_length" in msg or "too long" in msg or "maximum context" in msg
+        return False
 
     def create_agent(
         self,
@@ -409,66 +430,98 @@ class AgentOrchestrator:
             usage_stats=self.usage_stats,
         )
 
-        # Run agent
+        # Run agent with context-length retry: if the model rejects due to
+        # context overflow (multi-turn accumulation), truncate the prompt by
+        # 100K tokens and retry with a fresh agent.
+        _CONTEXT_TRIM_STEP = 100_000
+        _MAX_CONTEXT_RETRIES = 5
+        _current_prompt = user_prompt
+
         try:
-            t0 = time.time()
-            result = await agent.run(
-                user_prompt,
-                deps=deps,
-                usage_limits=UsageLimits(
-                    request_limit=None,
-                    # Don't set request_tokens_limit — multi-turn tool calls
-                    # accumulate context naturally. Model's own context limit
-                    # will reject oversized requests, handled by _is_context_length_error.
-                ),
-                event_stream_handler=agent_progress_handler,
-            )
-            elapsed = time.time() - t0
+            for _ctx_attempt in range(_MAX_CONTEXT_RETRIES + 1):
+                try:
+                    t0 = time.time()
+                    # Fresh deps for each retry (reset registry/dispatched state)
+                    if _ctx_attempt > 0:
+                        deps = dataclasses.replace(deps, registry={}, _dispatched_sub_modules=set())
+                        agent = self.create_agent(
+                            module_name, components, core_component_ids, estimated_tokens
+                        )
 
-            # Log which model(s) actually responded (detects fallback switches)
-            model_names = []
-            for msg in result.all_messages():
-                if isinstance(msg, ModelResponse) and msg.model_name:
-                    if msg.model_name not in model_names:
-                        model_names.append(msg.model_name)
-            run_usage = result.usage()
-            if self.usage_stats is not None and run_usage:
-                record_agent_run_usage(
-                    self.usage_stats,
-                    model_names,
-                    run_usage.input_tokens or 0,
-                    run_usage.output_tokens or 0,
-                    run_usage.requests or 0,
-                )
-            models_used = ", ".join(model_names) if model_names else "unknown"
-            if len(model_names) > 1:
-                logger.info(
-                    f"Fallback triggered for '{module_name}': "
-                    f"models used: {models_used} ({elapsed:.1f}s)"
-                )
-            logger.debug(
-                f"Successfully processed module: {module_name} "
-                f"in {elapsed:.1f}s (model: {models_used})"
-            )
+                    result = await agent.run(
+                        _current_prompt,
+                        deps=deps,
+                        usage_limits=UsageLimits(request_limit=None),
+                        event_stream_handler=agent_progress_handler,
+                    )
+                    elapsed = time.time() - t0
 
-            # Persist tree — manager handles locking; otherwise save directly
-            if tree_manager:
-                await tree_manager.save()
-            else:
-                module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-                file_manager.save_json(deps.module_tree, module_tree_path)
+                    # Log which model(s) actually responded (detects fallback switches)
+                    model_names = []
+                    for msg in result.all_messages():
+                        if isinstance(msg, ModelResponse) and msg.model_name:
+                            if msg.model_name not in model_names:
+                                model_names.append(msg.model_name)
+                    run_usage = result.usage()
+                    if self.usage_stats is not None and run_usage:
+                        record_agent_run_usage(
+                            self.usage_stats,
+                            model_names,
+                            run_usage.input_tokens or 0,
+                            run_usage.output_tokens or 0,
+                            run_usage.requests or 0,
+                        )
+                    models_used = ", ".join(model_names) if model_names else "unknown"
+                    if len(model_names) > 1:
+                        logger.info(
+                            f"Fallback triggered for '{module_name}': "
+                            f"models used: {models_used} ({elapsed:.1f}s)"
+                        )
+                    logger.debug(
+                        f"Successfully processed module: {module_name} "
+                        f"in {elapsed:.1f}s (model: {models_used})"
+                    )
 
-            # Mark the module as fully completed so future runs can skip it
-            if state_mgr:
-                doc_id = doc_id_for_path(module_tree, doc_path_parts)
-                output_path = os.path.join(working_dir, assigned_filename)
-                await state_mgr.mark_completed(
-                    doc_id,
-                    content_hash=content_hash(output_path),
-                    model=models_used,
-                )
+                    # Persist tree — manager handles locking; otherwise save directly
+                    if tree_manager:
+                        await tree_manager.save()
+                    else:
+                        module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
+                        file_manager.save_json(deps.module_tree, module_tree_path)
 
-            return deps.module_tree, models_used
+                    # Mark the module as fully completed so future runs can skip it
+                    if state_mgr:
+                        doc_id = doc_id_for_path(module_tree, doc_path_parts)
+                        output_path = os.path.join(working_dir, assigned_filename)
+                        await state_mgr.mark_completed(
+                            doc_id,
+                            content_hash=content_hash(output_path),
+                            model=models_used,
+                        )
+
+                    return deps.module_tree, models_used
+
+                except Exception as e:
+                    if not self._is_context_overflow(e):
+                        raise
+                    # Context overflow — trim prompt and retry
+                    from codewiki.src.be.utils import _get_encoder
+
+                    enc = _get_encoder("gpt-4")
+                    tokens = enc.encode(_current_prompt)
+                    new_len = max(len(tokens) - _CONTEXT_TRIM_STEP, 10_000)
+                    if new_len >= len(tokens):
+                        raise  # can't trim further
+                    _current_prompt = enc.decode(tokens[:new_len])
+                    estimated_tokens = new_len + _SYSTEM_PROMPT_OVERHEAD
+                    logger.warning(
+                        "✂️ Context overflow for '%s' — trimming prompt %dK → %dK tokens (attempt %d/%d)",
+                        module_name,
+                        len(tokens) // 1000,
+                        new_len // 1000,
+                        _ctx_attempt + 1,
+                        _MAX_CONTEXT_RETRIES,
+                    )
 
         except Exception as e:
             logger.error(
