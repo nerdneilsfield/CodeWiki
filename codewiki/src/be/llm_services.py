@@ -185,13 +185,41 @@ def create_fallback_models(config: CodeWikiConfig) -> FallbackModel:
 def create_long_context_model(config: CodeWikiConfig):
     if config.long_context_model is None:
         raise ValueError("long_context_model is not configured")
+
     if _has_provider_registry(config):
-        return create_model_from_ref(config, config.long_context_model)
-    return OpenAIChatModel(
-        model_name=config.long_context_model,
-        provider=_make_provider(config),
-        settings=_model_settings(config),
+        primary = create_model_from_ref(config, config.long_context_model)
+    else:
+        primary = OpenAIChatModel(
+            model_name=config.long_context_model,
+            provider=_make_provider(config),
+            settings=_model_settings(config),
+        )
+
+    # Build fallback chain if long_context_fallback is configured
+    fallback_names = [
+        n.strip() for n in (config.long_context_fallback or "").split(",") if n.strip()
+    ]
+    if not fallback_names:
+        return primary
+
+    fallbacks = []
+    for name in fallback_names:
+        if _has_provider_registry(config):
+            fallbacks.append(create_model_from_ref(config, name))
+        else:
+            fallbacks.append(
+                OpenAIChatModel(
+                    model_name=name,
+                    provider=_make_provider(config),
+                    settings=_model_settings(config),
+                )
+            )
+    _logger.info(
+        "Long-context model chain: %s → %s",
+        config.long_context_model,
+        " → ".join(fallback_names),
     )
+    return FallbackModel(primary, *fallbacks)
 
 
 def select_agent_model(config: CodeWikiConfig, estimated_tokens: int = 0):
