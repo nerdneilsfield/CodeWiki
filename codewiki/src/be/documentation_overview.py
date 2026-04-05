@@ -21,6 +21,61 @@ from codewiki.src.utils import content_hash, doc_id_for_path, file_manager, find
 logger = logging.getLogger(__name__)
 
 
+def _truncate_child_doc(text: str, max_chars: int = 8000) -> str:
+    """Truncate a child module doc keeping first paragraph intact + tail.
+
+    Strategy: keep the first paragraph (everything up to the first blank
+    line after content starts) in full, then head (60%) + tail (40%) of
+    the remainder, capped at *max_chars* total.
+    """
+    if len(text) <= max_chars:
+        return text
+
+    lines = text.split("\n")
+
+    # Find end of first paragraph (first blank line after non-blank content)
+    first_para_end = 0
+    found_content = False
+    for i, line in enumerate(lines):
+        if line.strip():
+            found_content = True
+        elif found_content:
+            first_para_end = i
+            break
+    else:
+        first_para_end = len(lines)
+
+    first_para = "\n".join(lines[:first_para_end])
+    rest_lines = lines[first_para_end:]
+
+    if not rest_lines or len(first_para) >= max_chars:
+        return first_para[:max_chars] + "\n\n_(truncated)_"
+
+    # Budget for the rest after first paragraph
+    rest_budget_chars = max_chars - len(first_para)
+    rest_text = "\n".join(rest_lines)
+
+    if len(rest_text) <= rest_budget_chars:
+        return text
+
+    # head 60% + tail 40% of rest
+    budget_lines = max(rest_budget_chars // 80, 6)  # ~80 chars per line estimate
+    head_n = int(budget_lines * 0.6)
+    tail_n = budget_lines - head_n
+    omitted = len(rest_lines) - head_n - tail_n
+
+    if omitted <= 0:
+        return text
+
+    truncated_rest = (
+        "\n".join(rest_lines[:head_n])
+        + f"\n\n... ({omitted} lines truncated) ...\n\n"
+        + "\n".join(rest_lines[-tail_n:])
+    )
+
+    return first_para + "\n" + truncated_rest
+
+
 @dataclass
 class OverviewContext:
     config: CodeWikiConfig
@@ -72,11 +127,19 @@ def build_overview_structure(
             if child_path is None:
                 child_path = find_module_doc(working_dir, [name])
             if child_path:
-                entry["docs"] = file_manager.load_text(child_path)
+                entry["docs"] = _truncate_child_doc(file_manager.load_text(child_path))
             else:
                 logger.warning("Module docs not found for [%s]", name)
                 entry["docs"] = ""
             result[name] = entry
+
+        # Log total overview input size
+        total_chars = sum(len(e.get("docs", "")) for e in result.values())
+        logger.info(
+            "📏 Overview structure: %d children, ~%dK chars",
+            len(result),
+            total_chars // 1000,
+        )
         return result
 
     result = strip_tree_for_overview(module_tree)
@@ -109,11 +172,20 @@ def build_overview_structure(
         if child_path is None:
             child_path = find_module_doc(working_dir, module_path + [child_name])
         if child_path:
-            target_children[child_name]["docs"] = file_manager.load_text(child_path)
+            target_children[child_name]["docs"] = _truncate_child_doc(
+                file_manager.load_text(child_path)
+            )
         else:
             logger.warning("Module docs not found for %s", module_path + [child_name])
             target_children[child_name]["docs"] = ""
 
+    total_chars = sum(len(c.get("docs", "")) for c in target_children.values())
+    logger.info(
+        "📏 Overview structure for '%s': %d children, ~%dK chars",
+        "/".join(module_path),
+        len(target_children),
+        total_chars // 1000,
+    )
     return result
 
 

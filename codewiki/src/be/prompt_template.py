@@ -1214,7 +1214,8 @@ def format_user_prompt(
             len(_file_contents),
         )
         # Iteratively truncate the longest files until under budget
-        _MAX_ROUNDS = 10
+        _MIN_LINES = 6  # absolute minimum: imports + class signature
+        _MAX_ROUNDS = 20
         for _round in range(_MAX_ROUNDS):
             if total_file_tokens <= _TOKEN_BUDGET:
                 break
@@ -1230,9 +1231,9 @@ def format_user_prompt(
                     break
                 lang, content = _file_contents[path]
                 lines = content.split("\n")
-                if len(lines) <= 30:
+                if len(lines) <= _MIN_LINES:
                     continue  # already at minimum
-                target = max(len(lines) // 2, 30)
+                target = max(len(lines) // 2, _MIN_LINES)
                 truncated = _truncate_file(content, target)
                 saved = _estimate_tokens(content) - _estimate_tokens(truncated)
                 if saved <= 0:
@@ -1250,12 +1251,23 @@ def format_user_prompt(
                 )
             if not made_progress:
                 break  # all files at minimum size
+
+        # Nuclear option: if still over, drop file contents entirely
+        if total_file_tokens > _TOKEN_BUDGET:
+            logger.warning(
+                "⚠️ Still over budget after %d rounds — dropping file contents, keeping signatures only",
+                _round + 1,
+            )
+            for path in list(_file_contents.keys()):
+                lang, _ = _file_contents[path]
+                _file_contents[path] = (lang, "// (file content omitted — prompt too large)")
+            total_file_tokens = sum(_estimate_tokens(c) for _, c in _file_contents.values())
+
         logger.info(
-            "✂️ Truncation complete: %dK → %dK tokens (%d rounds, %s budget)",
+            "✂️ Truncation complete: %dK → %dK tokens (%d rounds)",
             _original_tokens // 1000,
             total_file_tokens // 1000,
             _round + 1,
-            "within" if total_file_tokens <= _TOKEN_BUDGET else "STILL OVER",
         )
 
     # Inject file contents into placeholders
