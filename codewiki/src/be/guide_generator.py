@@ -194,7 +194,8 @@ class GuideGenerator:
         self, guide_type: str, input_files: List[str], extra_salt: str = ""
     ) -> bool:
         version = _PROMPT_VERSIONS.get(guide_type, "v1")
-        extra = f"{version}:{extra_salt}" if extra_salt else version
+        lang = self.config.output_language or "en"
+        extra = f"{version}:{lang}:{extra_salt}" if extra_salt else f"{version}:{lang}"
         current_hash = self._compute_combined_hash(input_files, extra=extra)
         cached = self.cache.get(guide_type, {})
         if cached.get("input_hash") == current_hash:
@@ -215,7 +216,8 @@ class GuideGenerator:
         extra_salt: str = "",
     ):
         version = _PROMPT_VERSIONS.get(guide_type, "v1")
-        extra = f"{version}:{extra_salt}" if extra_salt else version
+        lang = self.config.output_language or "en"
+        extra = f"{version}:{lang}:{extra_salt}" if extra_salt else f"{version}:{lang}"
         # Store relative filenames (not absolute paths) for cross-environment portability
         rel_names = [os.path.basename(f) for f in output_files]
         self.cache[guide_type] = {

@@ -540,12 +540,15 @@ class DocumentationGenerator:
         first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
         state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
 
-        dedup_docs_directory(working_dir)
+        self._gen_state = self._gen_state or GenerationState.load(state_path)
+
+        # Skip expensive dedup on resumed runs where state already exists
+        has_existing_tasks = bool(self._gen_state and self._gen_state.tasks)
+        if not has_existing_tasks:
+            dedup_docs_directory(working_dir)
         freeze_doc_filenames(module_tree)
         file_manager.save_json(module_tree, module_tree_path)
         file_manager.save_json(module_tree, first_module_tree_path)
-
-        self._gen_state = self._gen_state or GenerationState.load(state_path)
         self._state_mgr = self._state_mgr or GenerationStateManager(self._gen_state, state_path)
         await self._state_mgr.update_metadata(self.commit_id or "", config_fingerprint(self.config))
         planned_tasks = build_generation_tasks(

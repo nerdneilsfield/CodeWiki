@@ -162,8 +162,16 @@ async def run_module_queue(
     done_queue: asyncio.Queue[tuple[str, bool, bool, str | None]] = asyncio.Queue()
 
     leaf_count = 0
-    for key, (_, _, _, is_leaf) in all_tasks.items():
+    for key, (path, _, _, is_leaf) in all_tasks.items():
         if is_leaf:
+            if gen_state:
+                did = doc_id_for_path(graph_tree, path)
+                t = gen_state.get_task(did)
+                if t and t.status in ("completed", "skipped"):
+                    # Already done — report success without entering work_queue
+                    await done_queue.put((key, True, False, None))
+                    leaf_count += 1
+                    continue
             await work_queue.put(key)
             leaf_count += 1
 
@@ -523,6 +531,10 @@ async def fill_missing_module_docs(
         return names
 
     summary = ModuleSummary()
+    # Fast path: skip fill pass when all actionable tasks are already done
+    if gen_state and not gen_state.actionable_task_ids():
+        logger.debug("All tasks completed — skipping fill pass")
+        return summary
     for attempt in range(config.max_retries):
         if cancel_token and cancel_token.is_cancelled:
             logger.info("⏹ Fill pass skipped (cancelled)")

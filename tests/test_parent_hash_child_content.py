@@ -149,7 +149,8 @@ async def test_scheduler_marks_completed_parent_stale_when_child_hash_changes(tm
     assert parent is not None
     assert parent.status == "completed"
     assert parent.input_hash != "old-parent-hash"
-    assert execution_order == ["Parent/ChildA", "Parent/ChildB", "Parent"]
+    # Completed leaf tasks are skipped (not re-processed); only the parent runs
+    assert execution_order == ["Parent"]
     assert "Task module:parent marked stale (input changed)" in caplog.text
 
 

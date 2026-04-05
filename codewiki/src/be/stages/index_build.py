@@ -12,7 +12,5 @@ class IndexBuildStage:
     failure_policy = "degraded_ok"
 
     async def execute(self, ctx: PipelineContext) -> None:
-        if ctx.cluster_cache_hit:
-            logger.info("Skipping index build (cluster cache hit, same commit)")
-            return
+        # IndexBuilder has its own commit-based cache; don't skip here.
         await ctx.generator._build_index(ctx)
