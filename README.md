@@ -65,27 +65,43 @@ codewiki config validate --config config.toml
 ### Generate
 
 ```bash
-# Generate documentation for a local repository
-codewiki generate /path/to/your/repo --config config.toml
+# Generate documentation for current directory
+codewiki generate --config config.toml
+
+# Specify a different repository
+codewiki generate -C /path/to/repo --config config.toml
 
 # Generate with Chinese output
-codewiki generate /path/to/repo --config config.toml --language zh
+codewiki generate -C /path/to/repo --config config.toml --language zh
+
+# Generate with static HTML pages (Bulma CSS, works offline)
+codewiki generate --config config.toml --static
 
 # Generate with GitHub Pages viewer
-codewiki generate /path/to/repo --config config.toml --github-pages
+codewiki generate --config config.toml --github-pages
+
+# Resume interrupted generation (completed modules are skipped)
+codewiki generate --config config.toml
+
+# Write debug logs to file for diagnostics
+codewiki generate --config config.toml --log-file codewiki.log
 ```
 
 <details>
 <summary><strong>Full CLI options</strong></summary>
 
 ```
-codewiki generate [REPO_PATH] [OPTIONS]
+codewiki generate [OPTIONS]
 
-Output:
+Repository:
+  -C DIR                    Repository directory (default: current directory)
   --output DIR              Output directory (default: ./docs)
   --create-branch           Create a git branch for generated docs
+
+Output Format:
   --github-pages            Generate index.html viewer
-  --static                  Pre-render standalone HTML pages
+  --static                  Pre-render standalone HTML pages (Bulma CSS)
+  --no-repo-links           Omit Repository/DeepWiki links from HTML
   --no-cache                Force full regeneration
 
 Language:
@@ -111,7 +127,10 @@ Filtering:
 Customization:
   --doc-type TYPE           api, architecture, user-guide, developer
   --instructions TEXT       Custom agent instructions
-  --verbose                 Show detailed progress
+
+Diagnostics:
+  --verbose                 Show detailed progress (DEBUG level)
+  --log-file PATH           Write DEBUG-level JSON logs to file
 ```
 
 </details>
@@ -221,7 +240,7 @@ Validates and repairs generated documentation:
 - **Math validation** — `pylatexenc` structural parsing plus KaTeX render checks, deterministic cleanup rules, then batch LLM repair when needed
 - **Mermaid validation** — `mmdc` when available, regex fallback otherwise, deterministic cleanup rules, then batch LLM repair when needed
 - **Repair model chain** — `repair_model -> repair_fallback_1 -> repair_fallback_2`, batched by `repair_batch_size`
-- **Mermaid degradation** — unfixable diagrams replaced with `text` code blocks + error comments
+- **Mermaid degradation** — controlled by `degrade_mermaid` config (default: off). When disabled, unfixable diagrams keep the original mermaid code for browser-side rendering
 - **Math degradation** — inline math → backtick code; display math → `latex` fenced block
 - **LintReport** — JSON report saved to `_lint_report.json` with all failures
 - **Strict gate** — `config.postprocess.strict = true` raises `LintError` on unfixable issues
@@ -232,11 +251,11 @@ Validates and repairs generated documentation:
 
 ## Resilience
 
-CodeWiki includes built-in error handling, retry logic, and cancellation support for LLM operations.
+CodeWiki includes built-in error handling, retry logic, caching, and cancellation support.
 
-**Structured error classification** — LLM SDK exceptions are classified into categories (transient, auth, client error, config error, resource exhausted) so the system can decide whether to retry, fall back to the next model, or fail fast.
+**Structured error classification** — LLM SDK exceptions are classified into categories (transient, auth, client error, config error, resource exhausted) so the system can decide whether to retry, fall back to the next model, or fail fast. Non-retryable errors (context length exceeded, invalid config) break out of the retry loop immediately.
 
-**Automatic retry with backoff** — Transient errors (429, 500, 502, 503, timeouts) trigger exponential backoff with jitter. `Retry-After` headers from rate-limited APIs are respected. Auth errors retry once. Non-retryable errors propagate immediately.
+**Automatic retry with backoff** — Transient errors (429, 500, 502, 503, timeouts) trigger exponential backoff with jitter. `Retry-After` headers from rate-limited APIs are respected. Auth errors retry once. Retry sleeps respond to cancellation within 1 second.
 
 **Streaming fallback** — For models marked with `stream = true` in config, timeout errors trigger a retry using streaming mode. This helps with providers that have aggressive non-streaming timeouts. Only `openai_compatible` providers support this in the current release.
 
@@ -248,7 +267,22 @@ model_list = [
 ]
 ```
 
-**Cooperative cancellation** — Long-running generation jobs can be cancelled via the web API (`POST /api/jobs/{job_id}/cancel`). Cancellation is checked at pipeline stage boundaries, between scheduler tasks, during retry waits, and before each guide section LLM call.
+**Graceful Ctrl+C** — First Ctrl+C sets a cancellation token. The pipeline finishes in-flight tasks, persists all state (generation state, module tree), and exits cleanly. Completed modules are preserved for resume. Second Ctrl+C force-quits.
+
+**Multi-layer caching** — Each pipeline stage has its own cache to avoid redundant work on resumed runs:
+
+| Stage | Cache Key | Skip Condition |
+|-------|-----------|----------------|
+| GraphBuild (AST) | commit + include/exclude patterns | Same commit |
+| IndexBuild | commit + INDEX_VERSION | Same commit |
+| Clustering | language + max_depth + patterns | Same config |
+| Module generation | per-module component hash | Module unchanged |
+| Guide generation | input file content + language | Inputs unchanged |
+| Postprocess | per-file content hash | File unchanged |
+
+Switching models does **not** invalidate any cache. Only structural changes (code, config, language) trigger reprocessing. `--no-cache` clears all caches for a full rebuild.
+
+**Crash recovery** — Tasks left in `running` state after a crash are automatically reset to `ready` on next load. The pipeline flushes generation state and module tree on every exit path (success, cancel, or failure).
 
 ---
 
@@ -284,13 +318,17 @@ The web interface is available at `http://localhost:8000`.
 ## Web Interface
 
 Submit a GitHub repository URL through the browser and view generated documentation with:
-- Dark/light mode (follows OS preference)
+- Dark/light mode (Bulma v1 native, follows OS preference + localStorage)
 - Collapsible sidebar with module tree navigation
-- Auto-generated table of contents per page
-- Syntax highlighting (highlight.js)
-- Math rendering (KaTeX)
-- Mobile-responsive layout
+- Table of contents dropdown in the navbar
+- Repository and DeepWiki links in the navbar (controllable via `--no-repo-links`)
+- Syntax highlighting (Highlight.js) with theme-aware switching
+- Math rendering (KaTeX + MathJax fallback, CJK-aware extraction)
+- Mermaid diagram rendering with error details
+- Mobile-responsive layout with hamburger sidebar toggle
 - Job cancellation for in-progress generation
+
+The `--static` flag generates self-contained HTML pages using Bulma CSS (CDN, no JS build tools). These work offline via `file://` protocol and can be deployed to any static hosting.
 
 ---
 
@@ -331,6 +369,7 @@ fallback_models    = ["openai/gpt-4o-mini"]
 [postprocess]
 strict             = false                 # true = block build on unfixable lint issues
 fix_links          = true                  # validate and rewrite internal links
+degrade_mermaid    = false                 # true = replace unfixable mermaid with text blocks
 # repair_model     = "openai/gpt-4o-mini"  # empty = main_model
 # repair_fallback_1 = ""
 # repair_fallback_2 = ""
@@ -372,11 +411,14 @@ codewiki config get      --config config.toml             # display parsed confi
 
 ```bash
 # Explicit path (recommended)
-codewiki generate /path/to/repo --config config.toml
+codewiki generate -C /path/to/repo --config config.toml
 
 # Via env var (useful in Docker / CI)
 export CODEWIKI_CONFIG=/path/to/config.toml
-codewiki generate /path/to/repo
+codewiki generate -C /path/to/repo
+
+# Log diagnostics to file
+CODEWIKI_LOG_FILE=codewiki.log codewiki generate -C /path/to/repo
 ```
 
 `codewiki config set` and `codewiki config agent` edit the TOML file in place.
