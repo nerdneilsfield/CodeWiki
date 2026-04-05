@@ -1262,19 +1262,56 @@ def format_user_prompt(
                 _file_contents.keys(),
                 key=lambda p: len(_file_contents[p][1]),
             )
-            dropped = 0
+            _SIG_KEYWORDS = (
+                "def ",
+                "class ",
+                "function ",
+                "async function ",
+                "export ",
+                "import ",
+                "interface ",
+                "type ",
+                "struct ",
+                "enum ",
+                "fn ",
+                "pub ",
+                "func ",
+                "const ",
+                "var ",
+                "let ",
+                "module ",
+                "namespace ",
+                "package ",
+                "from ",
+                "abstract ",
+                "public ",
+                "private ",
+                "protected ",
+                "static ",
+                "#include",
+                "#import",
+                "#pragma",
+            )
+            reduced = 0
             for path in drop_candidates:
                 if total_file_tokens <= _TOKEN_BUDGET:
                     break
                 lang, content = _file_contents[path]
-                saved = _estimate_tokens(content)
-                _file_contents[path] = (lang, f"// (content omitted — see {path} directly)")
-                total_file_tokens -= saved
-                dropped += 1
-            if dropped:
+                # Extract only signature lines
+                sig_lines = [
+                    line for line in content.split("\n") if line.lstrip().startswith(_SIG_KEYWORDS)
+                ]
+                sig_text = "\n".join(sig_lines) if sig_lines else f"// (see {path})"
+                replacement = f"// ── signatures only (body omitted) ──\n{sig_text}"
+                saved = _estimate_tokens(content) - _estimate_tokens(replacement)
+                if saved > 0:
+                    _file_contents[path] = (lang, replacement)
+                    total_file_tokens -= saved
+                    reduced += 1
+            if reduced:
                 logger.warning(
-                    "⚠️ Dropped content of %d/%d files to fit budget",
-                    dropped,
+                    "⚠️ Reduced %d/%d files to signatures only to fit budget",
+                    reduced,
                     len(_file_contents),
                 )
 
