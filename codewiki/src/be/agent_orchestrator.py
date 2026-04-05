@@ -335,6 +335,24 @@ class AgentOrchestrator:
 
         prompt_tokens = count_tokens(user_prompt)
         estimated_tokens = prompt_tokens + _SYSTEM_PROMPT_OVERHEAD
+
+        # Final guard: if assembled prompt still exceeds limit, hard-truncate
+        _max_prompt_tokens = self.config.max_input_tokens - _SYSTEM_PROMPT_OVERHEAD
+        if prompt_tokens > _max_prompt_tokens:
+            # Truncate user_prompt by encoding → slicing → decoding
+            from codewiki.src.be.utils import _get_encoder
+
+            enc = _get_encoder("gpt-4")
+            tokens = enc.encode(user_prompt)
+            user_prompt = enc.decode(tokens[:_max_prompt_tokens])
+            prompt_tokens = _max_prompt_tokens
+            estimated_tokens = prompt_tokens + _SYSTEM_PROMPT_OVERHEAD
+            logger.warning(
+                "⚠️ Hard-truncated prompt for '%s' to %dK tokens (was over budget)",
+                module_name,
+                estimated_tokens // 1000,
+            )
+
         file_count = len(
             set(
                 getattr(components[c], "relative_path", "")
