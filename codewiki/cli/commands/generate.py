@@ -92,6 +92,7 @@ def _build_runtime_overrides(
     main_model: str | None,
     cluster_model: str | None,
     long_context_model: str | None,
+    long_context_fallback: str | None,
     long_context_threshold: int | None,
     *,
     base_config: CodeWikiConfig,
@@ -111,6 +112,7 @@ def _build_runtime_overrides(
         main_model=_normalize_model_override(base_config, main_model),
         cluster_model=_normalize_model_override(base_config, cluster_model),
         long_context_model=_normalize_model_override(base_config, long_context_model),
+        long_context_fallback=long_context_fallback,
         long_context_threshold=long_context_threshold,
         agent_instructions=merged_agent if merged_agent is not None else None,
     )
@@ -279,6 +281,12 @@ def parse_patterns(patterns_str: str) -> List[str]:
     help="Override the long-context model for this generation. Overrides config.",
 )
 @click.option(
+    "--long-context-fallback",
+    type=str,
+    default=None,
+    help="Fallback model(s) when long-context model fails (comma-separated). Overrides config.",
+)
+@click.option(
     "--long-context-threshold",
     type=int,
     default=None,
@@ -312,6 +320,7 @@ def generate_command(
     main_model: Optional[str],
     cluster_model: Optional[str],
     long_context_model: Optional[str],
+    long_context_fallback: Optional[str],
     long_context_threshold: Optional[int],
 ):
     """
@@ -499,6 +508,7 @@ def generate_command(
             main_model=main_model,
             cluster_model=cluster_model,
             long_context_model=long_context_model,
+            long_context_fallback=long_context_fallback,
             long_context_threshold=long_context_threshold,
             base_config=base_config,
         )

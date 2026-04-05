@@ -111,6 +111,7 @@ Model:
   --main-model NAME         Primary LLM model
   --cluster-model NAME      Model for module naming
   --long-context-model NAME Model for oversized prompts
+  --long-context-fallback N Fallback when long-context model fails (comma-separated)
   --long-context-threshold N Token threshold for long-context switch
 
 Limits:
@@ -359,7 +360,8 @@ long_context_threshold    = 200000
 main_model         = "openai/gpt-4o-mini"
 cluster_model      = "openai/gpt-4o-mini"
 fallback_models    = ["openai/gpt-4o-mini"]
-# long_context_model = "openai/gpt-4o"   # optional
+# long_context_model = "openai/gpt-4o"             # optional: for oversized prompts
+# long_context_fallback = "openai/gpt-4o-mini"     # optional: fallback chain if long-context fails
 
 [agent]
 # doc_type            = "architecture"   # api | architecture | user-guide | developer

@@ -82,6 +82,7 @@ def test_build_runtime_overrides_merges_agent_instructions(tmp_path):
         main_model=None,
         cluster_model=None,
         long_context_model=None,
+        long_context_fallback=None,
         long_context_threshold=None,
         base_config=config,
     )

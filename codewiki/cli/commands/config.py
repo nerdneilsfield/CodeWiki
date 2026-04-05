@@ -57,6 +57,7 @@ fallback_models = [
   "openai/gpt-4o-mini",
 ]
 # long_context_model = "openai/gpt-4o"
+# long_context_fallback = "openai/gpt-4o-mini"  # fallback chain if long-context model fails
 
 [agent]
 # doc_type = "architecture"  # api | architecture | user-guide | developer
@@ -66,6 +67,7 @@ fallback_models = [
 [postprocess]
 strict = false
 fix_links = true
+degrade_mermaid = false  # true = replace unfixable mermaid with text blocks
 # repair_model = ""
 # repair_fallback_1 = ""
 # repair_fallback_2 = ""
