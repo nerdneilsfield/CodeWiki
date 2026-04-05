@@ -356,6 +356,60 @@ def graph_pre_cluster(
             len(communities),
         )
 
+    # ── Split oversized communities ──────────────────────────────────────
+    # If a community is too large (>max_cluster_components), re-cluster it
+    # with higher resolution to produce sub-communities.
+    MAX_CLUSTER_COMPONENTS = 1000
+    split_communities: list[set[str]] = []
+    for community in communities:
+        if len(community) <= MAX_CLUSTER_COMPONENTS:
+            split_communities.append(community)
+            continue
+        # Re-cluster this oversized community with 2x resolution
+        logger.info(
+            "📐 Splitting oversized cluster (%d components) with higher resolution",
+            len(community),
+        )
+        sub_nodes = community
+        sub_graph = ig.Graph(n=len(sub_nodes), directed=False)
+        sub_list = sorted(sub_nodes)
+        sub_idx = {n: i for i, n in enumerate(sub_list)}
+        sub_graph.vs["name"] = sub_list
+        sub_edges = []
+        sub_weights = []
+        for u, v, data in G.edges(data=True):
+            if u in sub_idx and v in sub_idx:
+                sub_edges.append((sub_idx[u], sub_idx[v]))
+                sub_weights.append(data.get("weight", 1.0))
+        if sub_edges:
+            sub_graph.add_edges(sub_edges)
+            sub_graph.es["weight"] = sub_weights
+        try:
+            sub_resolution = resolution * 2.0
+            sub_partition = leidenalg.find_partition(
+                sub_graph,
+                leidenalg.RBConfigurationVertexPartition,
+                weights=sub_weights if sub_edges else None,
+                resolution_parameter=sub_resolution,
+                seed=42,
+                n_iterations=-1,
+            )
+            sub_comms = [{sub_list[idx] for idx in members} for members in sub_partition if members]
+            if len(sub_comms) > 1:
+                logger.info(
+                    "📐 Split into %d sub-clusters (sizes: %s)",
+                    len(sub_comms),
+                    ", ".join(str(len(c)) for c in sorted(sub_comms, key=len, reverse=True)[:5]),
+                )
+                split_communities.extend(sub_comms)
+            else:
+                split_communities.append(community)  # couldn't split further
+        except Exception as e:
+            logger.warning("Sub-clustering failed: %s", e)
+            split_communities.append(community)
+
+    communities = cast(list[set[str]], sorted(split_communities, key=len, reverse=True))
+
     # Build cluster dict with heuristic names
     clusters: Dict[str, List[str]] = {}
     node_to_cluster: Dict[str, str] = {}
