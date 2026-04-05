@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ── Shared Mermaid safety rules ───────────────────────────────────────────────
 # Embedded verbatim in every <MERMAID_REQUIREMENTS> block and in the base system
 # prompts.  Rule rationale: Mermaid's lexer rejects Unicode math operators in
@@ -1110,6 +1114,7 @@ def format_user_prompt(
         grouped_components[path].append(component_id)
 
     core_component_codes = ""
+    _file_contents: dict[str, tuple[str, str]] = {}  # path → (lang, content)
     for path, component_ids_in_file in grouped_components.items():
         core_component_codes += f"# File: {path}\n\n"
         core_component_codes += f"## Core Components in this file:\n"
@@ -1166,17 +1171,93 @@ def format_user_prompt(
 
         ext = "." + path.split(".")[-1] if "." in path else ""
         lang = EXTENSION_TO_LANGUAGE.get(ext, ext.lstrip(".") or "text")
-        core_component_codes += f"\n## File Content:\n```{lang}\n"
 
-        # Read content of the file using the first component's file path
+        # Read file content — actual source will be injected after budget check
         try:
-            core_component_codes += file_manager.load_text(
-                components[component_ids_in_file[0]].file_path
-            )
+            file_content = file_manager.load_text(components[component_ids_in_file[0]].file_path)
         except (FileNotFoundError, IOError) as e:
-            core_component_codes += f"# Error reading file: {e}\n"
+            file_content = f"# Error reading file: {e}"
 
-        core_component_codes += "```\n\n"
+        _file_contents[path] = (lang, file_content)
+        # Placeholder — will be replaced after truncation
+        core_component_codes += f"\n## File Content:\n{{{{FILE:{path}}}}}\n\n"
+
+    # ── Token budget enforcement ──────────────────────────────────────────
+    # If total file content exceeds the budget, iteratively truncate the
+    # longest files using a head (60%) + tail (40%) strategy.
+    _TOKEN_BUDGET = 800_000  # leave room for system prompt + response
+
+    def _estimate_tokens(text: str) -> int:
+        return len(text) // 3  # rough estimate: 1 token ≈ 3 chars
+
+    def _truncate_file(content: str, target_lines: int) -> str:
+        lines = content.split("\n")
+        if len(lines) <= target_lines:
+            return content
+        head_n = int(target_lines * 0.6)
+        tail_n = target_lines - head_n
+        omitted = len(lines) - head_n - tail_n
+        return (
+            "\n".join(lines[:head_n])
+            + f"\n\n// ... ({omitted} lines truncated) ...\n\n"
+            + "\n".join(lines[-tail_n:])
+        )
+
+    total_file_tokens = sum(_estimate_tokens(c) for _, c in _file_contents.values())
+    if total_file_tokens > _TOKEN_BUDGET:
+        logger.info(
+            "File content ~%dK tokens exceeds budget %dK — truncating",
+            total_file_tokens // 1000,
+            _TOKEN_BUDGET // 1000,
+        )
+        # Iteratively truncate the longest files until under budget
+        _MAX_ROUNDS = 10
+        for _round in range(_MAX_ROUNDS):
+            if total_file_tokens <= _TOKEN_BUDGET:
+                break
+            # Sort by current content length each round (longest first)
+            sorted_paths = sorted(
+                _file_contents.keys(),
+                key=lambda p: len(_file_contents[p][1]),
+                reverse=True,
+            )
+            made_progress = False
+            for path in sorted_paths:
+                if total_file_tokens <= _TOKEN_BUDGET:
+                    break
+                lang, content = _file_contents[path]
+                lines = content.split("\n")
+                if len(lines) <= 30:
+                    continue  # already at minimum
+                target = max(len(lines) // 2, 30)
+                truncated = _truncate_file(content, target)
+                saved = _estimate_tokens(content) - _estimate_tokens(truncated)
+                if saved <= 0:
+                    continue
+                total_file_tokens -= saved
+                _file_contents[path] = (lang, truncated)
+                made_progress = True
+                logger.debug(
+                    "Truncated %s: %d→%d lines (saved ~%dK tokens, round %d)",
+                    path,
+                    len(lines),
+                    target,
+                    saved // 1000,
+                    _round + 1,
+                )
+            if not made_progress:
+                break  # all files at minimum size
+        logger.info(
+            "After truncation: ~%dK tokens (%s budget)",
+            total_file_tokens // 1000,
+            "within" if total_file_tokens <= _TOKEN_BUDGET else "STILL OVER",
+        )
+
+    # Inject file contents into placeholders
+    for path, (lang, content) in _file_contents.items():
+        placeholder = f"{{{{FILE:{path}}}}}"
+        replacement = f"```{lang}\n{content}\n```"
+        core_component_codes = core_component_codes.replace(placeholder, replacement)
 
     # Build a reverse dependency map (who depends on me) for this module
     depended_by: dict[str, list[str]] = {}
