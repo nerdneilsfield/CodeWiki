@@ -27,8 +27,8 @@ pip install git+https://github.com/nerdneilsfield/CodeWiki.git
 Requires Python 3.12+ and Node.js 14+.
 
 ```bash
-# Required: Mermaid CLI for diagram validation during post-processing
-npm install -g @mermaid-js/mermaid-cli
+# Required: Mermaid CLI and KaTeX for post-processing validation
+npm install -g @mermaid-js/mermaid-cli katex
 ```
 
 ### Configure
