@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from typing import cast
 
@@ -120,8 +121,13 @@ def _configure_root_handler(*, renderer, level: int, stream) -> None:
         root.addHandler(handler)
 
 
-def configure_cli_logging(verbose: bool = False) -> None:
-    """Configure structlog for CLI usage with colored console output."""
+def configure_cli_logging(verbose: bool = False, log_file: str = "") -> None:
+    """Configure structlog for CLI usage with colored console output.
+
+    When *log_file* is provided (or env ``CODEWIKI_LOG_FILE`` is set),
+    DEBUG-level JSON logs are written to that file in addition to the
+    console handler.
+    """
     level = logging.DEBUG if verbose else logging.INFO
     renderer = structlog.dev.ConsoleRenderer(colors=True)
     _configure_structlog(format_exc=False)
@@ -133,6 +139,24 @@ def configure_cli_logging(verbose: bool = False) -> None:
 
     for name in _THIRD_PARTY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
+
+    # File handler — always DEBUG so diagnostics survive even without --verbose
+    log_file = log_file or os.environ.get("CODEWIKI_LOG_FILE", "")
+    if log_file:
+        log_dir = os.path.dirname(log_file)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        file_formatter = structlog.stdlib.ProcessorFormatter(
+            processor=structlog.processors.JSONRenderer(),
+            foreign_pre_chain=_shared_processors(format_exc=True),
+        )
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(file_formatter)
+        setattr(fh, "_codewiki_structlog", True)
+        logging.getLogger().addHandler(fh)
+        logging.getLogger().setLevel(logging.DEBUG)
+        codewiki_logger.setLevel(logging.DEBUG)
 
 
 def configure_web_logging() -> None:

@@ -213,6 +213,12 @@ def parse_patterns(patterns_str: str) -> List[str]:
     help="Show detailed progress and debug information",
 )
 @click.option(
+    "--log-file",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Write DEBUG-level JSON logs to this file. Also set via CODEWIKI_LOG_FILE env.",
+)
+@click.option(
     "--max-tokens",
     type=int,
     default=None,
@@ -295,6 +301,7 @@ def generate_command(
     doc_type: Optional[str],
     instructions: Optional[str],
     verbose: bool,
+    log_file: Optional[str],
     max_tokens: Optional[int],
     max_token_per_module: Optional[int],
     max_token_per_leaf_module: Optional[int],
@@ -365,7 +372,7 @@ def generate_command(
     $ codewiki generate --main-model gpt-4o
     $ codewiki generate --main-model gpt-4o --long-context-model gpt-4o-128k --long-context-threshold 100000
     """
-    configure_cli_logging(verbose=verbose)
+    configure_cli_logging(verbose=verbose, log_file=log_file or "")
     logger = create_logger(verbose=verbose, name="codewiki.cli.generate")
     start_time = time.time()
 
