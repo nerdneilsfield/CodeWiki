@@ -104,17 +104,6 @@ class AgentOrchestrator:
         self.long_context_model = (
             create_long_context_model(config) if config.long_context_model else None
         )
-        # Build a routing model that transparently selects long-context when needed
-        if self.long_context_model:
-            from codewiki.src.be.context_routing_model import ContextRoutingModel
-
-            self.routing_model = ContextRoutingModel(
-                self.fallback_models,
-                self.long_context_model,
-                threshold=config.long_context_threshold,
-            )
-        else:
-            self.routing_model = self.fallback_models
         self.custom_instructions = config.get_prompt_addition() if config else None
         self.output_language = config.output_language if config else "en"
         # v2: late-injected after index build + clustering
@@ -152,12 +141,17 @@ class AgentOrchestrator:
         core_component_ids: List[str],
         estimated_tokens: int = 0,
     ) -> Agent[CodeWikiDeps, str]:
-        """Create an appropriate agent based on module complexity.
-
-        Model selection is handled by ContextRoutingModel at the LLM layer —
-        it automatically routes to long-context model when input exceeds threshold.
-        """
-        model = self.routing_model
+        """Create an appropriate agent based on module complexity."""
+        if self.long_context_model and estimated_tokens > self.config.long_context_threshold:
+            model = self.long_context_model
+            logger.info(
+                "🔀 Using long-context model for '%s' (~%dK tokens > %dK threshold)",
+                module_name,
+                estimated_tokens // 1000,
+                self.config.long_context_threshold // 1000,
+            )
+        else:
+            model = self.fallback_models
         custom_instructions = self.custom_instructions or ""
 
         if is_complex_module(components, core_component_ids):
@@ -348,9 +342,9 @@ class AgentOrchestrator:
         prompt_tokens = count_tokens(user_prompt)
         estimated_tokens = prompt_tokens + _SYSTEM_PROMPT_OVERHEAD
 
-        # Hard-truncate if over the absolute max (long-context limit).
-        # Model routing (normal vs long-context) is handled transparently
-        # by ContextRoutingModel at the LLM layer based on actual message size.
+        # Hard-truncate if over the absolute max.
+        # Model selection (normal vs long-context) happens in create_agent
+        # based on estimated_tokens computed here.
         _absolute_max = (
             self.config.long_context_max_input_tokens
             if self.long_context_model

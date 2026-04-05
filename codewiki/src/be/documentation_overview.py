@@ -110,9 +110,9 @@ def _budget_child_docs(
             # Try adding this paragraph
             included[name] = sorted(set(included[name]) | {para_idx})
             if _total_tokens() > max_tokens:
-                # Over budget — remove it and stop this layer
+                # Over budget — remove it, skip this doc but try others
                 included[name] = [i for i in included[name] if i != para_idx]
-                break
+                continue
 
     result = _build_result()
     total = _total_tokens()
@@ -343,9 +343,21 @@ async def generate_parent_module_docs(
         output_language=config.output_language,
     )
 
-    from codewiki.src.be.utils import count_tokens
+    from codewiki.src.be.utils import count_tokens, _get_encoder
 
     prompt_tokens = count_tokens(prompt)
+    # Hard-truncate if over budget
+    if prompt_tokens > config.max_input_tokens:
+        enc = _get_encoder("gpt-4")
+        tokens = enc.encode(prompt)
+        prompt = enc.decode(tokens[: config.max_input_tokens])
+        prompt_tokens = config.max_input_tokens
+        logger.warning(
+            "⚠️ Hard-truncated overview prompt for '%s' to %dK tokens",
+            module_name,
+            prompt_tokens // 1000,
+        )
+
     logger.info(
         "📝 Overview prompt for '%s': ~%dK tokens (budget %dK)",
         module_name,

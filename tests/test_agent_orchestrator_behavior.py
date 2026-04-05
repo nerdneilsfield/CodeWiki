@@ -24,10 +24,9 @@ def _make_config(tmp_path):
     )
 
 
-def test_create_agent_uses_routing_model(tmp_path):
-    """Agent always gets the ContextRoutingModel which routes transparently."""
+def test_create_agent_uses_long_context_model_for_large_prompt(tmp_path):
+    """Agent gets long-context model when estimated tokens exceed threshold."""
     import codewiki.src.be.agent_orchestrator as orch_mod
-    from codewiki.src.be.context_routing_model import ContextRoutingModel
 
     with (
         patch.object(orch_mod, "create_fallback_models", return_value="fallback-model"),
@@ -35,12 +34,10 @@ def test_create_agent_uses_routing_model(tmp_path):
         patch.object(orch_mod, "Agent", return_value=MagicMock()) as mock_agent,
     ):
         orchestrator = orch_mod.AgentOrchestrator(_make_config(tmp_path))
+        # threshold is 100 in test config
         orchestrator.create_agent("module", {}, [], estimated_tokens=1000)
 
-    model_arg = mock_agent.call_args.args[0]
-    assert isinstance(model_arg, ContextRoutingModel)
-    assert model_arg._primary == "fallback-model"
-    assert model_arg._long_context == "long-model"
+    assert mock_agent.call_args.args[0] == "long-model"
 
 
 def test_create_agent_uses_complex_toolset_for_multi_file_module(tmp_path):
