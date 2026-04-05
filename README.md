@@ -361,7 +361,7 @@ main_model         = "openai/gpt-4o-mini"
 cluster_model      = "openai/gpt-4o-mini"
 fallback_models    = ["openai/gpt-4o-mini"]
 # long_context_model = "openai/gpt-4o"             # optional: for oversized prompts
-# long_context_fallback = "openai/gpt-4o-mini"     # optional: fallback chain if long-context fails
+# long_context_fallback = ["openai/gpt-4o-mini"]   # optional: fallback chain if long-context fails
 
 [agent]
 # doc_type            = "architecture"   # api | architecture | user-guide | developer

@@ -57,7 +57,7 @@ fallback_models = [
   "openai/gpt-4o-mini",
 ]
 # long_context_model = "openai/gpt-4o"
-# long_context_fallback = "openai/gpt-4o-mini"  # fallback chain if long-context model fails
+# long_context_fallback = ["openai/gpt-4o-mini"]  # fallback chain if long-context model fails
 
 [agent]
 # doc_type = "architecture"  # api | architecture | user-guide | developer
