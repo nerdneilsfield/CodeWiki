@@ -20,6 +20,9 @@ from codewiki.src.utils import content_hash, doc_id_for_path, file_manager, find
 
 logger = logging.getLogger(__name__)
 
+# Token overhead for JSON structure, prompt template, and system prompt
+_OVERVIEW_OVERHEAD = 30_000
+
 
 def _split_paragraphs(text: str) -> list[str]:
     """Split text into paragraphs (separated by blank lines)."""
@@ -180,7 +183,9 @@ def build_overview_structure(
                 raw_docs[name] = ""
             result[name] = entry
 
-        budgeted = _budget_child_docs(raw_docs, ctx.config.max_input_tokens)
+        budgeted = _budget_child_docs(
+            raw_docs, max(ctx.config.max_input_tokens - _OVERVIEW_OVERHEAD, 50_000)
+        )
         for name in result:
             result[name]["docs"] = budgeted.get(name, "")
         return result
@@ -221,7 +226,9 @@ def build_overview_structure(
             logger.warning("Module docs not found for %s", module_path + [child_name])
             raw_docs[child_name] = ""
 
-    budgeted = _budget_child_docs(raw_docs, ctx.config.max_input_tokens)
+    budgeted = _budget_child_docs(
+        raw_docs, max(ctx.config.max_input_tokens - _OVERVIEW_OVERHEAD, 50_000)
+    )
     for child_name in target_children:
         target_children[child_name]["docs"] = budgeted.get(child_name, "")
     return result
@@ -334,6 +341,16 @@ async def generate_parent_module_docs(
         repo_structure=json.dumps(repo_structure, indent=4),
         is_repo=(len(module_path) == 0),
         output_language=config.output_language,
+    )
+
+    from codewiki.src.be.utils import count_tokens
+
+    prompt_tokens = count_tokens(prompt)
+    logger.info(
+        "📝 Overview prompt for '%s': ~%dK tokens (budget %dK)",
+        module_name,
+        prompt_tokens // 1000,
+        config.max_input_tokens // 1000,
     )
 
     try:
