@@ -1243,14 +1243,6 @@ def format_user_prompt(
                 total_file_tokens -= saved
                 _file_contents[path] = (lang, truncated)
                 made_progress = True
-                logger.debug(
-                    "Truncated %s: %d→%d lines (saved ~%dK tokens, round %d)",
-                    path,
-                    len(lines),
-                    target,
-                    saved // 1000,
-                    _round + 1,
-                )
             if not made_progress:
                 break  # all files at minimum size
 
