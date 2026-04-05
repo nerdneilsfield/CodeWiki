@@ -72,7 +72,7 @@ class DocumentationGenerator:
         self.config = config
         self.commit_id = commit_id
         self.cancel_token = cancel_token
-        self.graph_builder = DependencyGraphBuilder(config)
+        self.graph_builder = DependencyGraphBuilder(config, commit_id=commit_id or "")
         self.usage_stats = LLMUsageStats()
         self.agent_orchestrator = AgentOrchestrator(config, usage_stats=self.usage_stats)
         self._gen_state: Optional[GenerationState] = None
@@ -403,24 +403,9 @@ class DocumentationGenerator:
         )
 
     def _build_initial_context(self) -> PipelineContext:
-        # Pre-check: skip GraphBuild/IndexBuild only when BOTH commit and
-        # config are unchanged.  If commit changed but config didn't, we
-        # still reuse the cluster layout but need GraphBuild for heal.
-        working_dir = os.path.abspath(self.config.docs_dir)
-        cluster_cache_hit = False
-        first_mt_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
-        state_path = internal_file_path(working_dir, GENERATION_STATE_FILENAME)
-        if os.path.exists(first_mt_path):
-            existing = GenerationState.load(state_path)
-            same_config = existing.config_fingerprint == config_fingerprint(self.config)
-            same_commit = existing.repo_commit == (self.commit_id or "")
-            if same_config and same_commit:
-                cluster_cache_hit = True
-
         return PipelineContext(
             config=self.config,
-            working_dir=working_dir,
-            cluster_cache_hit=cluster_cache_hit,
+            working_dir=os.path.abspath(self.config.docs_dir),
             usage_stats=self.usage_stats,
             graph_builder=self.graph_builder,
             agent_orchestrator=self.agent_orchestrator,
@@ -472,12 +457,8 @@ class DocumentationGenerator:
 
         if not need_recluster:
             assert cached_tree is not None
-            if not commit_changed:
-                # Same commit — skip GraphBuild entirely, use cached tree as-is
-                ctx.cluster_cache_hit = True
-                module_tree = cached_tree
-            elif ctx.components:
-                # Commit changed but layout reused — heal tree with new components
+            if ctx.components:
+                # Heal tree with current components (GraphBuild always runs)
                 module_tree = heal_module_tree_components(cached_tree, ctx.components)
             else:
                 module_tree = cached_tree

@@ -179,11 +179,10 @@ def test_cluster_modules_uses_cached_tree_when_commit_matches(tmp_path):
     ):
         asyncio.run(gen._cluster_modules(ctx))
 
-    # Same commit + same config → heal is NOT called (cached tree used as-is)
-    heal.assert_not_called()
+    # Same config → cluster not called; heal called with available components
+    heal.assert_called_once_with(cached_tree, ctx.components)
     cluster.assert_not_called()
     assert ctx.module_tree == cached_tree
-    assert ctx.cluster_cache_hit is True
     assert any(
         call.args[1].endswith(FIRST_MODULE_TREE_FILENAME) for call in save_json.call_args_list
     )

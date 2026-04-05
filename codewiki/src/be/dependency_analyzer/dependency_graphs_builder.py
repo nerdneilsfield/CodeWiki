@@ -1,7 +1,10 @@
 from typing import Dict, List, Any
+import json
 import os
+import subprocess
 from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.be.dependency_analyzer.ast_parser import DependencyParser
+from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.dependency_analyzer.topo_sort import (
     build_graph_from_components,
     get_leaf_nodes,
@@ -12,12 +15,77 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+_GRAPH_CACHE_VERSION = "v1"
+
 
 class DependencyGraphBuilder:
     """Handles dependency analysis and graph building."""
 
-    def __init__(self, config: CodeWikiConfig):
+    def __init__(self, config: CodeWikiConfig, commit_id: str = ""):
         self.config = config
+        self.commit_id = commit_id
+
+    def _cache_path(self) -> str:
+        return os.path.join(self.config.dependency_graph_dir, "_graph_cache.json")
+
+    def _get_commit_hash(self) -> str:
+        if self.commit_id:
+            return self.commit_id
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.config.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return result.stdout.strip() if result.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    def _try_load_cache(self) -> tuple[Dict[str, Any], List[str]] | None:
+        cache_path = self._cache_path()
+        if not os.path.exists(cache_path):
+            return None
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            key = data.get("_cache_key", {})
+            if (
+                key.get("commit") == self._get_commit_hash()
+                and key.get("version") == _GRAPH_CACHE_VERSION
+                and sorted(key.get("include", [])) == sorted(self.config.include_patterns or [])
+                and sorted(key.get("exclude", [])) == sorted(self.config.exclude_patterns or [])
+            ):
+                components = {k: Node.model_validate(v) for k, v in data["components"].items()}
+                leaf_nodes = data["leaf_nodes"]
+                logger.info(
+                    "Graph cache hit — %d components, %d leaves",
+                    len(components),
+                    len(leaf_nodes),
+                )
+                return components, leaf_nodes
+        except Exception as e:
+            logger.debug("Graph cache load failed: %s", e)
+        return None
+
+    def _save_cache(self, components: Dict[str, Any], leaf_nodes: List[str]) -> None:
+        try:
+            data = {
+                "_cache_key": {
+                    "commit": self._get_commit_hash(),
+                    "version": _GRAPH_CACHE_VERSION,
+                    "include": self.config.include_patterns or [],
+                    "exclude": self.config.exclude_patterns or [],
+                },
+                "components": {k: v.model_dump() for k, v in components.items()},
+                "leaf_nodes": leaf_nodes,
+            }
+            file_manager.ensure_directory(self.config.dependency_graph_dir)
+            with open(self._cache_path(), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception as e:
+            logger.debug("Failed to save graph cache: %s", e)
 
     def build_dependency_graph(self) -> tuple[Dict[str, Any], List[str]]:
         """
@@ -26,6 +94,11 @@ class DependencyGraphBuilder:
         Returns:
             Tuple of (components, leaf_nodes)
         """
+        # Try cache first
+        cached = self._try_load_cache()
+        if cached is not None:
+            return cached
+
         # Ensure output directory exists
         file_manager.ensure_directory(self.config.dependency_graph_dir)
 
@@ -118,4 +191,5 @@ class DependencyGraphBuilder:
             len(leaf_nodes),
             len(keep_leaf_nodes),
         )
+        self._save_cache(components, keep_leaf_nodes)
         return components, keep_leaf_nodes
