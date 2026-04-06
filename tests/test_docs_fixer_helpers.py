@@ -111,19 +111,17 @@ def test_fix_docs_strict_mode_raises_lint_error(tmp_path):
 
     with patch(
         "codewiki.src.be.docs_fixer.fix_mermaid",
-        side_effect=lambda text,
-        *args,
-        report=None,
-        filename="",
-        **kwargs: report.link_issues.append(
-            {
-                "file": filename or "overview.md",
-                "line": 1,
-                "target": "missing.md",
-                "issue_type": "broken_link",
-            }
-        )
-        or text,
+        side_effect=lambda text, *args, report=None, filename="", **kwargs: (
+            report.link_issues.append(
+                {
+                    "file": filename or "overview.md",
+                    "line": 1,
+                    "target": "missing.md",
+                    "issue_type": "broken_link",
+                }
+            )
+            or text
+        ),
     ):
         try:
             fix_docs(str(tmp_path), config)
