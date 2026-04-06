@@ -17,7 +17,7 @@ class LLMCallUsage:
 
 @dataclass
 class LLMCallResult:
-    """Return value from call_llm: content plus optional usage."""
+    """Return value from a single LLM call: content plus optional usage."""
 
     content: str
     usage: LLMCallUsage | None = None

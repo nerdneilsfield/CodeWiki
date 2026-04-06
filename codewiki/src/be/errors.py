@@ -88,7 +88,20 @@ def classify_llm_exception(exc: Exception) -> LLMError:
                 code = body.get("error", {}).get("code", "")
                 if "context_length" in code:
                     return LLMError(str(exc), ErrorCategory.RESOURCE_EXHAUSTED, status)
-            if "context_length" in msg or "maximum context" in msg.lower():
+            msg_lower = msg.lower()
+            if any(
+                k in msg_lower
+                for k in (
+                    "context_length",
+                    "maximum context",
+                    "too long",
+                    "input length",
+                    "range of input",
+                    "token limit",
+                    "max_tokens",
+                    "input_tokens_limit",
+                )
+            ):
                 return LLMError(str(exc), ErrorCategory.RESOURCE_EXHAUSTED, status)
             return LLMError(str(exc), ErrorCategory.NON_RETRYABLE_CLIENT, status)
 

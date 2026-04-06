@@ -220,16 +220,6 @@ def create_long_context_model(config: CodeWikiConfig):
     return FallbackModel(primary, *fallbacks)
 
 
-def select_agent_model(config: CodeWikiConfig, estimated_tokens: int = 0):
-    if config.long_context_model and estimated_tokens > config.long_context_threshold:
-        _logger.info(
-            f"Pre-selecting long-context model {config.long_context_model} "
-            f"(estimated {estimated_tokens} tokens > threshold {config.long_context_threshold})"
-        )
-        return create_long_context_model(config)
-    return create_fallback_models(config)
-
-
 def create_openai_client(config: CodeWikiConfig) -> OpenAI:
     return _get_cached_openai_client(config.llm_base_url, config.llm_api_key)
 
@@ -289,33 +279,19 @@ def _call_llm_streaming(
     return "".join(parts)
 
 
-def call_llm(
+def raw_llm_call(
     prompt: str,
     config: CodeWikiConfig,
-    model: str | None = None,
+    model: str,
     temperature: float = 0.0,
     stream: bool = False,
 ) -> "LLMCallResult":
     from codewiki.src.be.utils import count_tokens
 
     try:
-        if model is None:
-            model = config.main_model
-
         prompt_tokens = count_tokens(prompt)
-        if (
-            config.long_context_model
-            and prompt_tokens > config.long_context_threshold
-            and model == config.main_model
-        ):
-            _logger.info(
-                f"Switching model: {model} → {config.long_context_model} "
-                f"(prompt {prompt_tokens} tokens > threshold {config.long_context_threshold})"
-            )
-            model = config.long_context_model
-
         _logger.debug(
-            f"call_llm: model={model}, prompt_tokens={prompt_tokens}, temperature={temperature}"
+            f"raw_llm_call: model={model}, prompt_tokens={prompt_tokens}, temperature={temperature}"
         )
 
         client, provider_type = _create_client_for_model(config, model)
@@ -386,7 +362,7 @@ def call_llm(
 
         elapsed = time.time() - t0
         _logger.debug(
-            "call_llm: model=%s, elapsed=%.1fs, input_tokens=%s, output_tokens=%s, source=%s",
+            "raw_llm_call: model=%s, elapsed=%.1fs, input_tokens=%s, output_tokens=%s, source=%s",
             model,
             elapsed,
             usage.input_tokens,
