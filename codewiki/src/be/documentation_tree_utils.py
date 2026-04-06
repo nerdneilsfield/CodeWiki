@@ -40,7 +40,7 @@ def collect_path_counts(tree: Dict[str, Any]) -> dict[str, int]:
 
 
 def stable_hash(parts: list[str]) -> str:
-    digest = hashlib.md5()
+    digest = hashlib.sha256()
     for part in parts:
         digest.update(part.encode("utf-8"))
         digest.update(b"\0")
@@ -177,9 +177,9 @@ def compute_module_input_hash(
         node = components.get(component_id)
         source_code = getattr(node, "source_code", "")
         if source_code:
-            source_hashes.append(hashlib.md5(source_code.encode("utf-8")).hexdigest())
+            source_hashes.append(hashlib.sha256(source_code.encode("utf-8")).hexdigest())
     custom_text = config.get_prompt_addition() if hasattr(config, "get_prompt_addition") else ""
-    custom_hash = hashlib.md5(custom_text.encode("utf-8")).hexdigest()
+    custom_hash = hashlib.sha256(custom_text.encode("utf-8")).hexdigest()
     output_language = getattr(config, "output_language", "en")
     return stable_hash(
         [

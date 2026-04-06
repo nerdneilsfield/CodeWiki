@@ -138,7 +138,7 @@ class GuideGenerator:
 
     @staticmethod
     def _compute_combined_hash(file_paths: List[str], extra: str = "") -> str:
-        h = hashlib.md5()
+        h = hashlib.sha256()
         if extra:
             h.update(extra.encode())
         for fp in sorted(file_paths):

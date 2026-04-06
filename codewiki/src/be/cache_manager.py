@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import threading
-import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -62,6 +61,7 @@ class CacheManager:
         self._lock = threading.Lock()
         self._dirty = False
         self._stopped = False
+        self._wake_event = threading.Event()
         self._flush_thread: threading.Thread | None = None
         self._load()
 
@@ -233,6 +233,7 @@ class CacheManager:
         if self._flush_thread is not None:
             return
         self._stopped = False
+        self._wake_event.clear()
         self._flush_thread = threading.Thread(
             target=self._periodic_flush,
             daemon=True,
@@ -243,6 +244,7 @@ class CacheManager:
     def stop(self) -> None:
         """Stop background flush thread and do a final flush."""
         self._stopped = True
+        self._wake_event.set()
         if self._flush_thread is not None:
             self._flush_thread.join(timeout=5.0)
             self._flush_thread = None
@@ -250,7 +252,8 @@ class CacheManager:
 
     def _periodic_flush(self) -> None:
         while not self._stopped:
-            time.sleep(self._flush_interval)
+            self._wake_event.wait(self._flush_interval)
+            self._wake_event.clear()
             if self._stopped:
                 break
             try:
@@ -308,6 +311,13 @@ class CacheManager:
         path = self._registry_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp_path = path + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, path)
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except FileNotFoundError:
+                pass
+            raise

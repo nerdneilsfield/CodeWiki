@@ -448,7 +448,9 @@ def fix_mermaid_in_text(
     for issue in issues:
         block_index = int(issue.issue_id.rsplit(":", 1)[-1])
         repair_id = f"postprocess_repair:{filename}:mermaid_{block_index}"
-        block_hash = hashlib.md5((issue.cleaned or issue.span.content).encode("utf-8")).hexdigest()
+        block_hash = hashlib.sha256(
+            (issue.cleaned or issue.span.content).encode("utf-8")
+        ).hexdigest()
         if cache_manager and cache_dir and cache_manager.is_valid(repair_id, block_hash):
             cached_path = _repair_cache_path(cache_dir, repair_id)
             if os.path.exists(cached_path):
@@ -470,7 +472,7 @@ def fix_mermaid_in_text(
                     continue
                 block_index = int(issue.issue_id.rsplit(":", 1)[-1])
                 repair_id = f"postprocess_repair:{filename}:mermaid_{block_index}"
-                block_hash = hashlib.md5(
+                block_hash = hashlib.sha256(
                     (issue.cleaned or issue.span.content).encode("utf-8")
                 ).hexdigest()
                 cached_path = _repair_cache_path(cache_dir, repair_id)

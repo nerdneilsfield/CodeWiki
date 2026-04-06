@@ -428,7 +428,7 @@ def fix_math_in_text(
         for issue in issues:
             _, line_no, issue_index = issue.issue_id.rsplit(":", 2)
             repair_id = f"postprocess_repair:{filename}:math_{line_no}_{issue_index}"
-            formula_hash = hashlib.md5(
+            formula_hash = hashlib.sha256(
                 (issue.cleaned or issue.span.content).encode("utf-8")
             ).hexdigest()
             if cache_manager and cache_dir and cache_manager.is_valid(repair_id, formula_hash):
@@ -451,7 +451,7 @@ def fix_math_in_text(
                         continue
                     _, line_no, issue_index = issue.issue_id.rsplit(":", 2)
                     repair_id = f"postprocess_repair:{filename}:math_{line_no}_{issue_index}"
-                    formula_hash = hashlib.md5(
+                    formula_hash = hashlib.sha256(
                         (issue.cleaned or issue.span.content).encode("utf-8")
                     ).hexdigest()
                     cached_path = _repair_cache_path(cache_dir, repair_id)

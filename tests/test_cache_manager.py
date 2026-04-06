@@ -1,5 +1,7 @@
 import os
 import sys
+import threading
+import time
 
 import pytest
 
@@ -236,6 +238,27 @@ def test_cache_manager_invalidate_handles_deep_dependency_chain(cache_dir):
     assert cache_manager.get_entry(previous).status == "stale"
 
 
+def test_cache_manager_invalidate_handles_cycle(cache_dir):
+    cache_manager = CacheManager(cache_dir)
+    cache_manager.mark_done(
+        "module:a",
+        input_hash="ha",
+        output_path="a.md",
+        depends_on=["module:b"],
+    )
+    cache_manager.mark_done(
+        "module:b",
+        input_hash="hb",
+        output_path="b.md",
+        depends_on=["module:a"],
+    )
+
+    cache_manager.invalidate("module:a")
+
+    assert cache_manager.get_entry("module:a").status == "stale"
+    assert cache_manager.get_entry("module:b").status == "stale"
+
+
 def test_cache_manager_get_stale_entries(cache_dir):
     cache_manager = CacheManager(cache_dir)
     cache_manager.mark_done("module:a", input_hash="h1", output_path="a.md")
@@ -247,6 +270,65 @@ def test_cache_manager_get_stale_entries(cache_dir):
 
 def test_overview_regenerate_threshold():
     assert CacheManager.OVERVIEW_REGENERATE_THRESHOLD == 0.5
+
+
+def test_cache_manager_stop_wakes_flush_thread_immediately(cache_dir):
+    cache_manager = CacheManager(cache_dir, flush_interval=60.0)
+    cache_manager.start()
+    started = time.monotonic()
+    cache_manager.stop()
+    assert time.monotonic() - started < 1.0
+
+
+def test_cache_manager_flush_removes_tmp_on_failure(cache_dir, monkeypatch):
+    cache_manager = CacheManager(cache_dir)
+    cache_manager.mark_done("module:auth", input_hash="abc", output_path="auth.md")
+
+    def _boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("json.dump", _boom)
+    with pytest.raises(OSError, match="disk full"):
+        cache_manager.flush()
+
+    assert not os.path.exists(os.path.join(cache_dir, "cache_registry.json.tmp"))
+
+
+def test_cache_manager_concurrent_get_entry_mutation_is_isolated(cache_dir):
+    cache_manager = CacheManager(cache_dir)
+    cache_manager.mark_done("module:auth", input_hash="abc", output_path="auth.md")
+    stop = threading.Event()
+    errors: list[Exception] = []
+
+    def _reader():
+        try:
+            while not stop.is_set():
+                entry = cache_manager.get_entry("module:auth")
+                if entry is not None:
+                    entry.status = "stale"
+                    entry.output_file = "mutated.md"
+        except Exception as exc:  # pragma: no cover - defensive
+            errors.append(exc)
+
+    thread = threading.Thread(target=_reader)
+    thread.start()
+    try:
+        for idx in range(50):
+            cache_manager.mark_done(
+                "module:auth",
+                input_hash=f"abc-{idx}",
+                output_path="auth.md",
+                output_file="auth.md",
+            )
+    finally:
+        stop.set()
+        thread.join(timeout=2.0)
+
+    assert errors == []
+    entry = cache_manager.get_entry("module:auth")
+    assert entry is not None
+    assert entry.output_file == "auth.md"
+    assert entry.status == "valid"
 
 
 def test_cache_full_pipeline_skip_flow(cache_dir):

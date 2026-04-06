@@ -122,7 +122,7 @@ def test_fix_mermaid_in_text_uses_cached_repair_result(tmp_path):
     text = '```mermaid\nA["it\'s bad"] --> B\n```'
     repair_id = "postprocess_repair:diagram.md:mermaid_0"
     block_hash = (
-        __import__("hashlib").md5(cleanup_mermaid('A["it\'s bad"] --> B').encode()).hexdigest()
+        __import__("hashlib").sha256(cleanup_mermaid('A["it\'s bad"] --> B').encode()).hexdigest()
     )
     cached_path = _repair_cache_path(str(tmp_path / ".codewiki"), repair_id)
     Path(cached_path).write_text('A["its bad"] --> B', encoding="utf-8")
@@ -171,7 +171,7 @@ def test_fix_mermaid_in_text_falls_back_when_cached_file_missing(tmp_path):
     text = '```mermaid\nA["it\'s bad"] --> B\n```'
     repair_id = "postprocess_repair:diagram.md:mermaid_0"
     block_hash = (
-        __import__("hashlib").md5(cleanup_mermaid('A["it\'s bad"] --> B').encode()).hexdigest()
+        __import__("hashlib").sha256(cleanup_mermaid('A["it\'s bad"] --> B').encode()).hexdigest()
     )
     cache_manager.mark_done(
         repair_id,
@@ -218,7 +218,7 @@ def test_fix_math_in_text_uses_cached_repair_result(tmp_path):
     cache_manager = CacheManager(str(tmp_path / ".codewiki"))
     text = "Broken $$\\frac{1}{$$ formula"
     repair_id = "postprocess_repair:math.md:math_1_0"
-    formula_hash = __import__("hashlib").md5(cleanup_formula(r"\frac{1}{").encode()).hexdigest()
+    formula_hash = __import__("hashlib").sha256(cleanup_formula(r"\frac{1}{").encode()).hexdigest()
     cached_path = _repair_cache_path(str(tmp_path / ".codewiki"), repair_id)
     Path(cached_path).write_text(r"\frac{1}{2}", encoding="utf-8")
     cache_manager.mark_done(
