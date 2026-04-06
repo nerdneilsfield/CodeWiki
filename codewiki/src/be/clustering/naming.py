@@ -4,7 +4,7 @@ import logging
 from collections import Counter
 from typing import Any
 
-from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_retry import with_retry_sync
 from codewiki.src.be.llm_usage import LLMUsageStats
 
@@ -96,6 +96,7 @@ def _name_clusters_with_llm(
     config: Any,
     components: dict[str, Any] | None = None,
     usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
 ) -> list[dict] | None:
     """Call LLM for cluster naming. Returns None on failure.
 
@@ -108,7 +109,13 @@ def _name_clusters_with_llm(
     prompt = _build_naming_prompt(clusters, component_file_map, components)
 
     try:
-        raw = with_retry_sync(call_llm, prompt, config, model=config.cluster_model, max_retries=1)
+        llm = middleware or LLMMiddleware(config, usage_stats=usage_stats)
+        raw = with_retry_sync(
+            llm.call,
+            prompt,
+            model=config.cluster_model,
+            max_retries=1,
+        )
         if usage_stats and raw.usage:
             usage_stats.record(
                 raw.model,
@@ -116,7 +123,7 @@ def _name_clusters_with_llm(
                 raw.usage.output_tokens,
             )
     except Exception as e:
-        logger.warning("call_llm raised during cluster naming: %s", e)
+        logger.warning("middleware LLM call raised during cluster naming: %s", e)
         return None
 
     try:
@@ -169,6 +176,7 @@ def name_clusters(
     config: Any = None,
     components: dict[str, Any] | None = None,
     usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
 ) -> list[dict]:
     """Name clusters using LLM with heuristic fallback.
 
@@ -188,7 +196,12 @@ def name_clusters(
     if config is not None and getattr(config, "cluster_model", None):
         try:
             result = _name_clusters_with_llm(
-                clusters, component_file_map, config, components, usage_stats
+                clusters,
+                component_file_map,
+                config,
+                components,
+                usage_stats,
+                middleware,
             )
             if result is not None and len(result) == len(clusters):
                 return result

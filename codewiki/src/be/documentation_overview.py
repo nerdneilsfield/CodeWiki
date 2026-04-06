@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import os
@@ -11,7 +10,8 @@ from typing import Any, Dict, List, Optional
 
 from codewiki.src.be.documentation_tree_utils import hash_mapping
 from codewiki.src.be.generation_state import GenerationState, GenerationStateManager
-from codewiki.src.be.llm_usage import LLMCallResult, LLMUsageStats
+from codewiki.src.be.llm_middleware import LLMMiddleware
+from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.module_tree_manager import ModuleTreeManager
 from codewiki.src.be.prompt_template import format_overview_prompt
 from codewiki.src.codewiki_config import CodeWikiConfig
@@ -133,7 +133,7 @@ class OverviewContext:
     gen_state: Optional[GenerationState] = None
     state_mgr: Optional[GenerationStateManager] = None
     tree_manager: Optional[ModuleTreeManager] = None
-    call_llm: Any = None
+    middleware: LLMMiddleware | None = None
     usage_stats: Optional[LLMUsageStats] = None
 
 
@@ -303,6 +303,7 @@ async def generate_parent_module_docs(
             module_tree=module_tree,
             working_dir=working_dir,
             gen_state=gen_state,
+            middleware=ctx.middleware,
         ),
         module_path,
     )
@@ -332,6 +333,7 @@ async def generate_parent_module_docs(
             module_tree=module_tree,
             working_dir=working_dir,
             gen_state=gen_state,
+            middleware=ctx.middleware,
         ),
         module_path,
     )
@@ -343,47 +345,9 @@ async def generate_parent_module_docs(
         output_language=config.output_language,
     )
 
-    from codewiki.src.be.utils import count_tokens, _get_encoder
-
-    prompt_tokens = count_tokens(prompt)
-    # Hard-truncate if over budget
-    if prompt_tokens > config.max_input_tokens:
-        enc = _get_encoder("gpt-4")
-        tokens = enc.encode(prompt)
-        prompt = enc.decode(tokens[: config.max_input_tokens])
-        prompt_tokens = config.max_input_tokens
-        logger.warning(
-            "⚠️ Hard-truncated overview prompt for '%s' to %dK tokens",
-            module_name,
-            prompt_tokens // 1000,
-        )
-
-    logger.info(
-        "📝 Overview prompt for '%s': ~%dK tokens (budget %dK)",
-        module_name,
-        prompt_tokens // 1000,
-        config.max_input_tokens // 1000,
-    )
-
     try:
-        llm_callable = ctx.call_llm
-        if llm_callable is None:
-            from codewiki.src.be.llm_services import call_llm as llm_callable
-
-        if inspect.iscoroutinefunction(llm_callable):
-            parent_docs = await llm_callable(prompt, config)
-        else:
-            parent_docs = await asyncio.to_thread(llm_callable, prompt, config)
-        if isinstance(parent_docs, LLMCallResult):
-            if ctx.usage_stats is not None and parent_docs.usage is not None:
-                ctx.usage_stats.record(
-                    parent_docs.model or config.main_model,
-                    parent_docs.usage.input_tokens,
-                    parent_docs.usage.output_tokens,
-                )
-            parent_docs = parent_docs.content
-        elif hasattr(parent_docs, "content"):
-            parent_docs = parent_docs.content
+        result = await asyncio.to_thread(ctx.middleware.call, prompt)
+        parent_docs = result.content
 
         if "<OVERVIEW>" in parent_docs and "</OVERVIEW>" in parent_docs:
             parent_content = parent_docs.split("<OVERVIEW>")[1].split("</OVERVIEW>")[0].strip()

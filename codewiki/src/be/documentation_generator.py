@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 # Local imports
 from codewiki.src.be.dependency_analyzer import DependencyGraphBuilder
-from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.cluster_modules import cluster_modules, heal_module_tree_components
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.config import (
     FIRST_MODULE_TREE_FILENAME,
@@ -74,7 +74,12 @@ class DocumentationGenerator:
         self.cancel_token = cancel_token
         self.graph_builder = DependencyGraphBuilder(config, commit_id=commit_id or "")
         self.usage_stats = LLMUsageStats()
-        self.agent_orchestrator = AgentOrchestrator(config, usage_stats=self.usage_stats)
+        self.middleware = LLMMiddleware(config, usage_stats=self.usage_stats)
+        self.agent_orchestrator = AgentOrchestrator(
+            config,
+            middleware=self.middleware,
+            usage_stats=self.usage_stats,
+        )
         self._gen_state: Optional[GenerationState] = None
         self._state_mgr: Optional[GenerationStateManager] = None
 
@@ -184,6 +189,7 @@ class DocumentationGenerator:
                 module_tree=module_tree,
                 working_dir=working_dir,
                 gen_state=self._gen_state,
+                middleware=self.middleware,
             ),
             module_path,
         )
@@ -379,6 +385,7 @@ class DocumentationGenerator:
                 module_tree=module_tree,
                 working_dir=working_dir,
                 gen_state=self._gen_state,
+                middleware=self.middleware,
             ),
             module_path,
         )
@@ -397,7 +404,7 @@ class DocumentationGenerator:
                 gen_state=self._gen_state,
                 state_mgr=self._state_mgr,
                 tree_manager=tree_manager,
-                call_llm=call_llm,
+                middleware=self.middleware,
                 usage_stats=self.usage_stats,
             ),
             module_path,
@@ -475,11 +482,22 @@ class DocumentationGenerator:
                 self.config,
                 index_products=ctx.index_products,
                 usage_stats=self.usage_stats,
+                middleware=self.middleware,
             )
             if module_tree:
                 freeze_doc_filenames(module_tree)
                 file_manager.save_json(module_tree, first_module_tree_path)
                 file_manager.save_json(module_tree, module_tree_path)
+
+        # If we re-clustered, the module tree changed — old task IDs no longer
+        # match.  Clear stale tasks so the pipeline re-evaluates from scratch
+        # (existing .md files on disk are still detected by module_doc_exists).
+        if need_recluster and existing_state.tasks:
+            logger.info(
+                "🗑 Clearing %d stale tasks (module tree changed after re-clustering)",
+                len(existing_state.tasks),
+            )
+            existing_state.tasks.clear()
 
         # Persist state fingerprint immediately after clustering so that
         # Ctrl+C during later stages does not invalidate the cache.
@@ -643,13 +661,19 @@ class DocumentationGenerator:
             working_dir=ctx.working_dir,
             usage_stats=self.usage_stats,
             cancel_token=ctx.cancel_token,
+            middleware=self.middleware,
         )
         await guide_gen.run()
 
     def _postprocess_docs(self, ctx: PipelineContext) -> None:
         from codewiki.src.be.docs_fixer import fix_docs
 
-        fix_docs(ctx.working_dir, self.config, usage_stats=self.usage_stats)
+        fix_docs(
+            ctx.working_dir,
+            self.config,
+            usage_stats=self.usage_stats,
+            middleware=self.middleware,
+        )
 
     def _write_metadata(self, ctx: PipelineContext) -> dict[str, Any]:
         return self.create_documentation_metadata(

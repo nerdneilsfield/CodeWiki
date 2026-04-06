@@ -131,7 +131,7 @@ def config_fingerprint(config: CodeWikiConfig) -> str:
             # include/exclude patterns affect which files are scanned
             *sorted(config.include_patterns or []),
             *sorted(config.exclude_patterns or []),
-            "naming-v7",
+            "clustering-v8-tfidf",
         ]
     )
 

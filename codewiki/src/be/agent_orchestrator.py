@@ -1,4 +1,3 @@
-import dataclasses
 import time
 from typing import Any, Dict, List, cast
 
@@ -71,7 +70,7 @@ from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_to
 from codewiki.src.be.agent_tools.generate_sub_module_documentations import (
     generate_sub_module_documentation_tool,
 )
-from codewiki.src.be.llm_services import create_fallback_models, create_long_context_model
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.prompt_template import (
     format_user_prompt,
     format_system_prompt,
@@ -98,13 +97,15 @@ from codewiki.src.be.dependency_analyzer.models.core import Node
 class AgentOrchestrator:
     """Orchestrates the AI agents for documentation generation."""
 
-    def __init__(self, config: CodeWikiConfig, usage_stats: LLMUsageStats | None = None):
+    def __init__(
+        self,
+        config: CodeWikiConfig,
+        middleware: LLMMiddleware,
+        usage_stats: LLMUsageStats | None = None,
+    ):
         self.config = config
         self.usage_stats = usage_stats
-        self.fallback_models = create_fallback_models(config)
-        self.long_context_model = (
-            create_long_context_model(config) if config.long_context_model else None
-        )
+        self._middleware = middleware
         self.custom_instructions = config.get_prompt_addition() if config else None
         self.output_language = config.output_language if config else "en"
         # v2: late-injected after index build + clustering
@@ -135,26 +136,6 @@ class AgentOrchestrator:
         except (KeyError, TypeError):
             return module_doc_filename(module_path)
 
-    @staticmethod
-    def _is_context_overflow(exc: Exception) -> bool:
-        """Check if exception is a context-length overflow (any source)."""
-        try:
-            from pydantic_ai.exceptions import UsageLimitExceeded, ModelHTTPError
-
-            if isinstance(exc, UsageLimitExceeded):
-                return True
-            if isinstance(exc, ModelHTTPError) and exc.status_code == 400:
-                msg = str(exc).lower()
-                return "context_length" in msg or "too long" in msg or "maximum context" in msg
-        except ImportError:
-            pass
-        import openai
-
-        if isinstance(exc, openai.APIStatusError) and exc.status_code == 400:
-            msg = str(exc).lower()
-            return "context_length" in msg or "too long" in msg or "maximum context" in msg
-        return False
-
     def create_agent(
         self,
         module_name: str,
@@ -163,16 +144,7 @@ class AgentOrchestrator:
         estimated_tokens: int = 0,
     ) -> Agent[CodeWikiDeps, str]:
         """Create an appropriate agent based on module complexity."""
-        if self.long_context_model and estimated_tokens > self.config.long_context_threshold:
-            model = self.long_context_model
-            logger.info(
-                "🔀 Using long-context model for '%s' (~%dK tokens > %dK threshold)",
-                module_name,
-                estimated_tokens // 1000,
-                self.config.long_context_threshold // 1000,
-            )
-        else:
-            model = self.fallback_models
+        model = self._middleware.create_agent_model()
         custom_instructions = self.custom_instructions or ""
 
         if is_complex_module(components, core_component_ids):
@@ -368,7 +340,7 @@ class AgentOrchestrator:
         # based on estimated_tokens computed here.
         _absolute_max = (
             self.config.long_context_max_input_tokens
-            if self.long_context_model
+            if self.config.long_context_model
             else self.config.max_input_tokens
         )
         _max_prompt_tokens = _absolute_max - _SYSTEM_PROMPT_OVERHEAD
@@ -420,8 +392,7 @@ class AgentOrchestrator:
             config=self.config,
             custom_instructions=self.custom_instructions,
             module_tree_manager=tree_manager,
-            fallback_models=self.fallback_models,
-            long_context_model=self.long_context_model,
+            middleware=self._middleware,
             index_products=self.index_products,
             global_assets=self.global_assets,
             assigned_doc_filename=assigned_filename,
@@ -430,98 +401,61 @@ class AgentOrchestrator:
             usage_stats=self.usage_stats,
         )
 
-        # Run agent with context-length retry: if the model rejects due to
-        # context overflow (multi-turn accumulation), truncate the prompt by
-        # 100K tokens and retry with a fresh agent.
-        _CONTEXT_TRIM_STEP = 100_000
-        _MAX_CONTEXT_RETRIES = 5
-        _current_prompt = user_prompt
-
         try:
-            for _ctx_attempt in range(_MAX_CONTEXT_RETRIES + 1):
-                try:
-                    t0 = time.time()
-                    # Fresh deps for each retry (reset registry/dispatched state)
-                    if _ctx_attempt > 0:
-                        deps = dataclasses.replace(deps, registry={}, _dispatched_sub_modules=set())
-                        agent = self.create_agent(
-                            module_name, components, core_component_ids, estimated_tokens
-                        )
+            t0 = time.time()
+            result = await agent.run(
+                user_prompt,
+                deps=deps,
+                usage_limits=UsageLimits(request_limit=None),
+                event_stream_handler=agent_progress_handler,
+            )
+            elapsed = time.time() - t0
 
-                    result = await agent.run(
-                        _current_prompt,
-                        deps=deps,
-                        usage_limits=UsageLimits(request_limit=None),
-                        event_stream_handler=agent_progress_handler,
-                    )
-                    elapsed = time.time() - t0
+            model_names = []
+            for msg in result.all_messages():
+                if isinstance(msg, ModelResponse) and msg.model_name:
+                    if msg.model_name not in model_names:
+                        model_names.append(msg.model_name)
+            run_usage = result.usage()
+            if self.usage_stats is not None and run_usage:
+                record_agent_run_usage(
+                    self.usage_stats,
+                    model_names,
+                    run_usage.input_tokens or 0,
+                    run_usage.output_tokens or 0,
+                    run_usage.requests or 0,
+                )
+            models_used = ", ".join(model_names) if model_names else "unknown"
+            if len(model_names) > 1:
+                logger.info(
+                    "Fallback triggered for '%s': models used: %s (%.1fs)",
+                    module_name,
+                    models_used,
+                    elapsed,
+                )
+            logger.debug(
+                "Successfully processed module: %s in %.1fs (model: %s)",
+                module_name,
+                elapsed,
+                models_used,
+            )
 
-                    # Log which model(s) actually responded (detects fallback switches)
-                    model_names = []
-                    for msg in result.all_messages():
-                        if isinstance(msg, ModelResponse) and msg.model_name:
-                            if msg.model_name not in model_names:
-                                model_names.append(msg.model_name)
-                    run_usage = result.usage()
-                    if self.usage_stats is not None and run_usage:
-                        record_agent_run_usage(
-                            self.usage_stats,
-                            model_names,
-                            run_usage.input_tokens or 0,
-                            run_usage.output_tokens or 0,
-                            run_usage.requests or 0,
-                        )
-                    models_used = ", ".join(model_names) if model_names else "unknown"
-                    if len(model_names) > 1:
-                        logger.info(
-                            f"Fallback triggered for '{module_name}': "
-                            f"models used: {models_used} ({elapsed:.1f}s)"
-                        )
-                    logger.debug(
-                        f"Successfully processed module: {module_name} "
-                        f"in {elapsed:.1f}s (model: {models_used})"
-                    )
+            if tree_manager:
+                await tree_manager.save()
+            else:
+                module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
+                file_manager.save_json(deps.module_tree, module_tree_path)
 
-                    # Persist tree — manager handles locking; otherwise save directly
-                    if tree_manager:
-                        await tree_manager.save()
-                    else:
-                        module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-                        file_manager.save_json(deps.module_tree, module_tree_path)
+            if state_mgr:
+                doc_id = doc_id_for_path(module_tree, doc_path_parts)
+                output_path = os.path.join(working_dir, assigned_filename)
+                await state_mgr.mark_completed(
+                    doc_id,
+                    content_hash=content_hash(output_path),
+                    model=models_used,
+                )
 
-                    # Mark the module as fully completed so future runs can skip it
-                    if state_mgr:
-                        doc_id = doc_id_for_path(module_tree, doc_path_parts)
-                        output_path = os.path.join(working_dir, assigned_filename)
-                        await state_mgr.mark_completed(
-                            doc_id,
-                            content_hash=content_hash(output_path),
-                            model=models_used,
-                        )
-
-                    return deps.module_tree, models_used
-
-                except Exception as e:
-                    if not self._is_context_overflow(e):
-                        raise
-                    # Context overflow — trim prompt and retry
-                    from codewiki.src.be.utils import _get_encoder
-
-                    enc = _get_encoder("gpt-4")
-                    tokens = enc.encode(_current_prompt)
-                    new_len = max(len(tokens) - _CONTEXT_TRIM_STEP, 10_000)
-                    if new_len >= len(tokens):
-                        raise  # can't trim further
-                    _current_prompt = enc.decode(tokens[:new_len])
-                    estimated_tokens = new_len + _SYSTEM_PROMPT_OVERHEAD
-                    logger.warning(
-                        "✂️ Context overflow for '%s' — trimming prompt %dK → %dK tokens (attempt %d/%d)",
-                        module_name,
-                        len(tokens) // 1000,
-                        new_len // 1000,
-                        _ctx_attempt + 1,
-                        _MAX_CONTEXT_RETRIES,
-                    )
+            return deps.module_tree, models_used
 
         except Exception as e:
             logger.error(

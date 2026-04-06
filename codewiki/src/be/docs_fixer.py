@@ -24,6 +24,7 @@ from pathlib import Path
 
 import mdformat
 
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.postprocess.lint_report import LintError, LintReport
 from codewiki.src.be.postprocess.math_validator import fix_math_in_text as fix_math
@@ -104,6 +105,7 @@ def _fix_math_in_text(
     config: CodeWikiConfig,
     stats: FixStats,
     usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
     report: LintReport | None = None,
     filename: str = "",
 ) -> str:
@@ -112,6 +114,7 @@ def _fix_math_in_text(
         config,
         stats,
         usage_stats,
+        middleware,
         report=report,
         filename=filename,
     )
@@ -122,6 +125,7 @@ def _fix_mermaid_in_text(
     config: CodeWikiConfig,
     stats: FixStats,
     usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
     report: LintReport | None = None,
     filename: str = "",
 ) -> str:
@@ -130,6 +134,7 @@ def _fix_mermaid_in_text(
         config,
         stats,
         usage_stats,
+        middleware,
         report=report,
         filename=filename,
     )
@@ -143,6 +148,7 @@ def fix_mermaid_in_file(
     config: CodeWikiConfig,
     stats: FixStats,
     usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
 ) -> bool:
     """Scan one markdown file and repair broken Mermaid diagrams in-place.
 
@@ -150,7 +156,13 @@ def fix_mermaid_in_file(
     """
     text = path.read_text(encoding="utf-8")
     new_text = _fix_mermaid_in_text(
-        text, config, stats, usage_stats, report=None, filename=path.name
+        text,
+        config,
+        stats,
+        usage_stats,
+        middleware,
+        report=None,
+        filename=path.name,
     )
     if new_text == text:
         return False
@@ -162,7 +174,10 @@ def fix_mermaid_in_file(
 
 
 def fix_docs(
-    working_dir: str, config: CodeWikiConfig, usage_stats: LLMUsageStats | None = None
+    working_dir: str,
+    config: CodeWikiConfig,
+    usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
 ) -> FixStats:
     """Apply all post-processing fix phases to every .md file in *working_dir*.
 
@@ -244,12 +259,24 @@ def fix_docs(
 
             # Phase 2 — Math repair
             text = _fix_math_in_text(
-                text, config, stats, usage_stats, report=report, filename=md_file.name
+                text,
+                config,
+                stats,
+                usage_stats,
+                middleware,
+                report=report,
+                filename=md_file.name,
             )
 
             # Phase 3 — Mermaid repair
             text = _fix_mermaid_in_text(
-                text, config, stats, usage_stats, report=report, filename=md_file.name
+                text,
+                config,
+                stats,
+                usage_stats,
+                middleware,
+                report=report,
+                filename=md_file.name,
             )
 
             if text != original_raw:

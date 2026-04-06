@@ -14,8 +14,8 @@ from typing import Any
 
 from pylatexenc.latexwalker import LatexWalker
 
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_retry import with_retry_sync
-from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.codewiki_config import CodeWikiConfig, PostprocessConfig
 
@@ -311,6 +311,7 @@ def repair_batch_sync(
     config: CodeWikiConfig,
     pp_config: PostprocessConfig,
     usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
 ) -> dict[str, str]:
     if not issues:
         return {}
@@ -318,12 +319,12 @@ def repair_batch_sync(
     expected_ids = {issue.issue_id for issue in issues}
     prompt = build_repair_prompt(issues)
 
+    llm = middleware or LLMMiddleware(config, usage_stats=usage_stats)
     for model in _build_model_chain(pp_config, config.main_model):
         try:
             result = with_retry_sync(
-                call_llm,
+                llm.call,
                 prompt,
-                config,
                 model=model,
                 temperature=0.0,
                 max_retries=pp_config.repair_max_retries,
@@ -381,6 +382,7 @@ def fix_math_in_text(
     config: CodeWikiConfig,
     stats: Any,
     usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
     report: Any | None = None,
     filename: str = "",
 ) -> str:
@@ -411,7 +413,9 @@ def fix_math_in_text(
         batch_size = max(1, config.postprocess.repair_batch_size)
         for start in range(0, len(issues), batch_size):
             batch = issues[start : start + batch_size]
-            repaired.update(repair_batch_sync(batch, config, config.postprocess, usage_stats))
+            repaired.update(
+                repair_batch_sync(batch, config, config.postprocess, usage_stats, middleware)
+            )
 
     replacements: list[tuple[int, int, str]] = []
     issue_lookup = {issue.issue_id: issue for issue in issues}

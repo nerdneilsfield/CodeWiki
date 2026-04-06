@@ -5,13 +5,12 @@ from typing import Any
 from pydantic_ai import RunContext, Tool, Agent
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
-import openai
 
 from codewiki.src.be.agent_tools.deps import CodeWikiDeps
 from codewiki.src.be.agent_tools.read_code_components import read_code_components_tool
 from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_tool
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_usage import record_agent_run_usage
-from codewiki.src.be.llm_services import select_agent_model
 from codewiki.src.be.prompt_template import (
     format_system_prompt,
     format_leaf_system_prompt,
@@ -232,10 +231,11 @@ async def generate_sub_module_documentation(
         num_tokens = count_tokens(
             format_potential_core_components(core_component_ids, ctx.deps.components)[-1]
         )
-        if ctx.deps.long_context_model and num_tokens > ctx.deps.config.long_context_threshold:
-            model = ctx.deps.long_context_model
-        else:
-            model = ctx.deps.fallback_models or select_agent_model(ctx.deps.config, num_tokens)
+        middleware = ctx.deps.middleware or LLMMiddleware(
+            ctx.deps.config,
+            usage_stats=ctx.deps.usage_stats,
+        )
+        model = middleware.create_agent_model()
 
         custom_instructions = ctx.deps.custom_instructions or ""
 

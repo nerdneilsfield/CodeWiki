@@ -40,6 +40,7 @@ def cluster_modules_v2(
     current_module_path: Optional[list] = None,
     _token_threshold: Optional[int] = None,
     usage_stats=None,
+    middleware=None,
 ) -> Dict[str, Any]:
     """Clustering v2: graph-driven structure + heuristic naming.
 
@@ -77,7 +78,14 @@ def cluster_modules_v2(
         return {}
 
     # Name clusters
-    names = name_clusters(clusters, component_file_map, config, components, usage_stats)
+    names = name_clusters(
+        clusters,
+        component_file_map,
+        config,
+        components,
+        usage_stats,
+        middleware=middleware,
+    )
 
     # Naming freeze: if module_id matches previous tree, reuse old title/path/description
     frozen_names = _apply_naming_freeze(clusters, names, current_module_tree)

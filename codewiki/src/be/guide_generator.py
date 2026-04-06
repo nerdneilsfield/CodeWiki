@@ -19,8 +19,8 @@ from typing import Any, Dict, List, Optional
 from codewiki.src.be.dependency_analyzer.utils.security import assert_safe_path
 from codewiki.src.be.cancellation import CancellationToken
 from codewiki.src.be.errors import CancellationError, LLMError
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_retry import LLMRetryExhausted, with_retry
-from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.repo_docs_collector import RepoDocsCollector, DocsBundle
 from codewiki.src.codewiki_config import CodeWikiConfig
@@ -105,6 +105,7 @@ class GuideGenerator:
         working_dir: str,
         usage_stats: LLMUsageStats | None = None,
         cancel_token: CancellationToken | None = None,
+        middleware: LLMMiddleware | None = None,
     ):
         self.config = config
         self.components = components
@@ -115,6 +116,7 @@ class GuideGenerator:
         self.cache = self._load_cache()
         self.usage_stats = usage_stats
         self.cancel_token = cancel_token
+        self._middleware = middleware or LLMMiddleware(config, usage_stats=usage_stats)
 
     # ── Cache management ──────────────────────────────────────────────
 
@@ -234,7 +236,7 @@ class GuideGenerator:
         Mirrors the agent framework's resilience pattern:
         1. Pre-select long-context model when prompt exceeds threshold
         2. Otherwise try models in order: main → fallback(s) → long_context
-        3. Each model is tried once; retry ownership lives outside call_llm()
+        3. Each model is tried once; retry ownership lives outside the middleware
         """
         from codewiki.src.be.utils import count_tokens
 
@@ -252,9 +254,8 @@ class GuideGenerator:
             async with self._semaphore:
                 result = await with_retry(
                     asyncio.to_thread,
-                    call_llm,
+                    self._middleware.call,
                     prompt,
-                    self.config,
                     model=self.config.long_context_model,
                     max_retries=2,
                     cancel_token=self.cancel_token,
@@ -262,12 +263,6 @@ class GuideGenerator:
                         self.config.long_context_model
                     ),
                 )
-                if self.usage_stats and result.usage:
-                    self.usage_stats.record(
-                        result.model,
-                        result.usage.input_tokens,
-                        result.usage.output_tokens,
-                    )
                 return result.content
 
         # Build fallback chain: main → fallback(s) → long_context (last resort)
@@ -285,20 +280,13 @@ class GuideGenerator:
                         self.cancel_token.check()
                     result = await with_retry(
                         asyncio.to_thread,
-                        call_llm,
+                        self._middleware.call,
                         prompt,
-                        self.config,
                         model=model_name,
                         max_retries=2,
                         cancel_token=self.cancel_token,
                         on_timeout_use_stream=self._model_supports_stream(model_name),
                     )
-                    if self.usage_stats and result.usage:
-                        self.usage_stats.record(
-                            result.model,
-                            result.usage.input_tokens,
-                            result.usage.output_tokens,
-                        )
                     return result.content
             except CancellationError:
                 raise

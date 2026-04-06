@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Optional, Set, TYPE_CHECKING
 from codewiki.src.be.dependency_analyzer.models.core import Node
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.codewiki_config import CodeWikiConfig
 
@@ -22,8 +23,7 @@ class CodeWikiDeps:
     config: CodeWikiConfig  # LLM configuration
     custom_instructions: Optional[str] = None
     module_tree_manager: Optional["ModuleTreeManager"] = None
-    fallback_models: Any = None  # pre-built FallbackModel from AgentOrchestrator
-    long_context_model: Any = None  # pre-built OpenAIModel (long context) or None
+    middleware: LLMMiddleware | None = None
     # v2: Index products and global assets for evidence-driven generation
     index_products: Any = None  # IndexProducts or None
     global_assets: Optional[dict] = None  # {"glossary": dict, "link_map": dict}

@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_retry import with_retry_sync
-from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.codewiki_config import CodeWikiConfig, PostprocessConfig
 
@@ -130,7 +130,9 @@ def cleanup_mermaid(text: str) -> str:
     # Expand chained edges like A --> B --> C into two statements.
     cleaned = re.sub(
         r"(?P<a>[^\n;]+?)\s*(?P<edge>(?:-->|---|-.->|==>))\s*(?P<b>[^\n;]+?)\s*(?P=edge)\s*(?P<c>[^\n;]+)",
-        lambda m: f"{m.group('a').strip()} {m.group('edge')} {m.group('b').strip()}\n{m.group('b').strip()} {m.group('edge')} {m.group('c').strip()}",
+        lambda m: (
+            f"{m.group('a').strip()} {m.group('edge')} {m.group('b').strip()}\n{m.group('b').strip()} {m.group('edge')} {m.group('c').strip()}"
+        ),
         cleaned,
     )
 
@@ -319,6 +321,7 @@ def repair_batch_sync(
     config: CodeWikiConfig,
     pp_config: PostprocessConfig,
     usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
 ) -> dict[str, str]:
     if not issues:
         return {}
@@ -326,12 +329,12 @@ def repair_batch_sync(
     prompt = build_repair_prompt(issues)
     expected_ids = {issue.issue_id for issue in issues}
     merged: dict[str, str] = {}
+    llm = middleware or LLMMiddleware(config, usage_stats=usage_stats)
     for model_name in _build_model_chain(pp_config, config.main_model):
         try:
             result = with_retry_sync(
-                call_llm,
+                llm.call,
                 prompt,
-                config,
                 model=model_name,
                 temperature=0.0,
                 max_retries=pp_config.repair_max_retries,
@@ -373,6 +376,7 @@ def fix_mermaid_in_text(
     config: CodeWikiConfig,
     stats: Any,
     usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
     report: Any | None = None,
     filename: str = "",
 ) -> str:
@@ -432,7 +436,7 @@ def fix_mermaid_in_text(
     except Exception:
         batch_size = 0
     for batch in _chunked(issues, batch_size or len(issues)):
-        repaired.update(repair_batch_sync(batch, config, pp_config, usage_stats))
+        repaired.update(repair_batch_sync(batch, config, pp_config, usage_stats, middleware))
 
     for issue in issues:
         span = issue.span
