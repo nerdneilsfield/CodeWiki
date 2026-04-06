@@ -349,8 +349,11 @@ Each entry is structured as:
 Your task: group the components into cohesive top-level modules. Each module should represent a distinct feature, layer, or domain of the codebase.
 
 Guidelines:
-- Aim for **6–15 top-level modules** — enough granularity to be meaningful, few enough to stay navigable
-- The graph-based clusters above are pre-computed structural hints (dependency + co-location). Use them as a starting point but **apply your own semantic judgement**: merge clusters that serve the same logical purpose, and split clusters that mix unrelated concerns
+- This codebase has **{total_components} components**. Aim for **{target_min}-{target_max} top-level modules** — enough granularity to be meaningful, few enough to stay navigable. (Computed adaptively: ~sqrt(N/4), scales for repos of any size.)
+- **MINIMUM**: NEVER produce fewer than {hard_min} modules. A handful of mega-modules destroys navigability — readers cannot find anything in a 400-component "Core Framework" module.
+- **MAXIMUM CLUSTER SIZE**: No single module should contain more than {max_cluster_size} components. If the graph clusters suggest a larger group, SPLIT it by sub-domain rather than keeping it whole.
+- The graph-based clusters above are pre-computed structural hints (dependency + co-location + semantic similarity). They are usually well-balanced — **prefer keeping them as-is unless you see a clear semantic reason to merge or split**. Aggressive merging is the most common failure mode: a few giant clusters look elegant but make the docs unusable.
+- Only merge graph clusters when they truly serve the same logical purpose (e.g. two clusters both implement "authentication"). Do NOT merge based on superficial similarity (e.g. "all utility classes" or "all manager classes").
 - Give each module a clear, human-readable name that describes its purpose (e.g. "Authentication", "Database Layer", "API Routes")
 - DO NOT include components that are not essential to the repository
 - Use the component identifiers (after "Component:") EXACTLY as listed — NOT the file paths
@@ -1512,11 +1515,32 @@ def format_user_prompt(
     )
 
 
+def adaptive_cluster_targets(total_components: int) -> tuple[int, int, int, int]:
+    """Compute adaptive (target_min, target_max, hard_min, max_cluster_size).
+
+    Uses sqrt(N/4) as the base — gives sensible counts for any repo size:
+        100 comps  → target=5, range 6-10, max_cluster=30
+        500 comps  → target=11, range 6-22, max_cluster=80
+        2000 comps → target=22, range 11-44, max_cluster=160
+        12000 comps → target=55, range 27-110, max_cluster=300
+    """
+    import math
+
+    target = max(1, round(math.sqrt(total_components / 4)))
+    target_max = target * 2
+    hard_min = max(6, target // 2) if total_components >= 30 else 1
+    target_min = max(hard_min, target)
+    # Max cluster size scales with total: ~total/target * 1.5 (allow 50% over avg)
+    max_cluster_size = max(30, int((total_components / max(target, 1)) * 1.5))
+    return target_min, target_max, hard_min, max_cluster_size
+
+
 def format_cluster_prompt(
     potential_core_components: str,
     module_tree: dict[str, Any] | None = None,
     module_name: str | None = None,
     graph_clusters_hint: str = "",
+    total_components: int = 0,
 ) -> str:
     """
     Format the cluster prompt with potential core components, module tree,
@@ -1562,10 +1586,17 @@ def format_cluster_prompt(
     else:
         graph_section = ""
 
+    target_min, target_max, hard_min, max_cluster_size = adaptive_cluster_targets(total_components)
+
     if module_tree == {}:
         return CLUSTER_REPO_PROMPT.format(
             potential_core_components=potential_core_components,
             graph_clusters_section=graph_section,
+            total_components=total_components,
+            target_min=target_min,
+            target_max=target_max,
+            hard_min=hard_min,
+            max_cluster_size=max_cluster_size,
         )
     else:
         return CLUSTER_MODULE_PROMPT.format(

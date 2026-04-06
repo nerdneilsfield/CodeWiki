@@ -389,8 +389,17 @@ def graph_pre_cluster(
     # ── TF-IDF semantic similarity edges ──────────────────────────────────
     # Components with similar names/docstrings/parameters but no direct
     # dependency are likely functionally related (e.g. parse_date / format_date).
-    _SEMANTIC_WEIGHT = 0.5
-    _SEMANTIC_THRESHOLD = 0.4
+    #
+    # Weight tuning: dependency edges should DOMINATE clustering. Semantic
+    # edges are auxiliary signals to merge functionally related components
+    # without direct dependencies. Too strong → Leiden produces few giant
+    # clusters by name similarity (e.g. all "*Manager" classes get merged).
+    # Empirically tested on CodeWiki itself (599 components, 856 dep edges):
+    # weight=0.5 + threshold=0.4 produced 528 semantic edges and merged
+    # everything into 3 mega-clusters. weight=0.2 + threshold=0.6 keeps
+    # semantic edges as a minority signal.
+    _SEMANTIC_WEIGHT = 0.2
+    _SEMANTIC_THRESHOLD = 0.6
 
     node_list_ordered = sorted(node_set)
     corpus: List[str] = []
@@ -718,27 +727,14 @@ def cluster_modules(
         )
 
     # ── Step 2: LLM refinement ────────────────────────────────────────────
-    prompt = format_cluster_prompt(
+    base_prompt = format_cluster_prompt(
         potential_core_components,
         current_module_tree,
         current_module_name,
         graph_clusters_hint=graph_hint,
+        total_components=len(leaf_nodes),
     )
     llm = middleware or LLMMiddleware(config, usage_stats=usage_stats)
-    response = with_retry_sync(
-        llm.call,
-        prompt,
-        model=config.cluster_model,
-        max_retries=1,
-    )
-    if usage_stats and response.usage:
-        usage_stats.record(
-            response.model,
-            response.usage.input_tokens,
-            response.usage.output_tokens,
-        )
-
-    module_tree = None
 
     def _strip_code_fence(text: str) -> str:
         stripped = text.strip()
@@ -757,27 +753,114 @@ def cluster_modules(
                 return None
             return parsed
         except Exception as e:
-            logger.error(
-                f"Failed to parse LLM response: {e}. Response: {response.content[:200]}..."
-            )
+            logger.error(f"Failed to parse LLM response: {e}. Response: {content[:200]}...")
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
-    if "<GROUPED_COMPONENTS>" in response.content and "</GROUPED_COMPONENTS>" in response.content:
-        response_content = response.content.split("<GROUPED_COMPONENTS>")[1].split(
-            "</GROUPED_COMPONENTS>"
-        )[0]
-        module_tree = _try_parse(response_content)
-    else:
-        # Accept bare JSON/dict responses as a fallback
+    def _extract_tree(response_content: str) -> Optional[Dict[str, Any]]:
+        if (
+            "<GROUPED_COMPONENTS>" in response_content
+            and "</GROUPED_COMPONENTS>" in response_content
+        ):
+            inner = response_content.split("<GROUPED_COMPONENTS>")[1].split(
+                "</GROUPED_COMPONENTS>"
+            )[0]
+            return _try_parse(inner)
         logger.warning(
             "LLM response missing <GROUPED_COMPONENTS> tags — attempting to parse raw response"
         )
-        module_tree = _try_parse(response.content)
+        return _try_parse(response_content)
 
-    # ── Step 3: Fallback to graph clusters if LLM failed ──────────────────
+    def _quality_issues(tree: Dict[str, Any]) -> Optional[str]:
+        """Return a feedback string describing why the tree is unacceptable, or None if OK.
+
+        Only enforced at top-level (non-recursive) calls with graph_clusters available.
+        """
+        if is_recursive_call or not graph_clusters:
+            return None
+        from codewiki.src.be.prompt_template import adaptive_cluster_targets
+
+        cluster_count = len(tree)
+        sizes = [len(v.get("components", [])) for v in tree.values()]
+        max_size = max(sizes) if sizes else 0
+        total = sum(sizes)
+        _, target_max, hard_min, max_cluster_size = adaptive_cluster_targets(total)
+        problems: list[str] = []
+        if cluster_count < hard_min and total >= 30:
+            problems.append(
+                f"You returned only {cluster_count} top-level modules but the MINIMUM is "
+                f"{hard_min} for a codebase with {total} components. Split your largest "
+                f"clusters into smaller, more focused modules."
+            )
+        if max_size > max_cluster_size:
+            biggest = max(tree.items(), key=lambda kv: len(kv[1].get("components", [])))
+            problems.append(
+                f"Module '{biggest[0]}' contains {max_size} components — the MAXIMUM is "
+                f"{max_cluster_size}. A module that large is unnavigable. Split it by "
+                f"sub-domain (e.g. by file path or functional area)."
+            )
+        if not problems:
+            return None
+        return "\n".join(f"- {p}" for p in problems)
+
+    # ── Step 2 & 3: LLM clustering with quality-aware retry ──────────────
+    # First call with the base prompt; if quality is bad, give the LLM specific
+    # feedback and try once more before falling back to graph clusters.
+    module_tree = None
+    max_quality_retries = 1
+    current_prompt = base_prompt
+    last_response_content = ""
+    for quality_attempt in range(max_quality_retries + 1):
+        response = with_retry_sync(
+            llm.call,
+            current_prompt,
+            model=config.cluster_model,
+            max_retries=1,
+        )
+        if usage_stats and response.usage:
+            usage_stats.record(
+                response.model,
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+            )
+        last_response_content = response.content
+        candidate_tree = _extract_tree(response.content)
+        if not candidate_tree:
+            module_tree = None
+            break  # parse failure → fall back to graph clusters
+
+        issues = _quality_issues(candidate_tree)
+        if issues is None:
+            module_tree = candidate_tree
+            break  # accepted
+
+        if quality_attempt >= max_quality_retries:
+            logger.warning(
+                "↩ LLM clustering still bad after %d retry — falling back to graph clusters:\n%s",
+                max_quality_retries,
+                issues,
+            )
+            module_tree = None
+            break
+
+        logger.warning(
+            "↻ LLM clustering quality issues, retrying with feedback:\n%s",
+            issues,
+        )
+        current_prompt = (
+            base_prompt
+            + "\n\n"
+            + "<PREVIOUS_ATTEMPT_REJECTED>\n"
+            + "Your previous response was rejected for these reasons:\n"
+            + issues
+            + "\n\nProduce a NEW grouping that fixes ALL of these issues. "
+            + "Do NOT repeat the same mistakes.\n"
+            + "</PREVIOUS_ATTEMPT_REJECTED>"
+        )
+
+    # ── Step 4: Fallback to graph clusters if LLM failed or was rejected ──
     if not module_tree and graph_clusters:
-        logger.warning("LLM clustering failed — falling back to graph-based clusters")
+        logger.warning("Using graph-based clusters as final result")
         path_index = _build_path_index(components)
         module_tree = {}
         for name, members in graph_clusters.items():
