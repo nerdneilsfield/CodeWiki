@@ -48,14 +48,25 @@ MERMAID SYNTAX SAFETY — violations cause parse errors visible to readers:
   subgraph Pipeline ["处理管线"]
     A["输入"] --> B["处理"] --> C["输出"]
   end
-- Choose the right diagram type:
-  * graph TD / flowchart TD — architecture, component relationships, decision trees
-  * sequenceDiagram — request traces, API call flows, time-ordered interactions
-  * classDiagram — data models, concept relationships (even if not literal classes)
-  * stateDiagram-v2 — state machines, lifecycle transitions
 - Label edges when the relationship isn't obvious: A -->|"validates"| B
 - For complex flows, use link styles sparingly to highlight the critical path.
-- Test your diagram in the Mermaid Live Editor (mermaid.live) before committing.\
+
+5. ARCHITECTURE VIEW SELECTION (choose the right diagram for the right purpose)
+- **Component Diagram** (graph TD / flowchart TD): Use for modules with >3 sub-components.
+  Show MODULE-level relationships, NOT individual functions.
+  Label edges with the NATURE of the relationship ("authenticates", "persists", "routes to"),
+  not implementation details ("calls foo()").
+  BAD:  AuthManager --> Token --> JWT --> verify()    ← function-level, too granular
+  GOOD: Auth["Authentication"] -->|"issues"| Token["Token Service"] -->|"validates via"| Crypto["Crypto Layer"]
+- **Sequence Diagram** (sequenceDiagram): Use for request/response flows, event chains,
+  or any time-ordered interaction between 3+ participants. Ideal for API call traces,
+  authentication handshakes, or pipeline processing stages.
+- **Data Flow Diagram** (graph LR): Use for modules that transform, route, or aggregate data.
+  Show data sources on the left, sinks on the right, transformations in the middle.
+- **Class/Concept Diagram** (classDiagram): Use ONLY for tightly coupled class hierarchies
+  or when inheritance/composition relationships are central to understanding the module.
+- **State Diagram** (stateDiagram-v2): Use for lifecycle management, FSMs, connection states.
+- When in doubt, prefer Component Diagram (flowchart TD) — it is the most versatile.\
 """
 # ──────────────────────────────────────────────────────────────────────────────
 

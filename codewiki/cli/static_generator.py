@@ -445,6 +445,76 @@ def _render_nav(
     return "\n".join(lines)
 
 
+def _build_module_map_mermaid(
+    module_tree: Dict[str, Any],
+    resolved_hrefs: Dict[str, Optional[str]],
+    nav_labels: Dict[str, str],
+) -> str:
+    """Generate a Mermaid flowchart showing the top-level module structure.
+
+    Produces a ``graph TD`` with top-level modules as nodes and their children
+    as sub-nodes (one level deep only to keep it readable).  Nodes with an
+    HTML page get a ``click`` directive so they are navigable in the rendered
+    diagram.
+    """
+    if not module_tree:
+        return ""
+
+    lines: list[str] = ["graph TD"]
+    node_ids: list[str] = []
+
+    for idx, (key, data) in enumerate(module_tree.items()):
+        nid = f"M{idx}"
+        label = nav_labels.get(
+            resolved_hrefs.get(key, "").removesuffix(".html") if resolved_hrefs.get(key) else "",
+            key.replace("_", " ").title(),
+        )
+        # Escape quotes in label
+        label = label.replace('"', "&quot;")
+        lines.append(f'  {nid}["{label}"]')
+        node_ids.append(nid)
+
+        href = resolved_hrefs.get(key)
+        if href:
+            lines.append(f'  click {nid} "{href}"')
+
+        children = data.get("children") or {}
+        if children:
+            child_ids = []
+            for cidx, (ckey, _cdata) in enumerate(children.items()):
+                cnid = f"M{idx}C{cidx}"
+                cpath = f"{key}/{ckey}"
+                clabel = nav_labels.get(
+                    resolved_hrefs.get(cpath, "").removesuffix(".html")
+                    if resolved_hrefs.get(cpath)
+                    else "",
+                    ckey.replace("_", " ").title(),
+                )
+                clabel = clabel.replace('"', "&quot;")
+                lines.append(f'  {cnid}["{clabel}"]')
+                lines.append(f"  {nid} --> {cnid}")
+                chref = resolved_hrefs.get(cpath)
+                if chref:
+                    lines.append(f'  click {cnid} "{chref}"')
+                child_ids.append(cnid)
+            # Keep max 8 children visible; collapse the rest
+            if len(child_ids) > 8:
+                lines = [
+                    ln
+                    for ln in lines
+                    if not any(ln.strip().startswith(cid) or cid in ln for cid in child_ids[8:])
+                ]
+                more_nid = f"M{idx}More"
+                lines.append(f'  {more_nid}["... +{len(child_ids) - 8} more"]')
+                lines.append(f"  {nid} --> {more_nid}")
+
+    if len(node_ids) < 2:
+        return ""
+
+    mermaid_src = "\n".join(lines)
+    return '\n\n<div class="mermaid not-prose">\n' + mermaid_src + "\n</div>\n\n"
+
+
 def _rewrite_md_to_html_links(html: str) -> str:
     """Replace href="something.md" with href="something.html" in rendered HTML."""
 
@@ -701,6 +771,20 @@ class StaticHTMLGenerator:
                 continue
 
             content_html = _markdown_to_static_html(md_content)
+
+            # For the overview page, inject a module map diagram after the
+            # first H1 heading so new visitors get an interactive bird's-eye
+            # view of the project structure.
+            if stem == "overview" and module_tree:
+                module_map = _build_module_map_mermaid(module_tree, resolved_hrefs, h1_titles)
+                if module_map:
+                    # Insert after first </h1> tag
+                    h1_end = content_html.find("</h1>")
+                    if h1_end != -1:
+                        insert_pos = h1_end + len("</h1>")
+                        content_html = (
+                            content_html[:insert_pos] + module_map + content_html[insert_pos:]
+                        )
 
             # Extract title from first H1 or fall back to stem
             title_match = re.search(r"<h1[^>]*>(.*?)</h1>", content_html, re.IGNORECASE | re.DOTALL)
