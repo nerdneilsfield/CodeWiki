@@ -28,8 +28,6 @@ class CodeWikiDeps:
     index_products: Any = None  # IndexProducts or None
     global_assets: Optional[dict] = None  # {"glossary": dict, "link_map": dict}
     assigned_doc_filename: str = ""
-    gen_state: Any = None
-    state_mgr: Any = None
     usage_stats: Optional[LLMUsageStats] = None
     # Tracks sub-module names already dispatched in this agent run to prevent
     # the LLM from processing the same sub-module twice via repeated tool calls.

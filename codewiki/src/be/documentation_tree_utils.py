@@ -4,9 +4,9 @@ import hashlib
 import logging
 import os
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from codewiki.src.be.generation_state import DocTask, GenerationState
 from codewiki.src.be.prompt_template import PROMPT_VERSION
 from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.config import OVERVIEW_FILENAME
@@ -195,23 +195,26 @@ def compute_module_input_hash(
     )
 
 
+@dataclass
+class TaskSpec:
+    """Lightweight task descriptor for cache planning."""
+
+    doc_id: str
+    kind: str
+    module_path: list[str]
+    output_file: str
+    depends_on: list[str] = field(default_factory=list)
+    input_hash: str = ""
+    language: str = "en"
+    prompt_version: str = ""
+
+
 def build_generation_tasks(
     tree: Dict[str, Any],
     config: CodeWikiConfig,
-    existing_state: GenerationState | None = None,
-) -> list[DocTask]:
-    """Build ledger tasks from the frozen tree."""
-    tasks: list[DocTask] = []
-
-    def _content_hashes(doc_ids: list[str]) -> list[str]:
-        if existing_state is None:
-            return []
-        hashes: list[str] = []
-        for doc_id in doc_ids:
-            task = existing_state.get_task(doc_id)
-            if task and task.content_hash:
-                hashes.append(task.content_hash)
-        return hashes
+) -> list[TaskSpec]:
+    """Build task specs from the frozen tree for cache planning."""
+    tasks: list[TaskSpec] = []
 
     def _walk(children: Dict[str, Any], parent_path: List[str]) -> list[str]:
         child_doc_ids: list[str] = []
@@ -223,7 +226,7 @@ def build_generation_tasks(
             )
             doc_id = doc_id_for_path(tree, current_path)
             tasks.append(
-                DocTask(
+                TaskSpec(
                     doc_id=doc_id,
                     kind="module" if not nested_child_ids else "overview",
                     module_path=current_path,
@@ -233,7 +236,6 @@ def build_generation_tasks(
                         [
                             *sorted(info.get("components", [])),
                             *nested_child_ids,
-                            *_content_hashes(nested_child_ids),
                             config.output_language,
                             "v7",
                         ]
@@ -247,15 +249,13 @@ def build_generation_tasks(
 
     top_level_ids = _walk(tree, [])
     tasks.append(
-        DocTask(
+        TaskSpec(
             doc_id="overview:root",
             kind="overview",
             module_path=[],
             output_file=OVERVIEW_FILENAME,
             depends_on=top_level_ids,
-            input_hash=stable_hash(
-                [*top_level_ids, *_content_hashes(top_level_ids), config.output_language, "v7"]
-            ),
+            input_hash=stable_hash([*top_level_ids, config.output_language, "v7"]),
             language=config.output_language,
             prompt_version="v7",
         )
@@ -267,14 +267,7 @@ def module_doc_exists(
     working_dir: str,
     module_path: List[str],
     module_tree: Optional[Dict[str, Any]] = None,
-    gen_state: Optional[GenerationState] = None,
 ) -> bool:
     """Return True if a non-trivial .md file already exists for *module_path*."""
-    if gen_state is not None and module_tree is not None:
-        doc_id = doc_id_for_path(module_tree, module_path)
-        task = gen_state.get_task(doc_id)
-        if task and task.status == "completed":
-            fpath = os.path.join(working_dir, task.output_file)
-            return os.path.exists(fpath) and os.path.getsize(fpath) > 100
     found = find_module_doc(working_dir, module_path)
     return found is not None and os.path.getsize(found) > 100

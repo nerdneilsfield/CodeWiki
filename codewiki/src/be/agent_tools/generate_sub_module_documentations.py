@@ -20,14 +20,10 @@ from codewiki.src.be.utils import is_complex_module, count_tokens, agent_progres
 from codewiki.src.be.cluster_modules import format_potential_core_components
 from codewiki.src.config import MODULE_TREE_FILENAME
 from codewiki.src.utils import (
-    content_hash,
-    doc_id_for_path,
     file_manager,
     module_doc_filename,
     find_module_doc,
 )
-from codewiki.src.be.generation_state import DocTask
-
 import logging
 
 logger = logging.getLogger(__name__)
@@ -150,38 +146,6 @@ async def generate_sub_module_documentation(
                     node[name]["components"] = info["components"]
             file_manager.save_json(tree_copy, module_tree_path)
 
-        if deps.state_mgr and deps.gen_state:
-            discovered_parent_id = doc_id_for_path(deps.module_tree, deps.path_to_current_module)
-            for sub_module_name in sub_module_specs:
-                sub_path = deps.path_to_current_module + [sub_module_name]
-                sub_doc_id = doc_id_for_path(deps.module_tree, sub_path)
-                if deps.gen_state.get_task(sub_doc_id):
-                    continue
-                try:
-                    nav = deps.module_tree
-                    for key in deps.path_to_current_module:
-                        nav = nav[key]["children"]
-                    sub_node = nav.get(sub_module_name, {})
-                    output_file = sub_node.get(
-                        "_doc_filename",
-                        module_doc_filename(sub_path),
-                    )
-                except (KeyError, TypeError):
-                    output_file = module_doc_filename(sub_path)
-                await deps.state_mgr.register_discovered_task(
-                    DocTask(
-                        doc_id=sub_doc_id,
-                        kind="module",
-                        module_path=sub_path,
-                        output_file=output_file,
-                        source="discovered",
-                        parent_doc_id=discovered_parent_id,
-                        language=deps.config.output_language,
-                        prompt_version="v7",
-                    )
-                )
-                await deps.state_mgr.flush()
-
     for sub_module_name, core_component_ids in sub_module_specs.items():
         # Create visual indentation for nested modules
         indent = "  " * deps.current_depth
@@ -197,16 +161,7 @@ async def generate_sub_module_documentation(
 
         # ── Skip sub-modules whose docs already exist ─────────────────
         sub_module_path = deps.path_to_current_module + [sub_module_name]
-        sub_doc_id = doc_id_for_path(deps.module_tree, sub_module_path)
-        docs_path = None
-        if deps.gen_state:
-            task = deps.gen_state.get_task(sub_doc_id)
-            if task and task.status == "completed":
-                candidate = os.path.join(deps.absolute_docs_path, task.output_file)
-                if os.path.exists(candidate) and os.path.getsize(candidate) > 100:
-                    docs_path = candidate
-        if docs_path is None and not deps.gen_state:
-            docs_path = find_module_doc(deps.absolute_docs_path, sub_module_path)
+        docs_path = find_module_doc(deps.absolute_docs_path, sub_module_path)
         if docs_path and os.path.getsize(docs_path) > 100:
             logger.debug(
                 f"{indent}{arrow} ✓ Sub-module {sub_module_name} already has docs, skipping"
@@ -350,15 +305,6 @@ async def generate_sub_module_documentation(
                 f"{_sub_last_exc} — skipping (fill pass will retry)"
             )
             continue
-
-        # Mark this sub-module as completed so re-runs can skip it
-        if deps.state_mgr and deps.gen_state:
-            await deps.state_mgr.mark_completed(
-                sub_doc_id,
-                content_hash=content_hash(os.path.join(deps.absolute_docs_path, assigned_filename)),
-                model=_sub_models_str,
-            )
-            await deps.state_mgr.flush()
 
     doc_files = [
         module_doc_filename(deps.path_to_current_module + [name])

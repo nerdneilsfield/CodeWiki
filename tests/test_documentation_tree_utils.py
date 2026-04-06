@@ -1,4 +1,3 @@
-from codewiki.src.be.generation_state import DocTask, GenerationState
 from codewiki.src.codewiki_config import CodeWikiConfig
 
 
@@ -77,28 +76,6 @@ def test_build_generation_tasks_includes_child_dependencies(tmp_path):
     assert by_id["module:mod-cli"].depends_on == ["module:mod-cli-io"]
     assert by_id["overview:root"].depends_on == ["module:mod-cli"]
     assert by_id["module:mod-cli"].language == "zh"
-
-
-def test_module_doc_exists_prefers_ledger_completed_output_file(tmp_path):
-    from codewiki.src.be.documentation_tree_utils import module_doc_exists
-
-    docs_dir = tmp_path / "docs"
-    docs_dir.mkdir()
-    (docs_dir / "cli.md").write_text("# CLI\n" + "x" * 200, encoding="utf-8")
-
-    tree = {"CLI Transport": {"module_id": "mod-cli", "children": {}}}
-    state = GenerationState()
-    state._add_task(
-        DocTask(
-            doc_id="module:mod-cli",
-            kind="module",
-            module_path=["CLI Transport"],
-            output_file="cli.md",
-            status="completed",
-        )
-    )
-
-    assert module_doc_exists(str(docs_dir), ["CLI Transport"], tree, state) is True
 
 
 def test_cleanup_legacy_internal_files_removes_root_cache_files(tmp_path):

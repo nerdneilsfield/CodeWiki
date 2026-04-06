@@ -58,6 +58,7 @@ class CacheManager:
         self._flush_interval = flush_interval
         self._entries: dict[str, CacheEntry] = {}
         self._reverse_deps: dict[str, set[str]] = {}
+        self._metadata: dict[str, str] = {}
         self._lock = threading.Lock()
         self._dirty = False
         self._stopped = False
@@ -87,6 +88,17 @@ class CacheManager:
         with self._lock:
             entry = self._entries.get(artifact_id)
             return entry.output_file if entry else None
+
+    def get_metadata(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._metadata)
+
+    def update_metadata(self, **metadata: str) -> None:
+        with self._lock:
+            self._metadata.update(
+                {key: value for key, value in metadata.items() if value is not None}
+            )
+            self._dirty = True
 
     def _set_depends_on_locked(self, artifact_id: str, depends_on: list[str]) -> None:
         entry = self._entries[artifact_id]
@@ -274,6 +286,11 @@ class CacheManager:
             if data.get("schema_version") != _SCHEMA_VERSION:
                 logger.warning("Cache registry schema mismatch — starting fresh")
                 return
+            self._metadata = {
+                key: value
+                for key, value in data.get("metadata", {}).items()
+                if isinstance(key, str) and isinstance(value, str)
+            }
             for artifact_id, raw in data.get("entries", {}).items():
                 entry = CacheEntry(
                     artifact_id=artifact_id,
@@ -301,6 +318,7 @@ class CacheManager:
     def _write_locked(self) -> None:
         data: dict[str, Any] = {
             "schema_version": _SCHEMA_VERSION,
+            "metadata": dict(self._metadata),
             "entries": {
                 artifact_id: {
                     key: value for key, value in asdict(entry).items() if key != "artifact_id"

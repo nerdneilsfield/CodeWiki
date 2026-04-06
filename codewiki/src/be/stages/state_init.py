@@ -8,7 +8,7 @@ class StateInitStage:
     failure_policy = "fail_fast"
 
     async def execute(self, ctx: PipelineContext) -> None:
-        await ctx.generator._initialize_generation_state_from_tree(
+        await ctx.generator._initialize_cache_from_tree(
             ctx.module_tree,
             ctx.working_dir,
         )

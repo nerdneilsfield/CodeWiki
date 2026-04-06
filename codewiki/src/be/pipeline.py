@@ -84,8 +84,6 @@ class PipelineContext:
     module_tree: dict[str, Any] = field(default_factory=dict)
     index_products: Any = None
     cache_manager: Any = None
-    gen_state: Any = None
-    state_mgr: Any = None
     tree_manager: Any = None
     usage_stats: Any = None
     graph_builder: Any = None
@@ -141,16 +139,6 @@ class PipelineRunner:
 async def _flush_all_state(ctx: PipelineContext) -> None:
     """Best-effort flush of all stateful managers."""
     flushed: list[str] = []
-    # state_mgr may live on ctx directly or on the generator instance
-    state_mgr = ctx.state_mgr
-    if not state_mgr and ctx.generator:
-        state_mgr = getattr(ctx.generator, "_state_mgr", None)
-    try:
-        if state_mgr and hasattr(state_mgr, "flush"):
-            await state_mgr.flush()
-            flushed.append("generation_state")
-    except Exception as exc:
-        logger.warning("Failed to flush generation state: %s", exc)
 
     tree_manager = ctx.tree_manager
     if not tree_manager and ctx.generator:

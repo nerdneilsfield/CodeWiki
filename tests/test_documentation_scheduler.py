@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 from codewiki.src.be.pipeline import ModuleSummary
-from codewiki.src.be.generation_state import DocTask, GenerationState, GenerationStateManager
 
 
 class _DummyTreeManager:
@@ -53,8 +52,6 @@ async def test_run_module_queue_processes_children_before_parent(tmp_path, monke
         path,
         working_dir,
         tree_manager,
-        gen_state=None,
-        state_mgr=None,
     ):
         order.append(("module", tuple(path)))
         return {}, "test/model"
@@ -89,63 +86,6 @@ async def test_run_module_queue_processes_children_before_parent(tmp_path, monke
 
 
 @pytest.mark.asyncio
-async def test_run_module_queue_marks_failed_tasks_in_state(tmp_path, monkeypatch):
-    from codewiki.src.be.documentation_scheduler import run_module_queue
-
-    monkeypatch.setattr("codewiki.src.be.documentation_scheduler.tqdm", _DummyProgress)
-
-    async def _fast_sleep(_seconds):
-        return None
-
-    monkeypatch.setattr("codewiki.src.be.documentation_scheduler.asyncio.sleep", _fast_sleep)
-
-    graph_tree = {"Leaf": {"components": ["x"], "children": {}}}
-    state = GenerationState()
-    state._add_task(
-        DocTask(
-            doc_id="module:leaf",
-            kind="module",
-            module_path=["Leaf"],
-            output_file="leaf.md",
-            status="ready",
-        )
-    )
-    manager = GenerationStateManager(state, str(tmp_path / "generation_state.json"))
-
-    async def process_module(
-        name,
-        components,
-        component_ids,
-        path,
-        working_dir,
-        tree_manager,
-        gen_state=None,
-        state_mgr=None,
-    ):
-        raise RuntimeError("boom")
-
-    config = SimpleNamespace(max_concurrent=1, main_model="test/main")
-    await asyncio.wait_for(
-        run_module_queue(
-            config=config,
-            graph_tree=graph_tree,
-            components={},
-            working_dir=str(tmp_path),
-            tree_manager=_DummyTreeManager(graph_tree),
-            process_module=process_module,
-            generate_root_overview=None,
-            include_root=False,
-            gen_state=state,
-            state_mgr=manager,
-        ),
-        timeout=2,
-    )
-
-    assert state.get_task("module:leaf").status == "failed"
-    assert "boom" in state.get_task("module:leaf").last_error
-
-
-@pytest.mark.asyncio
 async def test_fill_missing_module_docs_retries_only_missing_modules(tmp_path):
     from codewiki.src.be.documentation_scheduler import fill_missing_module_docs
 
@@ -164,7 +104,7 @@ async def test_fill_missing_module_docs_retries_only_missing_modules(tmp_path):
         retried.append(kwargs["desc"])
         return ModuleSummary()
 
-    def module_doc_exists(_working_dir, module_path, _module_tree, _gen_state=None):
+    def module_doc_exists(_working_dir, module_path, _module_tree):
         return module_path != ["Parent", "ChildB"]
 
     config = SimpleNamespace(max_retries=2)

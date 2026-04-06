@@ -87,7 +87,6 @@ from codewiki.src.config import (
     MODULE_TREE_FILENAME,
 )
 from codewiki.src.utils import (
-    content_hash,
     doc_id_for_path,
     file_manager,
     module_doc_filename,
@@ -183,8 +182,6 @@ class AgentOrchestrator:
         working_dir: str,
         tree_manager=None,
         cache_manager=None,
-        gen_state=None,
-        state_mgr=None,
     ) -> tuple[Dict[str, Any], str]:
         """Process a single module and generate its documentation.
 
@@ -197,26 +194,12 @@ class AgentOrchestrator:
             comma-separated string of model names that actually responded.
         """
         logger.info(f"Processing module: {module_name}")
-        module_tree_for_state: dict[str, Any] | None = None
 
         # ── Cache check ──────────────────────────────────────────────────
         doc_path_parts = module_path if module_path else [module_name]
-        docs_path = None if gen_state else find_module_doc(working_dir, doc_path_parts)
-        task = None
-        if gen_state:
-            module_tree_for_state = await tree_manager.get_snapshot() if tree_manager else None
-        if gen_state and module_tree_for_state:
-            doc_id = doc_id_for_path(module_tree_for_state, doc_path_parts)
-            task = gen_state.get_task(doc_id)
-            if task and task.status == "completed":
-                candidate = os.path.join(working_dir, task.output_file)
-                if os.path.exists(candidate) and os.path.getsize(candidate) > 100:
-                    docs_path = candidate
+        docs_path = find_module_doc(working_dir, doc_path_parts)
 
         if docs_path and os.path.getsize(docs_path) > 100:
-            if task and task.status == "completed":
-                logger.debug(f"✓ Module docs already exists at {docs_path}")
-                return {}, "cached"
             if is_complex_module(components, core_component_ids) and module_path:
                 children = {}
                 if tree_manager:
@@ -233,44 +216,19 @@ class AgentOrchestrator:
                     logger.debug(
                         f"✓ Module {module_name} has docs and no children — treating as complete"
                     )
-                    if state_mgr and module_tree_for_state:
-                        await state_mgr.mark_completed(
-                            doc_id_for_path(module_tree_for_state, doc_path_parts),
-                            content_hash=content_hash(docs_path),
-                            model=self.config.main_model,
-                        )
                     return {}, "cached"
 
-                child_done = False
-                if gen_state and module_tree_for_state:
-                    child_done = all(
-                        (
-                            child_task := gen_state.get_task(
-                                doc_id_for_path(module_tree_for_state, module_path + [cn])
-                            )
-                        )
-                        and child_task.status == "completed"
-                        for cn in children
+                child_done = all(
+                    (lambda p: p is not None and os.path.getsize(p) > 100)(
+                        find_module_doc(working_dir, module_path + [cn])
                     )
-                if not child_done:
-                    if not gen_state:
-                        child_done = all(
-                            (lambda p: p is not None and os.path.getsize(p) > 100)(
-                                find_module_doc(working_dir, module_path + [cn])
-                            )
-                            for cn in children
-                        )
+                    for cn in children
+                )
 
                 if child_done:
                     logger.debug(
                         f"✓ Module {module_name} and all children have docs — treating as complete"
                     )
-                    if state_mgr and module_tree_for_state:
-                        await state_mgr.mark_completed(
-                            doc_id_for_path(module_tree_for_state, doc_path_parts),
-                            content_hash=content_hash(docs_path),
-                            model=self.config.main_model,
-                        )
                     return {}, "cached"
 
                 logger.debug(
@@ -426,8 +384,6 @@ class AgentOrchestrator:
             index_products=self.index_products,
             global_assets=self.global_assets,
             assigned_doc_filename=assigned_filename,
-            gen_state=gen_state,
-            state_mgr=state_mgr,
             usage_stats=self.usage_stats,
         )
 
@@ -475,15 +431,6 @@ class AgentOrchestrator:
             else:
                 module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
                 file_manager.save_json(deps.module_tree, module_tree_path)
-
-            if state_mgr:
-                doc_id = doc_id_for_path(module_tree, doc_path_parts)
-                output_path = os.path.join(working_dir, assigned_filename)
-                await state_mgr.mark_completed(
-                    doc_id,
-                    content_hash=content_hash(output_path),
-                    model=models_used,
-                )
 
             return deps.module_tree, models_used
 

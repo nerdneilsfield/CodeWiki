@@ -103,8 +103,6 @@ async def test_process_module_success_records_usage_and_marks_completed(tmp_path
     )
     fake_agent = MagicMock()
     fake_agent.run = AsyncMock(return_value=fake_result)
-    state_mgr = AsyncMock()
-
     with (
         patch.object(orch_mod, "format_user_prompt", return_value="prompt"),
         patch.object(orch_mod, "build_context_pack", return_value={}),
@@ -125,12 +123,10 @@ async def test_process_module_success_records_usage_and_marks_completed(tmp_path
                 core_component_ids=["leaf"],
                 module_path=["module"],
                 working_dir=str(docs_dir),
-                state_mgr=state_mgr,
             )
 
     assert module_tree == {}
     assert models_used == "test/main"
     assert orchestrator.usage_stats.total_input_tokens == 11
     assert orchestrator.usage_stats.total_output_tokens == 7
-    state_mgr.mark_completed.assert_awaited_once()
     mock_file_manager.save_json.assert_called_once()

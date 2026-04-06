@@ -14,7 +14,6 @@ from codewiki.src.be.cache_manager import (
     overview_artifact_id,
 )
 from codewiki.src.be.documentation_tree_utils import hash_mapping, stable_hash
-from codewiki.src.be.generation_state import GenerationState, GenerationStateManager
 from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.module_tree_manager import ModuleTreeManager
@@ -147,8 +146,6 @@ class OverviewContext:
     config: CodeWikiConfig
     module_tree: Dict[str, Any]
     working_dir: str
-    gen_state: Optional[GenerationState] = None
-    state_mgr: Optional[GenerationStateManager] = None
     tree_manager: Optional[ModuleTreeManager] = None
     middleware: LLMMiddleware | None = None
     usage_stats: Optional[LLMUsageStats] = None
@@ -189,12 +186,6 @@ def _load_child_doc_content(
     child_path_str = None
     if ctx.cache_manager:
         child_file = ctx.cache_manager.get_output_file(module_artifact_id(child_doc_id))
-        if child_file:
-            candidate = os.path.join(ctx.working_dir, child_file)
-            if os.path.exists(candidate):
-                child_path_str = candidate
-    if child_path_str is None and ctx.gen_state:
-        child_file = ctx.gen_state.get_output_file(child_doc_id)
         if child_file:
             candidate = os.path.join(ctx.working_dir, child_file)
             if os.path.exists(candidate):
@@ -282,7 +273,6 @@ def build_overview_structure(
     """Build a lightweight structure for overview generation."""
     module_tree = ctx.module_tree
     working_dir = ctx.working_dir
-    gen_state = ctx.gen_state
 
     if len(module_path) == 0:
         result: Dict[str, Any] = {}
@@ -292,16 +282,7 @@ def build_overview_structure(
             children = info.get("children")
             if isinstance(children, dict) and children:
                 entry["children"] = {cn: {} for cn in children}
-            child_path = None
-            if gen_state:
-                child_doc_id = doc_id_for_path(module_tree, [name])
-                child_file = gen_state.get_output_file(child_doc_id)
-                if child_file:
-                    candidate = os.path.join(working_dir, child_file)
-                    if os.path.exists(candidate):
-                        child_path = candidate
-            if child_path is None:
-                child_path = find_module_doc(working_dir, [name])
+            child_path = find_module_doc(working_dir, [name])
             if child_path:
                 raw_docs[name] = file_manager.load_text(child_path)
             else:
@@ -336,16 +317,7 @@ def build_overview_structure(
     for child_name in children:
         if child_name not in target_children:
             target_children[child_name] = {}
-        child_path = None
-        if gen_state:
-            child_doc_id = doc_id_for_path(module_tree, module_path + [child_name])
-            child_file = gen_state.get_output_file(child_doc_id)
-            if child_file:
-                candidate = os.path.join(working_dir, child_file)
-                if os.path.exists(candidate):
-                    child_path = candidate
-        if child_path is None:
-            child_path = find_module_doc(working_dir, module_path + [child_name])
+        child_path = find_module_doc(working_dir, module_path + [child_name])
         if child_path:
             raw_docs[child_name] = file_manager.load_text(child_path)
         else:
@@ -366,7 +338,6 @@ def collect_child_doc_hashes(
 ) -> Dict[str, str]:
     """Return content hashes for direct child docs of a module."""
     module_tree = ctx.module_tree
-    gen_state = ctx.gen_state
     working_dir = ctx.working_dir
 
     if not module_path:
@@ -379,15 +350,8 @@ def collect_child_doc_hashes(
 
     hashes: Dict[str, str] = {}
     for child_name in children_dict:
-        child_doc_id = doc_id_for_path(module_tree, module_path + [child_name])
-        task = gen_state.get_task(child_doc_id) if gen_state else None
-        if task and task.content_hash:
-            hashes[child_name] = task.content_hash
-        elif gen_state is None:
-            child_path = find_module_doc(working_dir, module_path + [child_name])
-            hashes[child_name] = content_hash(child_path) if child_path else ""
-        else:
-            hashes[child_name] = ""
+        child_path = find_module_doc(working_dir, module_path + [child_name])
+        hashes[child_name] = content_hash(child_path) if child_path else ""
     return hashes
 
 
@@ -398,8 +362,6 @@ async def generate_parent_module_docs(
     """Generate overview/parent docs from child documentation."""
     module_tree = ctx.module_tree
     working_dir = ctx.working_dir
-    gen_state = ctx.gen_state
-    state_mgr = ctx.state_mgr
     cache_manager = ctx.cache_manager
     config = ctx.config
 
@@ -421,8 +383,6 @@ async def generate_parent_module_docs(
         output_file = None
         if cache_manager:
             output_file = cache_manager.get_output_file(overview_artifact_id(parent_doc_id))
-        if output_file is None and gen_state:
-            output_file = gen_state.get_output_file(parent_doc_id)
         if output_file is None:
             output_file = module_doc_filename(module_path)
         output_path = os.path.join(working_dir, output_file)
@@ -523,18 +483,6 @@ async def generate_parent_module_docs(
             depends_on=[arch_artifact_id, *[artifact_id for artifact_id, _, _ in child_segments]],
         )
 
-        if state_mgr and gen_state:
-            legacy_parent_doc_id = (
-                "overview:root" if not module_path else doc_id_for_path(module_tree, module_path)
-            )
-            if gen_state.get_task(legacy_parent_doc_id):
-                await state_mgr.mark_completed(
-                    legacy_parent_doc_id,
-                    content_hash=content_hash(output_path),
-                    model=config.main_model,
-                    input_hash=parent_hash,
-                )
-
         return module_tree
 
     child_hashes = collect_child_doc_hashes(
@@ -542,7 +490,6 @@ async def generate_parent_module_docs(
             config=config,
             module_tree=module_tree,
             working_dir=working_dir,
-            gen_state=gen_state,
             middleware=ctx.middleware,
             cache_manager=cache_manager,
         ),
@@ -558,14 +505,6 @@ async def generate_parent_module_docs(
 
     existing = output_path if os.path.exists(output_path) else None
     if existing and os.path.getsize(existing) > 100:
-        parent_task = gen_state.get_task(parent_doc_id) if gen_state else None
-        if (
-            parent_task
-            and parent_task.status == "completed"
-            and parent_task.input_hash == current_input_hash
-        ):
-            logger.debug("✓ Docs already exists at %s (children unchanged)", existing)
-            return module_tree
         logger.info("↻ Child docs changed for '%s', regenerating", module_name)
 
     repo_structure = build_overview_structure(
@@ -573,7 +512,6 @@ async def generate_parent_module_docs(
             config=config,
             module_tree=module_tree,
             working_dir=working_dir,
-            gen_state=gen_state,
             middleware=ctx.middleware,
             cache_manager=cache_manager,
         ),
@@ -596,14 +534,6 @@ async def generate_parent_module_docs(
         else:
             parent_content = parent_docs.strip()
         file_manager.save_text(parent_content, output_path)
-
-        if state_mgr and gen_state and gen_state.get_task(parent_doc_id):
-            await state_mgr.mark_completed(
-                parent_doc_id,
-                content_hash=content_hash(output_path),
-                model=config.main_model,
-                input_hash=current_input_hash,
-            )
 
         logger.debug("Successfully generated parent documentation for: %s", module_name)
         return module_tree

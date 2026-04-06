@@ -129,8 +129,6 @@ async def run_module_queue(
     desc: str = "Generating docs",
     include_root: bool = True,
     cache_manager=None,
-    gen_state=None,
-    state_mgr=None,
     progress_factory: Callable[..., Any] = tqdm,
     cancel_token=None,
 ) -> ModuleSummary:
@@ -171,8 +169,6 @@ async def run_module_queue(
         param.kind == inspect.Parameter.VAR_KEYWORD for param in process_module_params.values()
     )
     accepts_cache_manager = "cache_manager" in process_module_params or accepts_var_kwargs
-    accepts_gen_state = "gen_state" in process_module_params or accepts_var_kwargs
-    accepts_state_mgr = "state_mgr" in process_module_params or accepts_var_kwargs
 
     leaf_count = 0
     for key, (path, _, _, is_leaf) in all_tasks.items():
@@ -188,14 +184,6 @@ async def run_module_queue(
                     assigned_file=all_tasks[key][2].get("_doc_filename", ""),
                 )
                 if cache_manager.is_valid(artifact_id, input_hash):
-                    await done_queue.put((key, True, False, None))
-                    leaf_count += 1
-                    continue
-            elif gen_state:
-                did = doc_id_for_path(graph_tree, path)
-                t = gen_state.get_task(did)
-                if t and t.status in ("completed", "skipped"):
-                    # Already done — report success without entering work_queue
                     await done_queue.put((key, True, False, None))
                     leaf_count += 1
                     continue
@@ -340,73 +328,12 @@ async def run_module_queue(
                                 await done_queue.put((parent_key, True, False, None))
                                 active_tasks += 1
                                 continue
-                        if gen_state and state_mgr:
-                            # 通过 state_mgr 的锁保护对 gen_state 的读取，避免并发竞态
-                            stale_update: dict[str, str] | None = None
-                            async with state_mgr._lock:
-                                parent_doc_id = (
-                                    "overview:root"
-                                    if parent_key == ROOT_KEY
-                                    else doc_id_for_path(graph_tree, all_tasks[parent_key][0])
-                                )
-                                parent_task = gen_state.get_task(parent_doc_id)
-                                if parent_task:
-                                    if parent_key == ROOT_KEY:
-                                        parent_components: list[str] = []
-                                        child_keys = [
-                                            key
-                                            for key, value in child_to_parent.items()
-                                            if value == ROOT_KEY
-                                        ]
-                                    else:
-                                        _, _, parent_info, _ = all_tasks[parent_key]
-                                        parent_components = sorted(
-                                            parent_info.get("components", [])
-                                        )
-                                        child_keys = [
-                                            key
-                                            for key, value in child_to_parent.items()
-                                            if value == parent_key
-                                        ]
-                                    child_doc_ids = [
-                                        "overview:root"
-                                        if child_key == ROOT_KEY
-                                        else doc_id_for_path(graph_tree, all_tasks[child_key][0])
-                                        for child_key in child_keys
-                                    ]
-                                    child_content_hashes = []
-                                    for child_doc_id in child_doc_ids:
-                                        child_task = gen_state.get_task(child_doc_id)
-                                        if child_task and child_task.content_hash:
-                                            child_content_hashes.append(child_task.content_hash)
-                                    new_hash = stable_hash(
-                                        [
-                                            *parent_components,
-                                            *child_doc_ids,
-                                            *child_content_hashes,
-                                            parent_task.language,
-                                            "v7",
-                                        ]
-                                    )
-                                    if (
-                                        parent_task.status == "completed"
-                                        and new_hash != parent_task.input_hash
-                                    ):
-                                        # mark_stale 内部也会获取锁，先记录，释放锁后再调用避免死锁
-                                        stale_update = {parent_doc_id: new_hash}
-                                    elif parent_task.status != "completed":
-                                        parent_task.input_hash = new_hash
-                            # mark_stale 自带锁，放在 async with 外面避免死锁
-                            if stale_update is not None:
-                                await state_mgr.mark_stale(stale_update)
                         if parent_key == ROOT_KEY:
                             logger.info("🔓 All top-level modules done — enqueueing root overview")
                         else:
                             logger.info("🔓 Parent unblocked: %s", all_tasks[parent_key][1])
                         await work_queue.put(parent_key)
                         active_tasks += 1
-            if state_mgr:
-                await state_mgr.flush()
             done_queue.task_done()
             if cancel_token and cancel_token.is_cancelled:
                 logger.info("⏹ Scheduler cancelled — stopping work queue")
@@ -497,8 +424,6 @@ async def run_module_queue(
                         if key == ROOT_KEY:
                             if cache_manager:
                                 cache_manager.mark_running("overview:root")
-                            if state_mgr:
-                                await state_mgr.mark_running("overview:root")
                             if generate_root_overview:
                                 await generate_root_overview()
                             task_models_used = config.main_model
@@ -520,8 +445,6 @@ async def run_module_queue(
                             )
                             if cache_manager:
                                 cache_manager.mark_running(task_artifact_id)
-                            if state_mgr and gen_state:
-                                await state_mgr.mark_running(task_doc_id)
                             process_args = (
                                 name,
                                 components,
@@ -533,10 +456,6 @@ async def run_module_queue(
                             process_kwargs = {}
                             if accepts_cache_manager and cache_manager is not None:
                                 process_kwargs["cache_manager"] = cache_manager
-                            if accepts_gen_state:
-                                process_kwargs["gen_state"] = gen_state
-                            if accepts_state_mgr:
-                                process_kwargs["state_mgr"] = state_mgr
                             _, task_models_used = await process_module(
                                 *process_args, **process_kwargs
                             )
@@ -583,13 +502,6 @@ async def run_module_queue(
 
             except CancellationError:
                 logger.info("⏹ Task '%s' cancelled — resetting to ready", label)
-                if state_mgr:
-                    cancelled_doc_id = (
-                        "overview:root"
-                        if key == ROOT_KEY
-                        else doc_id_for_path(graph_tree, all_tasks[key][0])
-                    )
-                    await state_mgr.mark_ready(cancelled_doc_id)
                 if cache_manager:
                     cancelled_artifact_id = (
                         "overview:root"
@@ -606,11 +518,6 @@ async def run_module_queue(
             except Exception as e:
                 logger.error("✗ Failed to process '%s' after all retries: %s", label, e)
                 logger.error(traceback.format_exc())
-                if state_mgr:
-                    failed_doc_id = "overview:root"
-                    if key != ROOT_KEY:
-                        failed_doc_id = doc_id_for_path(graph_tree, all_tasks[key][0])
-                    await state_mgr.mark_failed(failed_doc_id, str(e))
                 if cache_manager:
                     failed_artifact_id = (
                         "overview:root"
@@ -658,7 +565,6 @@ async def fill_missing_module_docs(
     run_module_queue: Callable[..., Awaitable[ModuleSummary]],
     module_doc_exists: Callable[..., bool],
     cache_manager=None,
-    gen_state=None,
     cancel_token=None,
 ) -> ModuleSummary:
     """Retry missing module docs using the same dependency-aware queue."""
@@ -667,7 +573,7 @@ async def fill_missing_module_docs(
         count = 0
         for name, info in tree.items():
             module_path = path + [name]
-            if not module_doc_exists(working_dir, module_path, tree, gen_state):
+            if not module_doc_exists(working_dir, module_path, tree):
                 count += 1
             children = info.get("children") or {}
             if children:
@@ -678,7 +584,7 @@ async def fill_missing_module_docs(
         names: List[str] = []
         for name, info in tree.items():
             module_path = path + [name]
-            if not module_doc_exists(working_dir, module_path, tree, gen_state):
+            if not module_doc_exists(working_dir, module_path, tree):
                 names.append("-".join(module_path))
             children = info.get("children") or {}
             if children:
@@ -686,10 +592,6 @@ async def fill_missing_module_docs(
         return names
 
     summary = ModuleSummary()
-    # Fast path: skip fill pass when all actionable tasks are already done
-    if gen_state and not gen_state.actionable_task_ids():
-        logger.debug("All tasks completed — skipping fill pass")
-        return summary
     for attempt in range(config.max_retries):
         if cancel_token and cancel_token.is_cancelled:
             logger.info("⏹ Fill pass skipped (cancelled)")
@@ -715,7 +617,6 @@ async def fill_missing_module_docs(
             desc=f"Fill pass {attempt + 1}/{config.max_retries}",
             include_root=False,
             cache_manager=cache_manager,
-            gen_state=gen_state,
         )
         summary.extend(batch_summary)
     return summary

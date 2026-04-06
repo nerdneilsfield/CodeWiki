@@ -45,8 +45,6 @@ def _make_generator(tmp_path):
 
     gen = DocumentationGenerator.__new__(DocumentationGenerator)
     gen.config = config
-    gen._gen_state = None
-    gen._state_mgr = None
 
     async def _fake_process(*args, **kwargs):
         return None, "test/model"
