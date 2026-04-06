@@ -1,4 +1,12 @@
-const katex = require("katex");
+let katex;
+try {
+  katex = require("katex");
+} catch (_) {
+  // Fall back to global node_modules when katex is not installed locally
+  const { execSync } = require("child_process");
+  const globalRoot = execSync("npm root -g", { encoding: "utf8" }).trim();
+  katex = require(require("path").join(globalRoot, "katex"));
+}
 
 function check(expr, opts) {
   try {
