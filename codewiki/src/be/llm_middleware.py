@@ -60,9 +60,22 @@ class LLMMiddleware:
         max_retries: int = 3,
         trim_step: int = 100_000,
     ) -> LLMCallResult:
-        """Single-turn LLM call with routing, truncation, and overflow retry."""
+        """Single-turn LLM call with routing, truncation, overflow retry, and
+        auth-error → model fallback.
+
+        Key rotation happens inside raw_llm_call. When all keys for the current
+        model are exhausted on auth errors, the exception bubbles up here and
+        we fallback to the next model in the chain.
+        """
         prompt_tokens = count_tokens(prompt)
         effective_model = self._route_model(model, prompt_tokens)
+
+        # Build the auth-fallback model chain (only if no explicit model given)
+        if model is None:
+            model_chain = self._model_fallback_chain(effective_model)
+        else:
+            model_chain = [effective_model]
+        model_chain_idx = 0
 
         input_budget = self._input_budget_for_model(effective_model)
         if prompt_tokens > input_budget:
@@ -83,6 +96,23 @@ class LLMMiddleware:
             except Exception as exc:
                 if isinstance(exc, CancellationError):
                     raise
+
+                # Auth error: try next model in fallback chain (key rotation
+                # already exhausted inside raw_llm_call)
+                if self._is_auth_error(exc) and model_chain_idx + 1 < len(model_chain):
+                    model_chain_idx += 1
+                    next_model = model_chain[model_chain_idx]
+                    logger.warning(
+                        "🔑 Auth error on '%s' (all keys exhausted) → falling back to '%s'",
+                        effective_model,
+                        next_model,
+                    )
+                    effective_model = next_model
+                    new_budget = self._input_budget_for_model(effective_model)
+                    if count_tokens(current_prompt) > new_budget:
+                        current_prompt = self._truncate(current_prompt, new_budget)
+                    continue
+
                 if not self._is_context_overflow(exc):
                     raise
                 lc_model = self._config.long_context_model
@@ -136,6 +166,52 @@ class LLMMiddleware:
         if model == self._config.long_context_model:
             return self._config.long_context_max_input_tokens - self._config.max_tokens
         return self._config.max_input_tokens - self._config.max_tokens
+
+    def _is_auth_error(self, exc: Exception) -> bool:
+        """Check if exc is a 401/403 auth error from the LLM provider.
+
+        These mean ALL keys for the current provider/model exhausted on auth
+        errors (key rotation already exhausted in raw_llm_call). The middleware
+        should fallback to the next model.
+        """
+        if isinstance(exc, LLMError) and exc.category == ErrorCategory.RETRYABLE_AUTH:
+            return True
+        status = getattr(exc, "status_code", None)
+        if status in (401, 403):
+            return True
+        try:
+            from pydantic_ai.exceptions import ModelHTTPError
+
+            if isinstance(exc, ModelHTTPError) and exc.status_code in (401, 403):
+                return True
+        except ImportError:
+            pass
+        try:
+            import openai
+
+            if isinstance(exc, openai.APIStatusError) and exc.status_code in (401, 403):
+                return True
+        except ImportError:
+            pass
+        return False
+
+    def _model_fallback_chain(self, primary: str) -> list[str]:
+        """Build a fallback chain starting from `primary`, then config fallback list,
+        then long-context model. Deduplicated, preserves order."""
+        chain: list[str] = []
+        seen: set[str] = set()
+
+        def _add(m: str | None) -> None:
+            if m and m not in seen:
+                chain.append(m)
+                seen.add(m)
+
+        _add(primary)
+        # config.fallback_model is a list[str] (per recent refactor)
+        for m in getattr(self._config, "fallback_model", None) or []:
+            _add(m)
+        _add(self._config.long_context_model)
+        return chain
 
     def _is_context_overflow(self, exc: Exception) -> bool:
         if isinstance(exc, LLMError) and exc.category == ErrorCategory.RESOURCE_EXHAUSTED:

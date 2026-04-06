@@ -2,6 +2,8 @@
 LLM service factory for creating configured LLM clients.
 """
 
+import itertools
+import threading
 import time
 import logging
 from functools import lru_cache
@@ -70,15 +72,61 @@ def _get_provider_config(config: CodeWikiConfig, model_ref: str):
     return resolved.provider, resolved.model_name
 
 
+def _normalize_api_key(raw: Any) -> str:
+    """Extract the actual key string from an api_keys list entry."""
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        return str(raw.get("key", ""))
+    return str(raw)
+
+
+class _KeyRotator:
+    """Round-robin key rotator for load balancing across multiple API keys."""
+
+    def __init__(self, keys: list[str]):
+        # Filter out empty keys
+        self._keys = [k for k in keys if k]
+        self._lock = threading.Lock()
+        self._cycle = itertools.cycle(self._keys) if self._keys else None
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+    @property
+    def keys(self) -> list[str]:
+        return list(self._keys)
+
+    def next(self) -> str:
+        """Return the next key in round-robin order. Empty string if no keys."""
+        if not self._cycle:
+            return ""
+        with self._lock:
+            return next(self._cycle)
+
+
+# Cache: provider_id (id of provider_config object) → KeyRotator
+# Using id() since ProviderConfig is unhashable but stable per process.
+_rotator_cache: dict[int, _KeyRotator] = {}
+_rotator_cache_lock = threading.Lock()
+
+
+def _get_provider_rotator(provider_config) -> _KeyRotator:
+    """Get or create a KeyRotator for this provider config."""
+    pid = id(provider_config)
+    with _rotator_cache_lock:
+        rotator = _rotator_cache.get(pid)
+        if rotator is None:
+            raw_keys = getattr(provider_config, "api_keys", None) or []
+            keys = [_normalize_api_key(k) for k in raw_keys]
+            rotator = _KeyRotator(keys)
+            _rotator_cache[pid] = rotator
+        return rotator
+
+
 def _get_provider_api_key(provider_config) -> str:
-    if not getattr(provider_config, "api_keys", None):
-        return ""
-    first = provider_config.api_keys[0]
-    if isinstance(first, str):
-        return first
-    if isinstance(first, dict):
-        return str(first.get("key", ""))
-    return str(first)
+    """Return the next key from the rotator (load-balanced round-robin)."""
+    return _get_provider_rotator(provider_config).next()
 
 
 def validate_llm_credentials(config) -> None:
@@ -224,13 +272,21 @@ def create_openai_client(config: CodeWikiConfig) -> OpenAI:
     return _get_cached_openai_client(config.llm_base_url, config.llm_api_key)
 
 
-def _create_client_for_model(config: CodeWikiConfig, model: str):
+def _create_client_for_model(config: CodeWikiConfig, model: str, api_key: str | None = None):
+    """Create an SDK client for the given model.
+
+    If `api_key` is provided, it overrides the rotator's next() output. Used by
+    raw_llm_call to bind a specific key during the rotation retry loop.
+    """
     if not _has_provider_registry(config):
+        if api_key:
+            return _get_cached_openai_client(config.llm_base_url, api_key), "openai_compatible"
         return create_openai_client(config), "openai_compatible"
 
     provider_config, _ = _get_provider_config(config, model)
     provider_type = provider_config.type
-    api_key = _get_provider_api_key(provider_config)
+    if api_key is None:
+        api_key = _get_provider_api_key(provider_config)
 
     if provider_type in {"openai_compatible", "azure_openai"}:
         base_url = provider_config.base_url or provider_config.endpoint or config.llm_base_url
@@ -279,6 +335,99 @@ def _call_llm_streaming(
     return "".join(parts)
 
 
+def _is_auth_error(exc: Exception) -> bool:
+    """Check if exception is a 401/403 auth error from LLM provider."""
+    status = getattr(exc, "status_code", None)
+    return status in (401, 403)
+
+
+def _raw_llm_call_with_key(
+    prompt: str,
+    config: CodeWikiConfig,
+    model: str,
+    api_key: str,
+    temperature: float,
+    stream: bool,
+) -> "LLMCallResult":
+    """Single SDK call with a specific API key. Used inside the key-rotation retry loop."""
+    from codewiki.src.be.utils import count_tokens
+
+    client, provider_type = _create_client_for_model(config, model, api_key=api_key)
+    if _has_provider_registry(config):
+        resolved = resolve_model_ref(model, config.providers)
+        resolved_model_name = resolved.model_name
+        resolved_stream = resolved.stream
+    else:
+        resolved_model_name = model
+        resolved_stream = False
+
+    t0 = time.time()
+    usage = None
+
+    if provider_type in {"openai_compatible", "azure_openai"}:
+        if stream and resolved_stream:
+            content = _call_llm_streaming(client, resolved_model_name, prompt, temperature, config)
+        else:
+            response = client.chat.completions.create(
+                model=resolved_model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=config.max_tokens,
+            )
+            if not response.choices:
+                raise ValueError(f"LLM returned empty choices (model={resolved_model_name})")
+            content = response.choices[0].message.content
+            if content is None:
+                raise ValueError(
+                    f"LLM returned null content (model={resolved_model_name}, "
+                    f"finish_reason={response.choices[0].finish_reason!r})"
+                )
+            if response.usage:
+                usage = LLMCallUsage(
+                    input_tokens=response.usage.prompt_tokens or 0,
+                    output_tokens=response.usage.completion_tokens or 0,
+                    source="api",
+                )
+    elif provider_type == "claude":
+        response = _call_claude(client, resolved_model_name, prompt, temperature, config)
+        parts = []
+        for block in response.content:
+            text = getattr(block, "text", None)
+            if text:
+                parts.append(text)
+        content = "".join(parts)
+        response_usage = getattr(response, "usage", None)
+        if response_usage is not None:
+            usage = LLMCallUsage(
+                input_tokens=getattr(response_usage, "input_tokens", 0) or 0,
+                output_tokens=getattr(response_usage, "output_tokens", 0) or 0,
+                source="api",
+            )
+    else:
+        raise ValueError(f"unsupported provider type: {provider_type}")
+
+    if not content:
+        raise ValueError(f"LLM returned empty content (model={resolved_model_name})")
+
+    if usage is None:
+        usage = LLMCallUsage(
+            input_tokens=count_tokens(prompt),
+            output_tokens=count_tokens(content),
+            source="estimated",
+        )
+
+    elapsed = time.time() - t0
+    _logger.debug(
+        "raw_llm_call: model=%s, elapsed=%.1fs, input_tokens=%s, output_tokens=%s, source=%s",
+        model,
+        elapsed,
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.source,
+    )
+    return LLMCallResult(content=content, usage=usage, model=resolved_model_name)
+
+
 def raw_llm_call(
     prompt: str,
     config: CodeWikiConfig,
@@ -286,6 +435,12 @@ def raw_llm_call(
     temperature: float = 0.0,
     stream: bool = False,
 ) -> "LLMCallResult":
+    """Bottom-layer SDK call with key rotation on 401/403.
+
+    On auth error, tries the next key from the provider's KeyRotator.
+    Only when ALL keys are exhausted does the error propagate up to the
+    middleware (which then handles model fallback).
+    """
     from codewiki.src.be.utils import count_tokens
 
     try:
@@ -294,83 +449,56 @@ def raw_llm_call(
             f"raw_llm_call: model={model}, prompt_tokens={prompt_tokens}, temperature={temperature}"
         )
 
-        client, provider_type = _create_client_for_model(config, model)
-        resolved_stream = False
+        # Determine how many keys we have for this provider
+        rotator = None
+        num_keys = 1
         if _has_provider_registry(config):
-            resolved = resolve_model_ref(model, config.providers)
-            resolved_model_name = resolved.model_name
-            resolved_stream = resolved.stream
-        else:
-            resolved_model_name = model
+            try:
+                provider_config, _ = _get_provider_config(config, model)
+                rotator = _get_provider_rotator(provider_config)
+                num_keys = max(len(rotator), 1)
+            except Exception:
+                # Provider lookup failed (e.g. test mocks): fall back to single
+                # call. _create_client_for_model will surface the real error.
+                rotator = None
+                num_keys = 1
 
-        t0 = time.time()
-        usage = None
-
-        if provider_type in {"openai_compatible", "azure_openai"}:
-            if stream and resolved_stream:
-                content = _call_llm_streaming(
-                    client, resolved_model_name, prompt, temperature, config
-                )
+        last_auth_error: Exception | None = None
+        for attempt in range(num_keys):
+            # Get next key (rotator load-balances; this also picks the
+            # next key on auth-error retries)
+            if rotator is not None:
+                api_key = rotator.next()
+                if not api_key:
+                    raise RuntimeError(
+                        f"No API keys configured for provider serving model '{model}'"
+                    )
             else:
-                response = client.chat.completions.create(
-                    model=resolved_model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=temperature,
-                    max_tokens=config.max_tokens,
-                )
-                if not response.choices:
-                    raise ValueError(f"LLM returned empty choices (model={resolved_model_name})")
-                content = response.choices[0].message.content
-                if content is None:
-                    raise ValueError(
-                        f"LLM returned null content (model={resolved_model_name}, "
-                        f"finish_reason={response.choices[0].finish_reason!r})"
+                api_key = config.llm_api_key or ""
+
+            try:
+                return _raw_llm_call_with_key(prompt, config, model, api_key, temperature, stream)
+            except CancellationError:
+                raise
+            except Exception as exc:
+                if _is_auth_error(exc) and num_keys > 1 and attempt + 1 < num_keys:
+                    last_auth_error = exc
+                    _logger.warning(
+                        "🔑 Auth error (%s) on key #%d/%d for model '%s' — rotating to next key",
+                        getattr(exc, "status_code", "?"),
+                        attempt + 1,
+                        num_keys,
+                        model,
                     )
-                if response.usage:
-                    usage = LLMCallUsage(
-                        input_tokens=response.usage.prompt_tokens or 0,
-                        output_tokens=response.usage.completion_tokens or 0,
-                        source="api",
-                    )
-        elif provider_type == "claude":
-            response = _call_claude(client, resolved_model_name, prompt, temperature, config)
-            parts = []
-            for block in response.content:
-                text = getattr(block, "text", None)
-                if text:
-                    parts.append(text)
-            content = "".join(parts)
-            response_usage = getattr(response, "usage", None)
-            if response_usage is not None:
-                usage = LLMCallUsage(
-                    input_tokens=getattr(response_usage, "input_tokens", 0) or 0,
-                    output_tokens=getattr(response_usage, "output_tokens", 0) or 0,
-                    source="api",
-                )
-        else:
-            raise ValueError(f"unsupported provider type: {provider_type}")
+                    continue
+                # Non-auth error, or last key exhausted: propagate
+                raise classify_llm_exception(exc) from exc
 
-        if not content:
-            raise ValueError(f"LLM returned empty content (model={resolved_model_name})")
-
-        if usage is None:
-            usage = LLMCallUsage(
-                input_tokens=count_tokens(prompt),
-                output_tokens=count_tokens(content),
-                source="estimated",
-            )
-
-        elapsed = time.time() - t0
-        _logger.debug(
-            "raw_llm_call: model=%s, elapsed=%.1fs, input_tokens=%s, output_tokens=%s, source=%s",
-            model,
-            elapsed,
-            usage.input_tokens,
-            usage.output_tokens,
-            usage.source,
-        )
-        return LLMCallResult(content=content, usage=usage, model=resolved_model_name)
+        # All keys exhausted on auth errors
+        if last_auth_error is not None:
+            _logger.error("🔑 All %d keys exhausted on auth errors for model '%s'", num_keys, model)
+            raise classify_llm_exception(last_auth_error) from last_auth_error
+        # Unreachable but satisfies type checker
+        raise RuntimeError("raw_llm_call: exhausted retry loop without result")
     except CancellationError:
         raise
-    except Exception as exc:
-        raise classify_llm_exception(exc) from exc
