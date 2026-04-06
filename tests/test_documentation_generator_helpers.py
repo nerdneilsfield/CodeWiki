@@ -274,3 +274,34 @@ def test_initialize_generation_state_handles_missing_task_collisions(tmp_path):
 
     assert gen.cache_manager.get_output_file("overview:module:root") == "root.md"
     assert gen.cache_manager.get_output_file("module:root-child") == "root-child.md"
+
+
+def test_initialize_cache_renames_against_existing_entries(tmp_path):
+    """Existing cache entry holds 'modules.md'; new plan must rename, not throw."""
+    gen = _make_generator(tmp_path)
+    gen._build_initial_context()
+
+    # Pre-seed cache with an unrelated artifact owning 'modules.md'
+    gen.cache_manager.plan_task("module:legacy_orphan", output_file="modules.md")
+
+    module_tree = {
+        "Modules": {
+            "path": "modules",
+            "children": {},
+            "components": [],
+        }
+    }
+
+    with (
+        patch("codewiki.src.be.documentation_generator.cleanup_legacy_internal_files"),
+        patch("codewiki.src.be.documentation_generator.dedup_docs_directory"),
+        patch("codewiki.src.be.documentation_generator.freeze_doc_filenames"),
+        patch("codewiki.src.be.documentation_generator.file_manager.save_json"),
+    ):
+        asyncio.run(gen._initialize_cache_from_tree(module_tree, str(tmp_path / "docs")))
+
+    # Existing entry untouched, new artifact got a renamed file
+    assert gen.cache_manager.get_output_file("module:legacy_orphan") == "modules.md"
+    new_file = gen.cache_manager.get_output_file("module:modules")
+    assert new_file is not None and new_file != "modules.md"
+    assert new_file.startswith("modules_") and new_file.endswith(".md")

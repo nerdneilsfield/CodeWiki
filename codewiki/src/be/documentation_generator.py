@@ -484,6 +484,8 @@ class DocumentationGenerator:
         if not self.cache_manager:
             return
 
+        # First pass: compute artifact_id for each new task
+        planned: list[tuple[str, str]] = []  # [(artifact_id, requested_output_file)]
         for task in build_generation_tasks(module_tree, self.config):
             if task.doc_id == "overview:root":
                 artifact_id = "overview:root"
@@ -491,7 +493,34 @@ class DocumentationGenerator:
                 artifact_id = overview_artifact_id(task.doc_id)
             else:
                 artifact_id = module_artifact_id(task.doc_id)
-            self.cache_manager.plan_task(artifact_id, output_file=task.output_file)
+            planned.append((artifact_id, task.output_file))
+
+        # Build collision map: existing entries + planned, but exclude entries
+        # whose artifact_id is being re-planned (they're about to be reassigned).
+        replanned_ids = {aid for aid, _ in planned}
+        used_files: dict[str, str] = {
+            ofile: aid
+            for ofile, aid in self.cache_manager.output_file_assignments().items()
+            if aid not in replanned_ids
+        }
+
+        # Second pass: assign collision-free filenames and call plan_task
+        for artifact_id, requested_file in planned:
+            output_file = requested_file
+            if output_file in used_files and used_files[output_file] != artifact_id:
+                stem, ext = os.path.splitext(output_file)
+                suffix = 2
+                while f"{stem}_{suffix}{ext}" in used_files:
+                    suffix += 1
+                output_file = f"{stem}_{suffix}{ext}"
+                logger.warning(
+                    "Filename collision: '%s' renamed to '%s' (conflict with %s)",
+                    requested_file,
+                    output_file,
+                    used_files[requested_file],
+                )
+            used_files[output_file] = artifact_id
+            self.cache_manager.plan_task(artifact_id, output_file=output_file)
 
         self.cache_manager.update_metadata(
             repo_commit=self.commit_id or "",

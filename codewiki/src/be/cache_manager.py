@@ -89,6 +89,20 @@ class CacheManager:
             entry = self._entries.get(artifact_id)
             return entry.output_file if entry else None
 
+    def output_file_assignments(self) -> dict[str, str]:
+        """Return a snapshot of {output_file: artifact_id} for all current entries.
+
+        Used by callers (e.g. _initialize_cache_from_tree) to detect collisions
+        against entries that already exist in the registry, not just within a
+        single batch of new tasks.
+        """
+        with self._lock:
+            return {
+                entry.output_file: artifact_id
+                for artifact_id, entry in self._entries.items()
+                if entry.output_file
+            }
+
     def get_metadata(self) -> dict[str, str]:
         with self._lock:
             return dict(self._metadata)
