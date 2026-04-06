@@ -8,6 +8,7 @@ Tests cover:
 """
 
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from codewiki.src.be.clustering.models import (
@@ -523,17 +524,14 @@ _VALID_LLM_RESPONSE = json.dumps(
 
 
 class TestLLMNamingHappyPath:
-    """mock call_llm returns valid JSON → titles from LLM are used."""
+    """mock middleware returns valid JSON → titles from LLM are used."""
 
     def test_llm_naming_happy_path(self):
         from codewiki.src.be.clustering.naming import name_clusters
 
         config = _make_config_with_cluster_model()
-        with patch(
-            "codewiki.src.be.clustering.naming.call_llm",
-            return_value=_llm_result(_VALID_LLM_RESPONSE),
-        ):
-            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
+        middleware = SimpleNamespace(call=MagicMock(return_value=_llm_result(_VALID_LLM_RESPONSE)))
+        result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config, middleware=middleware)
 
         assert len(result) == 2
         assert result[0]["title"] == "认证模块 (Auth Module)"
@@ -549,11 +547,10 @@ class TestLLMNamingFallbackOnInvalidJson:
         from codewiki.src.be.clustering.naming import name_clusters
 
         config = _make_config_with_cluster_model()
-        with patch(
-            "codewiki.src.be.clustering.naming.call_llm",
-            return_value=_llm_result("this is not json at all %%%"),
-        ):
-            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
+        middleware = SimpleNamespace(
+            call=MagicMock(return_value=_llm_result("this is not json at all %%%"))
+        )
+        result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config, middleware=middleware)
 
         # Should fall back to heuristic — still returns 2 entries
         assert len(result) == 2
@@ -574,11 +571,8 @@ class TestLLMNamingFallbackOnException:
         from codewiki.src.be.clustering.naming import name_clusters
 
         config = _make_config_with_cluster_model()
-        with patch(
-            "codewiki.src.be.clustering.naming.call_llm",
-            side_effect=RuntimeError("LLM call failed"),
-        ):
-            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
+        middleware = SimpleNamespace(call=MagicMock(side_effect=RuntimeError("LLM call failed")))
+        result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config, middleware=middleware)
 
         assert len(result) == 2
         for entry in result:
@@ -597,11 +591,8 @@ class TestLLMNamingFallbackOnWrongCount:
             ]
         )
         config = _make_config_with_cluster_model()
-        with patch(
-            "codewiki.src.be.clustering.naming.call_llm",
-            return_value=_llm_result(short_response),
-        ):
-            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
+        middleware = SimpleNamespace(call=MagicMock(return_value=_llm_result(short_response)))
+        result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config, middleware=middleware)
 
         # Must still return 2 entries via heuristic fallback
         assert len(result) == 2
@@ -610,15 +601,15 @@ class TestLLMNamingFallbackOnWrongCount:
 
 
 class TestLLMNamingSkippedWithoutConfig:
-    """config=None → heuristic only, call_llm not called."""
+    """config=None → heuristic only, middleware not called."""
 
     def test_llm_naming_skipped_without_config(self):
         from codewiki.src.be.clustering.naming import name_clusters
 
-        with patch("codewiki.src.be.clustering.naming.call_llm") as mock_llm:
-            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config=None)
+        middleware = SimpleNamespace(call=MagicMock())
+        result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config=None, middleware=middleware)
 
-        mock_llm.assert_not_called()
+        middleware.call.assert_not_called()
         assert len(result) == 2
 
 
@@ -629,10 +620,10 @@ class TestLLMNamingSkippedWithoutClusterModel:
         from codewiki.src.be.clustering.naming import name_clusters
 
         config = _make_config_without_cluster_model()
-        with patch("codewiki.src.be.clustering.naming.call_llm") as mock_llm:
-            result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config)
+        middleware = SimpleNamespace(call=MagicMock())
+        result = name_clusters(_TWO_CLUSTER_SPEC, _FILE_MAP, config, middleware=middleware)
 
-        mock_llm.assert_not_called()
+        middleware.call.assert_not_called()
         assert len(result) == 2
 
 
@@ -807,11 +798,8 @@ class TestLLMNamingValidation:
         file_map = {"auth/a.py::A": "auth/a.py"}
         config = type("C", (), {"cluster_model": "test-model"})()
         response = json.dumps([{"cluster_idx": 0, "title": "", "description": "desc"}])
-        with patch(
-            "codewiki.src.be.clustering.naming.call_llm",
-            return_value=_llm_result(response),
-        ):
-            result = name_clusters(clusters, file_map, config)
+        middleware = SimpleNamespace(call=MagicMock(return_value=_llm_result(response)))
+        result = name_clusters(clusters, file_map, config, middleware=middleware)
         # Empty title → LLM rejected → heuristic used
         assert result[0]["title"] != ""
 
@@ -822,10 +810,7 @@ class TestLLMNamingValidation:
         file_map = {"auth/a.py::A": "auth/a.py"}
         config = type("C", (), {"cluster_model": "test-model"})()
         response = json.dumps([{"cluster_idx": 0, "title": "Auth", "description": ""}])
-        with patch(
-            "codewiki.src.be.clustering.naming.call_llm",
-            return_value=_llm_result(response),
-        ):
-            result = name_clusters(clusters, file_map, config)
+        middleware = SimpleNamespace(call=MagicMock(return_value=_llm_result(response)))
+        result = name_clusters(clusters, file_map, config, middleware=middleware)
         # Empty description → LLM rejected → heuristic used
         assert result[0]["description"] != ""

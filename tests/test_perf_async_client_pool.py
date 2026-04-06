@@ -60,66 +60,19 @@ def _make_dummy_config(long_context_model=None):
     return cfg
 
 
-def test_create_agent_does_not_call_create_fallback_models_per_module():
-    """create_agent() must not rebuild FallbackModel on every call."""
-    from unittest.mock import patch
+def test_create_agent_uses_middleware_model_factory():
+    """create_agent() delegates model creation to the middleware."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
     from codewiki.src.be.agent_orchestrator import AgentOrchestrator
     import codewiki.src.be.agent_orchestrator as orch_mod
 
     cfg = _make_dummy_config()
-    with patch.object(
-        orch_mod, "create_fallback_models", wraps=orch_mod.create_fallback_models
-    ) as mock_cfm:
-        orch = AgentOrchestrator(cfg)
-        calls_after_init = mock_cfm.call_count  # exactly 1 call from __init__
-
+    middleware = SimpleNamespace(create_agent_model=MagicMock(return_value="middleware-model"))
+    with patch.object(orch_mod, "Agent", return_value=MagicMock()) as mock_agent:
+        orch = AgentOrchestrator(cfg, middleware=middleware)
         orch.create_agent("mod1", {}, [], estimated_tokens=0)
-        orch.create_agent("mod2", {}, [], estimated_tokens=0)
-        orch.create_agent("mod3", {}, [], estimated_tokens=0)
+        orch.create_agent("mod2", {}, [], estimated_tokens=999_999)
 
-    # No additional calls beyond the one in __init__
-    assert mock_cfm.call_count == calls_after_init, (
-        f"create_fallback_models called {mock_cfm.call_count} times; "
-        f"expected {calls_after_init} (only during __init__)"
-    )
-
-
-def test_create_agent_reuses_long_context_model_for_large_prompts():
-    """create_long_context_model is called only once during __init__."""
-    from unittest.mock import patch, MagicMock
-    from codewiki.src.be.agent_orchestrator import AgentOrchestrator
-    import codewiki.src.be.agent_orchestrator as orch_mod
-
-    cfg = _make_dummy_config(long_context_model="long-ctx-model")
-    mock_lc = MagicMock(name="long-context-model")
-    with (
-        patch.object(orch_mod, "create_long_context_model", return_value=mock_lc) as mock_clcm,
-        patch.object(orch_mod, "Agent", return_value=MagicMock()),
-    ):
-        orch = AgentOrchestrator(cfg)
-        calls_after_init = mock_clcm.call_count  # exactly 1 call from __init__
-
-        big = cfg.long_context_threshold + 1
-        orch.create_agent("mod1", {}, [], estimated_tokens=big)
-        orch.create_agent("mod2", {}, [], estimated_tokens=big)
-
-    assert mock_clcm.call_count == calls_after_init, (
-        f"create_long_context_model called {mock_clcm.call_count} times; "
-        f"expected {calls_after_init} (only during __init__)"
-    )
-
-
-def test_create_agent_uses_fallback_when_no_long_context_model():
-    """When long_context_model is None, create_agent always uses self.fallback_models."""
-    from unittest.mock import patch
-    from codewiki.src.be.agent_orchestrator import AgentOrchestrator
-    import codewiki.src.be.agent_orchestrator as orch_mod
-
-    cfg = _make_dummy_config(long_context_model=None)
-    with patch.object(orch_mod, "create_long_context_model") as mock_clcm:
-        orch = AgentOrchestrator(cfg)
-        # Even with a huge token count, no long_context_model should be used
-        orch.create_agent("mod1", {}, [], estimated_tokens=999_999)
-
-    mock_clcm.assert_not_called()
-    assert orch.long_context_model is None
+    assert middleware.create_agent_model.call_count == 2
+    assert mock_agent.call_args.args[0] == "middleware-model"

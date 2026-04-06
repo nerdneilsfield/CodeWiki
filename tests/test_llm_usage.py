@@ -83,10 +83,10 @@ class TestLlmUsageStats:
         }
 
 
-class TestCallLlmReturnsResult:
-    def test_call_llm_returns_llm_call_result(self):
+class TestRawLlmCallReturnsResult:
+    def test_raw_llm_call_returns_llm_call_result(self):
         from codewiki.src.be.llm_usage import LLMCallResult
-        from codewiki.src.be.llm_services import call_llm
+        from codewiki.src.be.llm_services import raw_llm_call
 
         config = MagicMock()
         config.main_model = "test"
@@ -112,15 +112,15 @@ class TestCallLlmReturnsResult:
             "codewiki.src.be.llm_services._create_client_for_model",
             return_value=(mock_client, "openai_compatible"),
         ):
-            result = call_llm("test", config)
+            result = raw_llm_call("test", config, "test")
 
         assert isinstance(result, LLMCallResult)
         assert result.content == "response text"
         assert result.usage is not None
         assert result.usage.input_tokens == 10
 
-    def test_call_llm_uses_anthropic_api_usage_when_available(self):
-        from codewiki.src.be.llm_services import call_llm
+    def test_raw_llm_call_uses_anthropic_api_usage_when_available(self):
+        from codewiki.src.be.llm_services import raw_llm_call
 
         config = MagicMock()
         config.main_model = "claude-test"
@@ -141,7 +141,7 @@ class TestCallLlmReturnsResult:
             "codewiki.src.be.llm_services._create_client_for_model",
             return_value=(mock_client, "claude"),
         ):
-            result = call_llm("test", config)
+            result = raw_llm_call("test", config, "claude-test")
 
         assert result.content == "claude response"
         assert result.usage is not None
@@ -149,9 +149,9 @@ class TestCallLlmReturnsResult:
         assert result.usage.output_tokens == 8
         assert result.usage.source == "api"
 
-    def test_call_llm_no_retry_loop(self):
-        """call_llm must raise on first failure, not retry."""
-        from codewiki.src.be.llm_services import call_llm
+    def test_raw_llm_call_no_retry_loop(self):
+        """raw_llm_call must raise on first failure, not retry."""
+        from codewiki.src.be.llm_services import raw_llm_call
 
         config = MagicMock()
         config.main_model = "test"
@@ -170,7 +170,7 @@ class TestCallLlmReturnsResult:
             return_value=(mock_client, "openai_compatible"),
         ):
             with pytest.raises(Exception):
-                call_llm("test", config)
+                raw_llm_call("test", config, "test")
 
         assert mock_client.chat.completions.create.call_count == 1
 

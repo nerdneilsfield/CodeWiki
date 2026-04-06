@@ -103,7 +103,12 @@ def test_postprocess_docs_forwards_usage_stats(tmp_path):
     with patch("codewiki.src.be.docs_fixer.fix_docs") as fix_docs:
         gen._postprocess_docs(ctx)
 
-    fix_docs.assert_called_once_with(ctx.working_dir, gen.config, usage_stats=gen.usage_stats)
+    fix_docs.assert_called_once_with(
+        ctx.working_dir,
+        gen.config,
+        usage_stats=gen.usage_stats,
+        middleware=gen.middleware,
+    )
 
 
 def test_generate_docs_from_tree_small_repo_renames_overview(tmp_path):

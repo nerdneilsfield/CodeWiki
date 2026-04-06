@@ -8,7 +8,7 @@ class TestCallLlmRaisesLLMError:
         import openai
 
         from codewiki.src.be.errors import ErrorCategory, LLMError
-        from codewiki.src.be.llm_services import call_llm
+        from codewiki.src.be.llm_services import raw_llm_call
 
         config = MagicMock()
         config.main_model = "test"
@@ -26,13 +26,13 @@ class TestCallLlmRaisesLLMError:
             return_value=(mock_client, "openai_compatible"),
         ):
             with pytest.raises(LLMError) as exc_info:
-                call_llm("test", config)
+                raw_llm_call("test", config, "test")
             assert exc_info.value.category == ErrorCategory.RETRYABLE_TRANSIENT
 
     def test_streaming_path_returns_estimated_usage(self):
         from types import SimpleNamespace
 
-        from codewiki.src.be.llm_services import call_llm
+        from codewiki.src.be.llm_services import raw_llm_call
 
         config = MagicMock()
         config.main_model = "openai/gpt-4o"
@@ -57,7 +57,7 @@ class TestCallLlmRaisesLLMError:
             ),
             patch("codewiki.src.be.utils.count_tokens", side_effect=[12, 12, 34]),
         ):
-            result = call_llm("test", config, model="openai/gpt-4o", stream=True)
+            result = raw_llm_call("test", config, "openai/gpt-4o", stream=True)
 
         assert result.content == "hello world"
         assert result.usage is not None

@@ -29,15 +29,14 @@ def test_create_agent_uses_long_context_model_for_large_prompt(tmp_path):
     import codewiki.src.be.agent_orchestrator as orch_mod
 
     with (
-        patch.object(orch_mod, "create_fallback_models", return_value="fallback-model"),
-        patch.object(orch_mod, "create_long_context_model", return_value="long-model"),
         patch.object(orch_mod, "Agent", return_value=MagicMock()) as mock_agent,
     ):
-        orchestrator = orch_mod.AgentOrchestrator(_make_config(tmp_path))
+        middleware = SimpleNamespace(create_agent_model=lambda: "middleware-model")
+        orchestrator = orch_mod.AgentOrchestrator(_make_config(tmp_path), middleware=middleware)
         # threshold is 100 in test config
         orchestrator.create_agent("module", {}, [], estimated_tokens=1000)
 
-    assert mock_agent.call_args.args[0] == "long-model"
+    assert mock_agent.call_args.args[0] == "middleware-model"
 
 
 def test_create_agent_uses_complex_toolset_for_multi_file_module(tmp_path):
@@ -49,11 +48,10 @@ def test_create_agent_uses_complex_toolset_for_multi_file_module(tmp_path):
     }
 
     with (
-        patch.object(orch_mod, "create_fallback_models", return_value="fallback-model"),
-        patch.object(orch_mod, "create_long_context_model", return_value="long-model"),
         patch.object(orch_mod, "Agent", return_value=MagicMock()) as mock_agent,
     ):
-        orchestrator = orch_mod.AgentOrchestrator(_make_config(tmp_path))
+        middleware = SimpleNamespace(create_agent_model=lambda: "middleware-model")
+        orchestrator = orch_mod.AgentOrchestrator(_make_config(tmp_path), middleware=middleware)
         orchestrator.create_agent("module", components, ["a", "b"], estimated_tokens=0)
 
     tools = mock_agent.call_args.kwargs["tools"]
@@ -71,11 +69,10 @@ async def test_process_module_returns_cached_for_leaf_docs(tmp_path):
     doc_file.write_text("x" * 200, encoding="utf-8")
 
     with (
-        patch.object(orch_mod, "create_fallback_models", return_value="fallback-model"),
-        patch.object(orch_mod, "create_long_context_model", return_value="long-model"),
         patch.object(orch_mod, "find_module_doc", return_value=str(doc_file)),
     ):
-        orchestrator = orch_mod.AgentOrchestrator(_make_config(tmp_path))
+        middleware = SimpleNamespace(create_agent_model=lambda: "middleware-model")
+        orchestrator = orch_mod.AgentOrchestrator(_make_config(tmp_path), middleware=middleware)
         with patch.object(orchestrator, "create_agent") as mock_create_agent:
             module_tree, models_used = await orchestrator.process_module(
                 module_name="leaf",
@@ -109,8 +106,6 @@ async def test_process_module_success_records_usage_and_marks_completed(tmp_path
     state_mgr = AsyncMock()
 
     with (
-        patch.object(orch_mod, "create_fallback_models", return_value="fallback-model"),
-        patch.object(orch_mod, "create_long_context_model", return_value="long-model"),
         patch.object(orch_mod, "format_user_prompt", return_value="prompt"),
         patch.object(orch_mod, "build_context_pack", return_value={}),
         patch.object(orch_mod, "format_context_pack_section", return_value=""),
@@ -119,8 +114,9 @@ async def test_process_module_success_records_usage_and_marks_completed(tmp_path
         patch.object(orch_mod, "ModelResponse", SimpleNamespace),
     ):
         mock_file_manager.load_json.return_value = {}
+        middleware = SimpleNamespace(create_agent_model=lambda: "middleware-model")
         orchestrator = orch_mod.AgentOrchestrator(
-            _make_config(tmp_path), usage_stats=LLMUsageStats()
+            _make_config(tmp_path), middleware=middleware, usage_stats=LLMUsageStats()
         )
         with patch.object(orchestrator, "create_agent", return_value=fake_agent):
             module_tree, models_used = await orchestrator.process_module(

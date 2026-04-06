@@ -1,4 +1,5 @@
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.utils import doc_id_for_path
 
@@ -18,7 +19,10 @@ def _make_config(tmp_path):
 
 
 def test_assigned_doc_filename_reads_frozen_tree_node(tmp_path):
-    orchestrator = AgentOrchestrator(_make_config(tmp_path))
+    orchestrator = AgentOrchestrator(
+        _make_config(tmp_path),
+        middleware=LLMMiddleware(_make_config(tmp_path)),
+    )
     tree = {
         "CLI Transport": {
             "_doc_filename": "cli.md",

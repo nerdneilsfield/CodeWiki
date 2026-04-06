@@ -51,8 +51,8 @@ class TestPolymorphicModelList:
 
 
 class TestCallLlmStreamParam:
-    def test_call_llm_accepts_stream_parameter(self):
-        from codewiki.src.be.llm_services import call_llm
+    def test_middleware_call_accepts_stream_parameter(self):
+        from codewiki.src.be.llm_middleware import LLMMiddleware
 
-        sig = inspect.signature(call_llm)
+        sig = inspect.signature(LLMMiddleware.call)
         assert "stream" in sig.parameters

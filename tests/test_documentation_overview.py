@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 import warnings
 
 import pytest
@@ -128,8 +129,10 @@ async def test_generate_parent_module_docs_skips_when_input_hash_matches(tmp_pat
         module_tree=tree,
         working_dir=str(docs_dir),
         gen_state=state,
-        call_llm=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("should not call llm")
+        middleware=SimpleNamespace(
+            call=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("should not call llm")
+            )
         ),
     )
 
@@ -164,8 +167,8 @@ async def test_generate_parent_module_docs_marks_completed_after_write(tmp_path)
     )
     manager = GenerationStateManager(state, str(docs_dir / "generation_state.json"))
 
-    async def _call_llm(_prompt, _config):
-        return "<OVERVIEW>\nGenerated content\n</OVERVIEW>"
+    def _call(_prompt):
+        return SimpleNamespace(content="<OVERVIEW>\nGenerated content\n</OVERVIEW>")
 
     ctx = OverviewContext(
         config=_make_config(tmp_path),
@@ -173,7 +176,7 @@ async def test_generate_parent_module_docs_marks_completed_after_write(tmp_path)
         working_dir=str(docs_dir),
         gen_state=state,
         state_mgr=manager,
-        call_llm=_call_llm,
+        middleware=SimpleNamespace(call=_call),
     )
 
     with warnings.catch_warnings(record=True) as captured:
@@ -190,28 +193,31 @@ async def test_generate_parent_module_docs_marks_completed_after_write(tmp_path)
 @pytest.mark.asyncio
 async def test_generate_parent_module_docs_records_usage_stats(tmp_path):
     from codewiki.src.be.documentation_overview import OverviewContext, generate_parent_module_docs
+    from codewiki.src.be.llm_middleware import LLMMiddleware
 
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir()
     tree = {"CLI Transport": {"module_id": "mod-cli", "children": {}}}
     usage_stats = LLMUsageStats()
-
-    async def _call_llm(_prompt, _config):
-        return LLMCallResult(
-            content="<OVERVIEW>\nGenerated content\n</OVERVIEW>",
-            usage=LLMCallUsage(input_tokens=11, output_tokens=7),
-            model="test/main",
-        )
+    middleware = LLMMiddleware(_make_config(tmp_path), usage_stats=usage_stats)
 
     ctx = OverviewContext(
         config=_make_config(tmp_path),
         module_tree=tree,
         working_dir=str(docs_dir),
         usage_stats=usage_stats,
-        call_llm=_call_llm,
+        middleware=middleware,
     )
 
-    await generate_parent_module_docs(ctx, [])
+    with patch(
+        "codewiki.src.be.llm_middleware.raw_llm_call",
+        return_value=LLMCallResult(
+            content="<OVERVIEW>\nGenerated content\n</OVERVIEW>",
+            usage=LLMCallUsage(input_tokens=11, output_tokens=7),
+            model="test/main",
+        ),
+    ):
+        await generate_parent_module_docs(ctx, [])
 
     assert usage_stats.to_dict() == {
         "total_input_tokens": 11,

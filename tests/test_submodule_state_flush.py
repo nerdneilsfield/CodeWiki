@@ -44,8 +44,6 @@ async def test_submodule_completion_flushes_state(tmp_path):
         ),
         custom_instructions=None,
         module_tree_manager=None,
-        fallback_models=object(),
-        long_context_model=None,
         gen_state=gen_state,
         state_mgr=state_mgr,
     )

@@ -4,7 +4,7 @@ import pytest
 
 
 def _make_config():
-    """Build a minimal Config-like mock that passes call_llm's checks."""
+    """Build a minimal Config-like mock that passes raw_llm_call's checks."""
     config = MagicMock()
     config.main_model = "test-model"
     config.max_tokens = 1000
@@ -18,7 +18,7 @@ def _make_config():
 
 class TestLlmResponseGuard:
     def test_empty_choices_raises_value_error(self):
-        from codewiki.src.be.llm_services import call_llm
+        from codewiki.src.be.llm_services import raw_llm_call
 
         config = _make_config()
         mock_response = MagicMock()
@@ -32,10 +32,10 @@ class TestLlmResponseGuard:
             return_value=(mock_client, "openai_compatible"),
         ):
             with pytest.raises(ValueError, match="empty choices"):
-                call_llm("test prompt", config)
+                raw_llm_call("test prompt", config, "test-model")
 
     def test_none_content_raises_value_error(self):
-        from codewiki.src.be.llm_services import call_llm
+        from codewiki.src.be.llm_services import raw_llm_call
 
         config = _make_config()
         mock_choice = MagicMock()
@@ -52,10 +52,10 @@ class TestLlmResponseGuard:
             return_value=(mock_client, "openai_compatible"),
         ):
             with pytest.raises(ValueError, match="null content"):
-                call_llm("test prompt", config)
+                raw_llm_call("test prompt", config, "test-model")
 
     def test_openai_failure_propagates_without_streaming_fallback(self):
-        from codewiki.src.be.llm_services import call_llm
+        from codewiki.src.be.llm_services import raw_llm_call
 
         config = _make_config()
         mock_client = MagicMock()
@@ -66,11 +66,11 @@ class TestLlmResponseGuard:
             return_value=(mock_client, "openai_compatible"),
         ):
             with pytest.raises(Exception, match="cloudflare timeout"):
-                call_llm("test prompt", config)
+                raw_llm_call("test prompt", config, "test-model")
         mock_client.chat.completions.create.assert_called_once()
 
     def test_empty_claude_content_raises_value_error(self):
-        from codewiki.src.be.llm_services import call_llm
+        from codewiki.src.be.llm_services import raw_llm_call
 
         config = _make_config()
         mock_response = MagicMock()
@@ -85,4 +85,4 @@ class TestLlmResponseGuard:
             patch("codewiki.src.be.llm_services._call_claude", return_value=mock_response),
         ):
             with pytest.raises(ValueError, match="empty content"):
-                call_llm("test prompt", config)
+                raw_llm_call("test prompt", config, "test-model")
