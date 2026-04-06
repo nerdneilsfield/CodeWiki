@@ -7,6 +7,7 @@ from unittest.mock import patch, AsyncMock
 
 import pytest
 
+from codewiki.src.be.cache_manager import CacheManager
 from codewiki.src.be.guide_generator import GuideGenerator, _PROMPT_VERSIONS
 
 
@@ -103,6 +104,53 @@ def test_should_regenerate_when_input_changes():
             working_dir=wd,
         )
         assert gen2._should_regenerate("getting_started", [inp]) is True
+
+
+def test_should_not_regenerate_when_cache_manager_entry_valid():
+    with tempfile.TemporaryDirectory() as wd:
+        inp = os.path.join(wd, "input.md")
+        Path(inp).write_text("hello", encoding="utf-8")
+        out = os.path.join(wd, "guide-getting-started.md")
+        Path(out).write_text("# Getting Started\n" + "Content here.\n" * 10, encoding="utf-8")
+        cache_manager = CacheManager(os.path.join(wd, ".codewiki"))
+
+        gen = GuideGenerator(
+            config=_minimal_config(),
+            components={},
+            module_tree={},
+            working_dir=wd,
+            cache_manager=cache_manager,
+        )
+        input_hash = gen._compute_guide_input_hash([inp], "getting_started")
+        cache_manager.mark_done(
+            "guide:getting_started",
+            input_hash=input_hash,
+            output_path=out,
+            output_file=os.path.basename(out),
+        )
+
+        assert gen._should_regenerate("getting_started", [inp]) is False
+
+
+def test_update_cache_marks_cache_manager_entry():
+    with tempfile.TemporaryDirectory() as wd:
+        inp = os.path.join(wd, "input.md")
+        Path(inp).write_text("hello", encoding="utf-8")
+        out = os.path.join(wd, "guide-getting-started.md")
+        Path(out).write_text("# Getting Started\n" + "Content here.\n" * 10, encoding="utf-8")
+        cache_manager = CacheManager(os.path.join(wd, ".codewiki"))
+
+        gen = GuideGenerator(
+            config=_minimal_config(),
+            components={},
+            module_tree={},
+            working_dir=wd,
+            cache_manager=cache_manager,
+        )
+        gen._update_cache("getting_started", [inp], [out])
+
+        input_hash = gen._compute_guide_input_hash([inp], "getting_started")
+        assert cache_manager.is_valid("guide:getting_started", input_hash) is True
 
 
 # ── Contract tests (Task 7b) ─────────────────────────────────────────────────

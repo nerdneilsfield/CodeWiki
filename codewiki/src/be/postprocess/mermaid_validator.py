@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -13,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from codewiki.src.be.cache_manager import CacheManager
 from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_retry import with_retry_sync
 from codewiki.src.be.llm_usage import LLMUsageStats
@@ -24,6 +27,7 @@ _MERMAID_BLOCK_RE = re.compile(r"```mermaid\s*\n([\s\S]*?)```", re.IGNORECASE)
 _MERMAID_BAD_UNICODE_RE = re.compile(r"[∃∀∈∉⊂⊆⊇⊃⊄∧∨∩∪≡≈≠→⇒⇔←⇐≤≥∞∂∇√∫∑∏±×÷]")
 _MERMAID_SINGLE_QUOTE_RE = re.compile(r'\[(?:"|\'|)(?:[^"\']*\'[^"\']*)+(?:"|\'|)[^]]*]')
 _NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
+REPAIR_CACHE_DIR = "_repair_cache"
 
 _MMDC_PATH: str | None = None
 _MMDC_CHECKED = False
@@ -371,12 +375,20 @@ def _chunked(items: list[MermaidIssue], size: int) -> list[list[MermaidIssue]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
+def _repair_cache_path(cache_dir: str, repair_id: str) -> str:
+    target_dir = os.path.join(cache_dir, REPAIR_CACHE_DIR)
+    os.makedirs(target_dir, exist_ok=True)
+    safe_name = repair_id.replace(":", "_").replace("/", "_") + ".txt"
+    return os.path.join(target_dir, safe_name)
+
+
 def fix_mermaid_in_text(
     text: str,
     config: CodeWikiConfig,
     stats: Any,
     usage_stats: LLMUsageStats | None = None,
     middleware: LLMMiddleware | None = None,
+    cache_manager: CacheManager | None = None,
     report: Any | None = None,
     filename: str = "",
 ) -> str:
@@ -431,12 +443,44 @@ def fix_mermaid_in_text(
         return text
 
     repaired: dict[str, str] = {}
+    cache_dir = getattr(cache_manager, "_cache_dir", "") if cache_manager else ""
+    uncached_issues: list[MermaidIssue] = []
+    for issue in issues:
+        block_index = int(issue.issue_id.rsplit(":", 1)[-1])
+        repair_id = f"postprocess_repair:{filename}:mermaid_{block_index}"
+        block_hash = hashlib.md5((issue.cleaned or issue.span.content).encode("utf-8")).hexdigest()
+        if cache_manager and cache_dir and cache_manager.is_valid(repair_id, block_hash):
+            cached_path = _repair_cache_path(cache_dir, repair_id)
+            if os.path.exists(cached_path):
+                repaired[issue.issue_id] = Path(cached_path).read_text(encoding="utf-8")
+                continue
+        uncached_issues.append(issue)
     try:
         batch_size = int(getattr(pp_config, "repair_batch_size", 0) or 0)
     except Exception:
         batch_size = 0
-    for batch in _chunked(issues, batch_size or len(issues)):
-        repaired.update(repair_batch_sync(batch, config, pp_config, usage_stats, middleware))
+    for batch in _chunked(uncached_issues, batch_size or len(uncached_issues) or 1):
+        batch_repaired = repair_batch_sync(batch, config, pp_config, usage_stats, middleware)
+        repaired.update(batch_repaired)
+        if cache_manager and cache_dir:
+            issue_lookup = {issue.issue_id: issue for issue in batch}
+            for issue_id, repaired_block in batch_repaired.items():
+                issue = issue_lookup.get(issue_id)
+                if issue is None:
+                    continue
+                block_index = int(issue.issue_id.rsplit(":", 1)[-1])
+                repair_id = f"postprocess_repair:{filename}:mermaid_{block_index}"
+                block_hash = hashlib.md5(
+                    (issue.cleaned or issue.span.content).encode("utf-8")
+                ).hexdigest()
+                cached_path = _repair_cache_path(cache_dir, repair_id)
+                Path(cached_path).write_text(repaired_block, encoding="utf-8")
+                cache_manager.mark_done(
+                    repair_id,
+                    input_hash=block_hash,
+                    output_path=cached_path,
+                    output_file=os.path.basename(cached_path),
+                )
 
     for issue in issues:
         span = issue.span

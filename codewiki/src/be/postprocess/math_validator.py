@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import logging
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -12,6 +14,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from codewiki.src.be.cache_manager import CacheManager
 from pylatexenc.latexwalker import LatexWalker
 
 from codewiki.src.be.llm_middleware import LLMMiddleware
@@ -29,6 +32,7 @@ _INLINE_PAREN_RE = re.compile(r"\\\((.+?)\\\)", re.DOTALL)
 _INLINE_DOLLAR_RE = re.compile(r"(?<!\$)\$(?!\s)([^$\n]+?)(?<!\$)\$(?!\$)")
 
 _KATEX_HELPER = Path(__file__).with_name("katex_check.js")
+REPAIR_CACHE_DIR = "_repair_cache"
 
 
 @dataclass(frozen=True)
@@ -365,6 +369,13 @@ def _closing_delimiter(delimiter: str) -> str:
     return delimiter
 
 
+def _repair_cache_path(cache_dir: str, repair_id: str) -> str:
+    target_dir = os.path.join(cache_dir, REPAIR_CACHE_DIR)
+    os.makedirs(target_dir, exist_ok=True)
+    safe_name = repair_id.replace(":", "_").replace("/", "_") + ".txt"
+    return os.path.join(target_dir, safe_name)
+
+
 def _set_stat(stats: Any, name: str, delta: int = 1) -> None:
     if stats is None or not hasattr(stats, name):
         return
@@ -383,6 +394,7 @@ def fix_math_in_text(
     stats: Any,
     usage_stats: LLMUsageStats | None = None,
     middleware: LLMMiddleware | None = None,
+    cache_manager: CacheManager | None = None,
     report: Any | None = None,
     filename: str = "",
 ) -> str:
@@ -409,13 +421,47 @@ def fix_math_in_text(
             issues.append(issue)
 
     repaired: dict[str, str] = {}
+    cache_dir = getattr(cache_manager, "_cache_dir", "") if cache_manager else ""
     if issues:
         batch_size = max(1, config.postprocess.repair_batch_size)
-        for start in range(0, len(issues), batch_size):
-            batch = issues[start : start + batch_size]
-            repaired.update(
-                repair_batch_sync(batch, config, config.postprocess, usage_stats, middleware)
+        uncached_issues: list[FormulaIssue] = []
+        for issue in issues:
+            _, line_no, issue_index = issue.issue_id.rsplit(":", 2)
+            repair_id = f"postprocess_repair:{filename}:math_{line_no}_{issue_index}"
+            formula_hash = hashlib.md5(
+                (issue.cleaned or issue.span.content).encode("utf-8")
+            ).hexdigest()
+            if cache_manager and cache_dir and cache_manager.is_valid(repair_id, formula_hash):
+                cached_path = _repair_cache_path(cache_dir, repair_id)
+                if os.path.exists(cached_path):
+                    repaired[issue.issue_id] = Path(cached_path).read_text(encoding="utf-8")
+                    continue
+            uncached_issues.append(issue)
+        for start in range(0, len(uncached_issues), batch_size):
+            batch = uncached_issues[start : start + batch_size]
+            batch_repaired = repair_batch_sync(
+                batch, config, config.postprocess, usage_stats, middleware
             )
+            repaired.update(batch_repaired)
+            if cache_manager and cache_dir:
+                issue_lookup = {issue.issue_id: issue for issue in batch}
+                for issue_id, repaired_formula in batch_repaired.items():
+                    issue = issue_lookup.get(issue_id)
+                    if issue is None:
+                        continue
+                    _, line_no, issue_index = issue.issue_id.rsplit(":", 2)
+                    repair_id = f"postprocess_repair:{filename}:math_{line_no}_{issue_index}"
+                    formula_hash = hashlib.md5(
+                        (issue.cleaned or issue.span.content).encode("utf-8")
+                    ).hexdigest()
+                    cached_path = _repair_cache_path(cache_dir, repair_id)
+                    Path(cached_path).write_text(repaired_formula, encoding="utf-8")
+                    cache_manager.mark_done(
+                        repair_id,
+                        input_hash=formula_hash,
+                        output_path=cached_path,
+                        output_file=os.path.basename(cached_path),
+                    )
 
     replacements: list[tuple[int, int, str]] = []
     issue_lookup = {issue.issue_id: issue for issue in issues}

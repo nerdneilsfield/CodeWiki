@@ -108,6 +108,7 @@ def test_postprocess_docs_forwards_usage_stats(tmp_path):
         gen.config,
         usage_stats=gen.usage_stats,
         middleware=gen.middleware,
+        cache_manager=gen.cache_manager,
     )
 
 

@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from codewiki.src.be.generation_state import DocTask, GenerationState
+from codewiki.src.be.prompt_template import PROMPT_VERSION
 from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.config import OVERVIEW_FILENAME
 from codewiki.src.utils import (
@@ -159,6 +160,39 @@ def freeze_doc_filenames(tree: Dict[str, Any]) -> None:
                 _walk(nested, child_stem)
 
     _walk(tree)
+
+
+def compute_module_input_hash(
+    module_name: str,
+    module_path: list[str],
+    module_info: dict[str, Any],
+    components: dict[str, Any],
+    config: CodeWikiConfig,
+    assigned_file: str = "",
+) -> str:
+    """Compute the cache input hash for a module artifact."""
+    comp_ids = sorted(module_info.get("components", []))
+    source_hashes: list[str] = []
+    for component_id in comp_ids:
+        node = components.get(component_id)
+        source_code = getattr(node, "source_code", "")
+        if source_code:
+            source_hashes.append(hashlib.md5(source_code.encode("utf-8")).hexdigest())
+    custom_text = config.get_prompt_addition() if hasattr(config, "get_prompt_addition") else ""
+    custom_hash = hashlib.md5(custom_text.encode("utf-8")).hexdigest()
+    output_language = getattr(config, "output_language", "en")
+    return stable_hash(
+        [
+            module_name,
+            "/".join(module_path),
+            *comp_ids,
+            *source_hashes,
+            assigned_file,
+            output_language,
+            custom_hash,
+            PROMPT_VERSION,
+        ]
+    )
 
 
 def build_generation_tasks(

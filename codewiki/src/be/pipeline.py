@@ -83,6 +83,7 @@ class PipelineContext:
     leaf_nodes: list[str] = field(default_factory=list)
     module_tree: dict[str, Any] = field(default_factory=dict)
     index_products: Any = None
+    cache_manager: Any = None
     gen_state: Any = None
     state_mgr: Any = None
     tree_manager: Any = None
@@ -160,5 +161,11 @@ async def _flush_all_state(ctx: PipelineContext) -> None:
             flushed.append("module_tree")
     except Exception as exc:
         logger.warning("Failed to flush module tree: %s", exc)
+    try:
+        if ctx.cache_manager and hasattr(ctx.cache_manager, "stop"):
+            ctx.cache_manager.stop()
+            flushed.append("cache_registry")
+    except Exception as exc:
+        logger.warning("Failed to stop cache manager: %s", exc)
     if flushed:
         logger.info("💾 State saved: %s", ", ".join(flushed))

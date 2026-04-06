@@ -24,6 +24,7 @@ from pathlib import Path
 
 import mdformat
 
+from codewiki.src.be.cache_manager import CacheManager
 from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.postprocess.lint_report import LintError, LintReport
@@ -106,6 +107,7 @@ def _fix_math_in_text(
     stats: FixStats,
     usage_stats: LLMUsageStats | None = None,
     middleware: LLMMiddleware | None = None,
+    cache_manager: CacheManager | None = None,
     report: LintReport | None = None,
     filename: str = "",
 ) -> str:
@@ -115,6 +117,7 @@ def _fix_math_in_text(
         stats,
         usage_stats,
         middleware,
+        cache_manager=cache_manager,
         report=report,
         filename=filename,
     )
@@ -126,6 +129,7 @@ def _fix_mermaid_in_text(
     stats: FixStats,
     usage_stats: LLMUsageStats | None = None,
     middleware: LLMMiddleware | None = None,
+    cache_manager: CacheManager | None = None,
     report: LintReport | None = None,
     filename: str = "",
 ) -> str:
@@ -135,6 +139,7 @@ def _fix_mermaid_in_text(
         stats,
         usage_stats,
         middleware,
+        cache_manager=cache_manager,
         report=report,
         filename=filename,
     )
@@ -178,6 +183,7 @@ def fix_docs(
     config: CodeWikiConfig,
     usage_stats: LLMUsageStats | None = None,
     middleware: LLMMiddleware | None = None,
+    cache_manager: CacheManager | None = None,
 ) -> FixStats:
     """Apply all post-processing fix phases to every .md file in *working_dir*.
 
@@ -264,6 +270,7 @@ def fix_docs(
                 stats,
                 usage_stats,
                 middleware,
+                cache_manager=cache_manager,
                 report=report,
                 filename=md_file.name,
             )
@@ -275,6 +282,7 @@ def fix_docs(
                 stats,
                 usage_stats,
                 middleware,
+                cache_manager=cache_manager,
                 report=report,
                 filename=md_file.name,
             )

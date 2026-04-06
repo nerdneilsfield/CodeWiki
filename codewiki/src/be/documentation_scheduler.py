@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
+import os
 import random
 import sys
 import time
@@ -13,9 +15,11 @@ import openai
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from tqdm import tqdm
 
+from codewiki.src.be.cache_manager import module_artifact_id, overview_artifact_id
 from codewiki.src.be.errors import CancellationError, ErrorCategory, LLMError
+from codewiki.src.be.documentation_tree_utils import compute_module_input_hash, stable_hash
 from codewiki.src.be.pipeline import ModuleFailure, ModuleSkip, ModuleSummary
-from codewiki.src.be.documentation_tree_utils import stable_hash
+from codewiki.src.be.prompt_template import PROMPT_VERSION
 from codewiki.src.utils import doc_id_for_path
 
 logger = logging.getLogger(__name__)
@@ -124,6 +128,7 @@ async def run_module_queue(
     generate_root_overview: Optional[Callable[[], Awaitable[None]]] = None,
     desc: str = "Generating docs",
     include_root: bool = True,
+    cache_manager=None,
     gen_state=None,
     state_mgr=None,
     progress_factory: Callable[..., Any] = tqdm,
@@ -161,11 +166,32 @@ async def run_module_queue(
 
     work_queue: asyncio.Queue[str] = asyncio.Queue()
     done_queue: asyncio.Queue[tuple[str, bool, bool, str | None]] = asyncio.Queue()
+    process_module_params = inspect.signature(process_module).parameters
+    accepts_var_kwargs = any(
+        param.kind == inspect.Parameter.VAR_KEYWORD for param in process_module_params.values()
+    )
+    accepts_cache_manager = "cache_manager" in process_module_params or accepts_var_kwargs
+    accepts_gen_state = "gen_state" in process_module_params or accepts_var_kwargs
+    accepts_state_mgr = "state_mgr" in process_module_params or accepts_var_kwargs
 
     leaf_count = 0
     for key, (path, _, _, is_leaf) in all_tasks.items():
         if is_leaf:
-            if gen_state:
+            if cache_manager:
+                artifact_id = module_artifact_id(doc_id_for_path(graph_tree, path))
+                input_hash = compute_module_input_hash(
+                    path[-1],
+                    path,
+                    all_tasks[key][2],
+                    components,
+                    config,
+                    assigned_file=all_tasks[key][2].get("_doc_filename", ""),
+                )
+                if cache_manager.is_valid(artifact_id, input_hash):
+                    await done_queue.put((key, True, False, None))
+                    leaf_count += 1
+                    continue
+            elif gen_state:
                 did = doc_id_for_path(graph_tree, path)
                 t = gen_state.get_task(did)
                 if t and t.status in ("completed", "skipped"):
@@ -266,6 +292,54 @@ async def run_module_queue(
                         pending_count[parent_key] = 0
                     if pending_count[parent_key] == 0:
                         del pending_count[parent_key]
+                        if cache_manager:
+                            parent_doc_id = (
+                                "root"
+                                if parent_key == ROOT_KEY
+                                else doc_id_for_path(graph_tree, all_tasks[parent_key][0])
+                            )
+                            parent_artifact = overview_artifact_id(parent_doc_id)
+                            child_keys_for_parent = [
+                                child_key
+                                for child_key, value in child_to_parent.items()
+                                if value == parent_key
+                            ]
+                            stale_count = 0
+                            child_doc_ids: list[str] = []
+                            child_seg_hashes: list[str] = []
+                            for child_key in child_keys_for_parent:
+                                child_path, child_name, child_info, _ = all_tasks[child_key]
+                                child_doc_id = doc_id_for_path(graph_tree, child_path)
+                                child_doc_ids.append(child_doc_id)
+                                child_module_hash = compute_module_input_hash(
+                                    child_name,
+                                    child_path,
+                                    child_info,
+                                    components,
+                                    config,
+                                    assigned_file=child_info.get("_doc_filename", ""),
+                                )
+                                seg_current_hash = stable_hash([child_module_hash, PROMPT_VERSION])
+                                child_seg_hashes.append(seg_current_hash)
+                                seg_artifact = f"{parent_artifact}:child:{child_doc_id}"
+                                if not cache_manager.is_valid(seg_artifact, seg_current_hash):
+                                    stale_count += 1
+
+                            arch_current_hash = stable_hash(
+                                [
+                                    *child_doc_ids,
+                                    *child_seg_hashes,
+                                    config.output_language,
+                                    PROMPT_VERSION,
+                                ]
+                            )
+                            arch_artifact = f"{parent_artifact}:arch_intro"
+                            if not cache_manager.is_valid(arch_artifact, arch_current_hash):
+                                stale_count += 1
+                            if stale_count == 0:
+                                await done_queue.put((parent_key, True, False, None))
+                                active_tasks += 1
+                                continue
                         if gen_state and state_mgr:
                             # 通过 state_mgr 的锁保护对 gen_state 的读取，避免并发竞态
                             stale_update: dict[str, str] | None = None
@@ -421,6 +495,8 @@ async def run_module_queue(
                                 len(retry_delays),
                             )
                         if key == ROOT_KEY:
+                            if cache_manager:
+                                cache_manager.mark_running("overview:root")
                             if state_mgr:
                                 await state_mgr.mark_running("overview:root")
                             if generate_root_overview:
@@ -428,18 +504,54 @@ async def run_module_queue(
                             task_models_used = config.main_model
                         else:
                             path, name, info, _ = all_tasks[key]
+                            task_doc_id = doc_id_for_path(graph_tree, path)
+                            task_artifact_id = (
+                                overview_artifact_id(task_doc_id)
+                                if info.get("children")
+                                else module_artifact_id(task_doc_id)
+                            )
+                            task_input_hash = compute_module_input_hash(
+                                name,
+                                path,
+                                info,
+                                components,
+                                config,
+                                assigned_file=info.get("_doc_filename", ""),
+                            )
+                            if cache_manager:
+                                cache_manager.mark_running(task_artifact_id)
                             if state_mgr and gen_state:
-                                await state_mgr.mark_running(doc_id_for_path(graph_tree, path))
-                            _, task_models_used = await process_module(
+                                await state_mgr.mark_running(task_doc_id)
+                            process_args = (
                                 name,
                                 components,
                                 info.get("components", []),
                                 path,
                                 working_dir,
                                 tree_manager,
-                                gen_state=gen_state,
-                                state_mgr=state_mgr,
                             )
+                            process_kwargs = {}
+                            if accepts_cache_manager and cache_manager is not None:
+                                process_kwargs["cache_manager"] = cache_manager
+                            if accepts_gen_state:
+                                process_kwargs["gen_state"] = gen_state
+                            if accepts_state_mgr:
+                                process_kwargs["state_mgr"] = state_mgr
+                            _, task_models_used = await process_module(
+                                *process_args, **process_kwargs
+                            )
+                            if cache_manager:
+                                output_file = info.get("_doc_filename", "")
+                                output_path = (
+                                    os.path.join(working_dir, output_file) if output_file else ""
+                                )
+                                cache_manager.mark_done(
+                                    task_artifact_id,
+                                    input_hash=task_input_hash,
+                                    output_path=output_path,
+                                    model=task_models_used,
+                                    output_file=output_file,
+                                )
                         last_exc = None
                         success = True
                         break
@@ -478,6 +590,19 @@ async def run_module_queue(
                         else doc_id_for_path(graph_tree, all_tasks[key][0])
                     )
                     await state_mgr.mark_ready(cancelled_doc_id)
+                if cache_manager:
+                    cancelled_artifact_id = (
+                        "overview:root"
+                        if key == ROOT_KEY
+                        else (
+                            overview_artifact_id(doc_id_for_path(graph_tree, all_tasks[key][0]))
+                            if all_tasks[key][2].get("children")
+                            else module_artifact_id(doc_id_for_path(graph_tree, all_tasks[key][0]))
+                        )
+                    )
+                    entry = cache_manager.get_entry(cancelled_artifact_id)
+                    if entry and entry.status == "running":
+                        cache_manager.invalidate(cancelled_artifact_id)
             except Exception as e:
                 logger.error("✗ Failed to process '%s' after all retries: %s", label, e)
                 logger.error(traceback.format_exc())
@@ -486,6 +611,17 @@ async def run_module_queue(
                     if key != ROOT_KEY:
                         failed_doc_id = doc_id_for_path(graph_tree, all_tasks[key][0])
                     await state_mgr.mark_failed(failed_doc_id, str(e))
+                if cache_manager:
+                    failed_artifact_id = (
+                        "overview:root"
+                        if key == ROOT_KEY
+                        else (
+                            overview_artifact_id(doc_id_for_path(graph_tree, all_tasks[key][0]))
+                            if all_tasks[key][2].get("children")
+                            else module_artifact_id(doc_id_for_path(graph_tree, all_tasks[key][0]))
+                        )
+                    )
+                    cache_manager.mark_failed(failed_artifact_id, str(e))
                 error_message = str(e)
             finally:
                 await done_queue.put(
@@ -521,6 +657,7 @@ async def fill_missing_module_docs(
     tree_manager,
     run_module_queue: Callable[..., Awaitable[ModuleSummary]],
     module_doc_exists: Callable[..., bool],
+    cache_manager=None,
     gen_state=None,
     cancel_token=None,
 ) -> ModuleSummary:
@@ -577,6 +714,7 @@ async def fill_missing_module_docs(
             tree_manager=tree_manager,
             desc=f"Fill pass {attempt + 1}/{config.max_retries}",
             include_root=False,
+            cache_manager=cache_manager,
             gen_state=gen_state,
         )
         summary.extend(batch_summary)

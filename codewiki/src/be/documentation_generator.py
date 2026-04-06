@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Local imports
 from codewiki.src.be.dependency_analyzer import DependencyGraphBuilder
+from codewiki.src.be.cache_manager import CacheManager
 from codewiki.src.be.cluster_modules import cluster_modules, heal_module_tree_components
 from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.codewiki_config import CodeWikiConfig
@@ -75,6 +76,7 @@ class DocumentationGenerator:
         self.graph_builder = DependencyGraphBuilder(config, commit_id=commit_id or "")
         self.usage_stats = LLMUsageStats()
         self.middleware = LLMMiddleware(config, usage_stats=self.usage_stats)
+        self.cache_manager: CacheManager | None = None
         self.agent_orchestrator = AgentOrchestrator(
             config,
             middleware=self.middleware,
@@ -183,6 +185,7 @@ class DocumentationGenerator:
     def build_overview_structure(
         self, module_tree: Dict[str, Any], module_path: List[str], working_dir: str
     ) -> Dict[str, Any]:
+        cache_manager = getattr(self, "cache_manager", None)
         return build_overview_structure_impl(
             OverviewContext(
                 config=self.config,
@@ -190,6 +193,7 @@ class DocumentationGenerator:
                 working_dir=working_dir,
                 gen_state=self._gen_state,
                 middleware=self.middleware,
+                cache_manager=cache_manager,
             ),
             module_path,
         )
@@ -217,7 +221,12 @@ class DocumentationGenerator:
                 logger.info("Processing whole repo because repo can fit in the context window")
                 repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
                 final_module_tree, _ = await self.agent_orchestrator.process_module(
-                    repo_name, components, leaf_nodes, [], working_dir
+                    repo_name,
+                    components,
+                    leaf_nodes,
+                    [],
+                    working_dir,
+                    cache_manager=self.cache_manager,
                 )
 
                 file_manager.save_json(final_module_tree, module_tree_path)
@@ -327,6 +336,8 @@ class DocumentationGenerator:
         desc: str = "Generating docs",
         include_root: bool = True,
     ) -> ModuleSummary:
+        cache_manager = getattr(self, "cache_manager", None)
+
         async def _generate_root_overview() -> None:
             await self.generate_parent_module_docs([], working_dir, tree_manager)
 
@@ -340,6 +351,7 @@ class DocumentationGenerator:
             generate_root_overview=(_generate_root_overview if include_root else None),
             desc=desc,
             include_root=include_root,
+            cache_manager=cache_manager,
             gen_state=self._gen_state,
             state_mgr=self._state_mgr,
             progress_factory=tqdm,
@@ -353,6 +365,7 @@ class DocumentationGenerator:
         tree_manager,
         max_retries: int,
     ) -> ModuleSummary:
+        cache_manager = getattr(self, "cache_manager", None)
         return await fill_missing_module_docs_impl(
             config=self.config,
             working_dir=working_dir,
@@ -368,6 +381,7 @@ class DocumentationGenerator:
             ),
             module_doc_exists=module_doc_exists,
             gen_state=self._gen_state,
+            cache_manager=cache_manager,
             cancel_token=getattr(self, "cancel_token", None),
         )
 
@@ -396,6 +410,7 @@ class DocumentationGenerator:
         working_dir: str,
         tree_manager: Optional[ModuleTreeManager] = None,
     ) -> Dict[str, Any]:
+        cache_manager = getattr(self, "cache_manager", None)
         return await generate_parent_module_docs_impl(
             OverviewContext(
                 config=self.config,
@@ -406,11 +421,17 @@ class DocumentationGenerator:
                 tree_manager=tree_manager,
                 middleware=self.middleware,
                 usage_stats=self.usage_stats,
+                cache_manager=cache_manager,
             ),
             module_path,
         )
 
     def _build_initial_context(self) -> PipelineContext:
+        if self.cache_manager is None:
+            cache_dir = os.path.join(self.config.docs_dir, ".codewiki")
+            os.makedirs(cache_dir, exist_ok=True)
+            self.cache_manager = CacheManager(cache_dir)
+            self.cache_manager.start()
         return PipelineContext(
             config=self.config,
             working_dir=os.path.abspath(self.config.docs_dir),
@@ -420,6 +441,7 @@ class DocumentationGenerator:
             generator=self,
             cancel_token=getattr(self, "cancel_token", None),
             commit_id=self.commit_id or "",
+            cache_manager=self.cache_manager,
         )
 
     async def _build_index(self, ctx: PipelineContext) -> None:
@@ -608,7 +630,7 @@ class DocumentationGenerator:
             logger.info("Processing whole repo because repo can fit in the context window")
             repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
             final_module_tree, _ = await self.agent_orchestrator.process_module(
-                repo_name, components, leaf_nodes, [], working_dir
+                repo_name, components, leaf_nodes, [], working_dir, cache_manager=self.cache_manager
             )
 
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
@@ -662,6 +684,7 @@ class DocumentationGenerator:
             usage_stats=self.usage_stats,
             cancel_token=ctx.cancel_token,
             middleware=self.middleware,
+            cache_manager=self.cache_manager,
         )
         await guide_gen.run()
 
@@ -673,6 +696,7 @@ class DocumentationGenerator:
             self.config,
             usage_stats=self.usage_stats,
             middleware=self.middleware,
+            cache_manager=self.cache_manager,
         )
 
     def _write_metadata(self, ctx: PipelineContext) -> dict[str, Any]:

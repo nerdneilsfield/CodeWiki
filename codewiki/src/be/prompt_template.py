@@ -2,6 +2,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+PROMPT_VERSION = "prompt-v9"
+
 # ── Shared Mermaid safety rules ───────────────────────────────────────────────
 # Embedded verbatim in every <MERMAID_REQUIREMENTS> block and in the base system
 # prompts.  Rule rationale: Mermaid's lexer rejects Unicode math operators in
@@ -1684,3 +1686,46 @@ def format_overview_prompt(
         prompt = f"{lang_section}\n\n{prompt}"
 
     return prompt + EVIDENCE_RULES_BLOCK
+
+
+def format_arch_intro_prompt(
+    name: str,
+    children: list[str],
+    output_language: str = "en",
+) -> str:
+    """Prompt for generating the architecture introduction of an overview."""
+    child_list = "\n".join(f"- {child}" for child in children)
+    return f"""Write an architecture introduction for the "{name}" module.
+This module contains the following sub-modules:
+{child_list}
+
+Write 2-3 paragraphs covering:
+1. What this module does and why it exists
+2. How the sub-modules relate to each other (architecture overview)
+3. Key design decisions at this level
+
+Output language: {output_language}
+Write in markdown format. Do not include a top-level heading."""
+
+
+def format_child_summary_prompt(
+    parent_name: str,
+    child_name: str,
+    child_content: str,
+    output_language: str = "en",
+) -> str:
+    """Prompt for generating a single child summary section in a parent overview."""
+    truncated = child_content[:2000] + ("..." if len(child_content) > 2000 else "")
+    return f"""Write a 2-3 sentence summary of the "{child_name}" sub-module for the "{parent_name}" overview page.
+
+Here is the sub-module's documentation:
+<CHILD_DOC>
+{truncated}
+</CHILD_DOC>
+
+Write a concise summary that explains:
+1. What this sub-module does
+2. How it fits into the parent module
+
+Output language: {output_language}
+Write in markdown format. Include a ### heading with the sub-module name."""

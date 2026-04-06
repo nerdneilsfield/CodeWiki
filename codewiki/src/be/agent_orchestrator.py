@@ -70,6 +70,8 @@ from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_to
 from codewiki.src.be.agent_tools.generate_sub_module_documentations import (
     generate_sub_module_documentation_tool,
 )
+from codewiki.src.be.cache_manager import module_artifact_id, overview_artifact_id
+from codewiki.src.be.documentation_tree_utils import compute_module_input_hash
 from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.prompt_template import (
     format_user_prompt,
@@ -180,6 +182,7 @@ class AgentOrchestrator:
         module_path: List[str],
         working_dir: str,
         tree_manager=None,
+        cache_manager=None,
         gen_state=None,
         state_mgr=None,
     ) -> tuple[Dict[str, Any], str]:
@@ -285,6 +288,34 @@ class AgentOrchestrator:
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
             module_tree = file_manager.load_json(module_tree_path) or {}
 
+        current_node = None
+        try:
+            current_node = module_tree
+            for part in module_path:
+                current_node = current_node[part]
+        except Exception:
+            current_node = None
+
+        assigned_filename = self._assigned_doc_filename(module_tree, module_path)
+        if cache_manager and current_node is not None:
+            current_doc_id = doc_id_for_path(module_tree, doc_path_parts)
+            artifact_id = (
+                overview_artifact_id(current_doc_id)
+                if current_node.get("children")
+                else module_artifact_id(current_doc_id)
+            )
+            input_hash = compute_module_input_hash(
+                module_name,
+                module_path,
+                current_node,
+                components,
+                self.config,
+                assigned_file=assigned_filename,
+            )
+            if cache_manager.is_valid(artifact_id, input_hash):
+                logger.debug("✓ Cache hit for '%s'", module_name)
+                return {}, "cached"
+
         # Estimate prompt tokens to pre-select long-context model if needed.
         # The model receives system_prompt + tool_definitions + user_prompt.
         # Compute overhead from actual system prompt + estimated tool schemas.
@@ -329,7 +360,6 @@ class AgentOrchestrator:
         if context_section:
             user_prompt += "\n\n" + context_section
 
-        assigned_filename = self._assigned_doc_filename(module_tree, module_path)
         user_prompt += f"\n\nWrite your documentation to the file: {assigned_filename}"
 
         prompt_tokens = count_tokens(user_prompt)

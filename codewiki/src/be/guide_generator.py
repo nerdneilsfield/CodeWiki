@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from codewiki.src.be.cache_manager import CacheManager
 from codewiki.src.be.dependency_analyzer.utils.security import assert_safe_path
 from codewiki.src.be.cancellation import CancellationToken
 from codewiki.src.be.errors import CancellationError, LLMError
@@ -106,6 +107,7 @@ class GuideGenerator:
         usage_stats: LLMUsageStats | None = None,
         cancel_token: CancellationToken | None = None,
         middleware: LLMMiddleware | None = None,
+        cache_manager: CacheManager | None = None,
     ):
         self.config = config
         self.components = components
@@ -117,6 +119,7 @@ class GuideGenerator:
         self.usage_stats = usage_stats
         self.cancel_token = cancel_token
         self._middleware = middleware or LLMMiddleware(config, usage_stats=usage_stats)
+        self._cache_manager = cache_manager
 
     # ── Cache management ──────────────────────────────────────────────
 
@@ -193,7 +196,7 @@ class GuideGenerator:
         except Exception:
             return False
 
-    def _should_regenerate(
+    def _should_regenerate_legacy(
         self, guide_type: str, input_files: List[str], extra_salt: str = ""
     ) -> bool:
         version = _PROMPT_VERSIONS.get(guide_type, "v1")
@@ -211,7 +214,7 @@ class GuideGenerator:
             )
         return True
 
-    def _update_cache(
+    def _update_cache_legacy(
         self,
         guide_type: str,
         input_files: List[str],
@@ -227,6 +230,49 @@ class GuideGenerator:
             "input_hash": self._compute_combined_hash(input_files, extra=extra),
             "output_files": rel_names,
         }
+
+    def _compute_guide_input_hash(
+        self, input_files: List[str], guide_type: str, extra_salt: str = ""
+    ) -> str:
+        version = _PROMPT_VERSIONS.get(guide_type, "v1")
+        lang = self.config.output_language or "en"
+        extra = f"{version}:{lang}:{extra_salt}" if extra_salt else f"{version}:{lang}"
+        return self._compute_combined_hash(input_files, extra=extra)
+
+    def _should_regenerate(
+        self, guide_type: str, input_files: List[str], extra_salt: str = ""
+    ) -> bool:
+        if self._cache_manager:
+            artifact_id = f"guide:{guide_type}"
+            input_hash = self._compute_guide_input_hash(input_files, guide_type, extra_salt)
+            output_file = self._cache_manager.get_output_file(artifact_id)
+            if not self._cache_manager.is_valid(artifact_id, input_hash):
+                return True
+            if not output_file:
+                return True
+            output_path = os.path.join(self.working_dir, output_file)
+            return not (os.path.exists(output_path) and os.path.getsize(output_path) > 100)
+        return self._should_regenerate_legacy(guide_type, input_files, extra_salt)
+
+    def _update_cache(
+        self,
+        guide_type: str,
+        input_files: List[str],
+        output_files: List[str],
+        extra_salt: str = "",
+    ):
+        if self._cache_manager:
+            artifact_id = f"guide:{guide_type}"
+            input_hash = self._compute_guide_input_hash(input_files, guide_type, extra_salt)
+            output_path = output_files[0] if output_files else ""
+            self._cache_manager.mark_done(
+                artifact_id,
+                input_hash=input_hash,
+                output_path=output_path,
+                output_file=os.path.basename(output_path) if output_path else "",
+            )
+            return
+        self._update_cache_legacy(guide_type, input_files, output_files, extra_salt)
 
     # ── LLM calling with full resilience chain ─────────────────────────
 

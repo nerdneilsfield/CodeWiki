@@ -8,20 +8,37 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from codewiki.src.be.documentation_tree_utils import hash_mapping
+from codewiki.src.be.cache_manager import (
+    CacheManager,
+    module_artifact_id,
+    overview_artifact_id,
+)
+from codewiki.src.be.documentation_tree_utils import hash_mapping, stable_hash
 from codewiki.src.be.generation_state import GenerationState, GenerationStateManager
 from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.module_tree_manager import ModuleTreeManager
-from codewiki.src.be.prompt_template import format_overview_prompt
+from codewiki.src.be.prompt_template import (
+    PROMPT_VERSION,
+    format_arch_intro_prompt,
+    format_child_summary_prompt,
+    format_overview_prompt,
+)
 from codewiki.src.codewiki_config import CodeWikiConfig
 from codewiki.src.config import MODULE_TREE_FILENAME, OVERVIEW_FILENAME
-from codewiki.src.utils import content_hash, doc_id_for_path, file_manager, find_module_doc
+from codewiki.src.utils import (
+    content_hash,
+    doc_id_for_path,
+    file_manager,
+    find_module_doc,
+    module_doc_filename,
+)
 
 logger = logging.getLogger(__name__)
 
 # Token overhead for JSON structure, prompt template, and system prompt
 _OVERVIEW_OVERHEAD = 30_000
+OVERVIEW_PARTS_DIR = "_overview_parts"
 
 
 def _split_paragraphs(text: str) -> list[str]:
@@ -135,6 +152,115 @@ class OverviewContext:
     tree_manager: Optional[ModuleTreeManager] = None
     middleware: LLMMiddleware | None = None
     usage_stats: Optional[LLMUsageStats] = None
+    cache_manager: CacheManager | None = None
+
+
+def _parts_dir(working_dir: str) -> str:
+    path = os.path.join(working_dir, ".codewiki", OVERVIEW_PARTS_DIR)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _segment_filename(artifact_id: str) -> str:
+    safe_name = artifact_id
+    safe_name = safe_name.replace("overview:", "overview_")
+    safe_name = safe_name.replace(":arch_intro", "_arch_intro")
+    safe_name = safe_name.replace(":child:module:", "_child_")
+    safe_name = safe_name.replace(":child:", "_child_")
+    safe_name = safe_name.replace(":", "_").replace("/", "_")
+    return safe_name + ".md"
+
+
+def _segment_path(working_dir: str, artifact_id: str) -> str:
+    return os.path.join(_parts_dir(working_dir), _segment_filename(artifact_id))
+
+
+def _save_segment(working_dir: str, artifact_id: str, content: str) -> str:
+    path = _segment_path(working_dir, artifact_id)
+    file_manager.save_text(content, path)
+    return path
+
+
+def _load_child_doc_content(
+    ctx: OverviewContext,
+    child_doc_id: str,
+    child_path: list[str],
+) -> str:
+    child_path_str = None
+    if ctx.cache_manager:
+        child_file = ctx.cache_manager.get_output_file(module_artifact_id(child_doc_id))
+        if child_file:
+            candidate = os.path.join(ctx.working_dir, child_file)
+            if os.path.exists(candidate):
+                child_path_str = candidate
+    if child_path_str is None and ctx.gen_state:
+        child_file = ctx.gen_state.get_output_file(child_doc_id)
+        if child_file:
+            candidate = os.path.join(ctx.working_dir, child_file)
+            if os.path.exists(candidate):
+                child_path_str = candidate
+    if child_path_str is None:
+        child_path_str = find_module_doc(ctx.working_dir, child_path)
+    return (
+        file_manager.load_text(child_path_str)
+        if child_path_str and os.path.exists(child_path_str)
+        else ""
+    )
+
+
+async def _generate_arch_intro(
+    ctx: OverviewContext,
+    module_name: str,
+    children_dict: dict[str, Any],
+) -> str:
+    prompt = format_arch_intro_prompt(
+        name=module_name,
+        children=list(children_dict.keys()),
+        output_language=ctx.config.output_language,
+    )
+    result = await asyncio.to_thread(ctx.middleware.call, prompt)
+    return result.content.strip()
+
+
+async def _generate_child_summary(
+    ctx: OverviewContext,
+    module_name: str,
+    child_name: str,
+    child_doc_id: str,
+    child_path: list[str],
+) -> str:
+    child_content = _load_child_doc_content(ctx, child_doc_id, child_path)
+    prompt = format_child_summary_prompt(
+        parent_name=module_name,
+        child_name=child_name,
+        child_content=child_content,
+        output_language=ctx.config.output_language,
+    )
+    result = await asyncio.to_thread(ctx.middleware.call, prompt)
+    return result.content.strip()
+
+
+def _assemble_overview(
+    working_dir: str,
+    child_segments: list[tuple[str, str, str]],
+    arch_artifact_id: str,
+    output_path: str,
+) -> None:
+    sections: list[str] = []
+    arch_path = _segment_path(working_dir, arch_artifact_id)
+    if os.path.exists(arch_path):
+        arch_content = file_manager.load_text(arch_path).strip()
+        if arch_content:
+            sections.append(arch_content)
+
+    for segment_artifact_id, _, _ in child_segments:
+        segment_path = _segment_path(working_dir, segment_artifact_id)
+        if os.path.exists(segment_path):
+            segment_content = file_manager.load_text(segment_path).strip()
+            if segment_content:
+                sections.append(segment_content)
+
+    file_manager.save_text("\n\n---\n\n".join(sections).strip(), output_path)
 
 
 def strip_tree_for_overview(tree: Dict[str, Any]) -> Dict[str, Any]:
@@ -274,6 +400,7 @@ async def generate_parent_module_docs(
     working_dir = ctx.working_dir
     gen_state = ctx.gen_state
     state_mgr = ctx.state_mgr
+    cache_manager = ctx.cache_manager
     config = ctx.config
 
     module_name = (
@@ -287,15 +414,128 @@ async def generate_parent_module_docs(
         module_tree = file_manager.load_json(module_tree_path) or {}
 
     if len(module_path) == 0:
+        parent_doc_id = "root"
         output_path = os.path.join(working_dir, OVERVIEW_FILENAME)
     else:
-        doc_id = doc_id_for_path(module_tree, module_path)
-        output_file = gen_state.get_output_file(doc_id) if gen_state else None
-        output_path = os.path.join(
-            working_dir,
-            output_file
-            or doc_id_for_path(module_tree, module_path).split("module:", 1)[-1] + ".md",
+        parent_doc_id = doc_id_for_path(module_tree, module_path)
+        output_file = None
+        if cache_manager:
+            output_file = cache_manager.get_output_file(overview_artifact_id(parent_doc_id))
+        if output_file is None and gen_state:
+            output_file = gen_state.get_output_file(parent_doc_id)
+        if output_file is None:
+            output_file = module_doc_filename(module_path)
+        output_path = os.path.join(working_dir, output_file)
+
+    if cache_manager:
+        if not module_path:
+            children_dict = module_tree
+        else:
+            target = module_tree
+            for path_part in module_path:
+                target = target[path_part]
+            children_dict = target.get("children") or {}
+
+        parent_artifact_id = overview_artifact_id(parent_doc_id)
+        child_segments: list[tuple[str, str, str]] = []
+        stale_segments: list[tuple[str, str, str]] = []
+        child_doc_ids: list[str] = []
+        child_module_artifacts: list[str] = []
+        child_seg_hashes: list[str] = []
+
+        for child_name in children_dict:
+            child_path = module_path + [child_name]
+            child_doc_id = doc_id_for_path(module_tree, child_path)
+            child_module_artifact = module_artifact_id(child_doc_id)
+            child_module_hash = cache_manager.get_input_hash(child_module_artifact) or ""
+            child_segment_hash = stable_hash([child_module_hash, PROMPT_VERSION])
+            child_segment_artifact = f"{parent_artifact_id}:child:{child_doc_id}"
+            child_segments.append((child_segment_artifact, child_name, child_doc_id))
+            child_doc_ids.append(child_doc_id)
+            child_module_artifacts.append(child_module_artifact)
+            child_seg_hashes.append(child_segment_hash)
+            child_segment_exists = os.path.exists(
+                _segment_path(working_dir, child_segment_artifact)
+            )
+            if (
+                not cache_manager.is_valid(child_segment_artifact, child_segment_hash)
+                or not child_segment_exists
+            ):
+                stale_segments.append((child_segment_artifact, child_name, child_doc_id))
+
+        arch_artifact_id = f"{parent_artifact_id}:arch_intro"
+        arch_hash = stable_hash(
+            [*child_doc_ids, *child_seg_hashes, config.output_language, PROMPT_VERSION]
         )
+        arch_exists = os.path.exists(_segment_path(working_dir, arch_artifact_id))
+        if not cache_manager.is_valid(arch_artifact_id, arch_hash) or not arch_exists:
+            stale_segments.append((arch_artifact_id, "__arch_intro__", ""))
+        parent_hash = stable_hash([arch_hash, *child_seg_hashes, PROMPT_VERSION])
+
+        total_segments = len(child_segments) + 1
+        stale_ratio = len(stale_segments) / total_segments if total_segments else 0.0
+        if stale_ratio >= cache_manager.OVERVIEW_REGENERATE_THRESHOLD:
+            stale_segments = child_segments + [(arch_artifact_id, "__arch_intro__", "")]
+
+        if stale_segments:
+            for artifact_id, child_name, child_doc_id in stale_segments:
+                if child_name == "__arch_intro__":
+                    segment_content = await _generate_arch_intro(ctx, module_name, children_dict)
+                    depends_on = child_module_artifacts
+                else:
+                    segment_content = await _generate_child_summary(
+                        ctx,
+                        module_name,
+                        child_name,
+                        child_doc_id,
+                        module_path + [child_name],
+                    )
+                    depends_on = [module_artifact_id(child_doc_id)]
+                segment_path = _save_segment(working_dir, artifact_id, segment_content)
+                cache_manager.mark_done(
+                    artifact_id,
+                    input_hash=arch_hash
+                    if child_name == "__arch_intro__"
+                    else stable_hash(
+                        [
+                            cache_manager.get_input_hash(module_artifact_id(child_doc_id)) or "",
+                            PROMPT_VERSION,
+                        ]
+                    ),
+                    output_path=segment_path,
+                    output_file=os.path.basename(segment_path),
+                    depends_on=depends_on,
+                )
+        elif (
+            os.path.exists(output_path)
+            and os.path.getsize(output_path) > 100
+            and cache_manager.is_valid(parent_artifact_id, parent_hash)
+        ):
+            logger.debug("✓ Overview cache hit for '%s'", module_name)
+            return module_tree
+
+        _assemble_overview(working_dir, child_segments, arch_artifact_id, output_path)
+        cache_manager.mark_done(
+            parent_artifact_id,
+            input_hash=parent_hash,
+            output_path=output_path,
+            output_file=os.path.basename(output_path),
+            depends_on=[arch_artifact_id, *[artifact_id for artifact_id, _, _ in child_segments]],
+        )
+
+        if state_mgr and gen_state:
+            legacy_parent_doc_id = (
+                "overview:root" if not module_path else doc_id_for_path(module_tree, module_path)
+            )
+            if gen_state.get_task(legacy_parent_doc_id):
+                await state_mgr.mark_completed(
+                    legacy_parent_doc_id,
+                    content_hash=content_hash(output_path),
+                    model=config.main_model,
+                    input_hash=parent_hash,
+                )
+
+        return module_tree
 
     child_hashes = collect_child_doc_hashes(
         OverviewContext(
@@ -304,6 +544,7 @@ async def generate_parent_module_docs(
             working_dir=working_dir,
             gen_state=gen_state,
             middleware=ctx.middleware,
+            cache_manager=cache_manager,
         ),
         module_path,
     )
@@ -334,6 +575,7 @@ async def generate_parent_module_docs(
             working_dir=working_dir,
             gen_state=gen_state,
             middleware=ctx.middleware,
+            cache_manager=cache_manager,
         ),
         module_path,
     )
