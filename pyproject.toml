@@ -68,6 +68,7 @@ dependencies = [
     "tomli_w>=1.0.0",
     "leidenalg>=0.11.0",
     "python-igraph>=1.0.0",
+    "scipy>=1.17.1",
 ]
 
 [external]

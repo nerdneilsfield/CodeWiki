@@ -5,6 +5,7 @@ from pathlib import PurePosixPath
 import difflib
 import json
 import logging
+import re
 import traceback
 
 import math
@@ -14,7 +15,7 @@ import leidenalg
 import networkx as nx
 
 from codewiki.src.be.dependency_analyzer.models.core import Node
-from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_retry import with_retry_sync
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.be.utils import count_tokens
@@ -27,6 +28,103 @@ logger = logging.getLogger(__name__)
 # is attempted.  Modules with fewer files are unlikely to benefit from an
 # extra LLM call and are skipped directly.
 _MIN_FILES_FOR_SUB_CLUSTER = 4
+
+# ── TF-IDF helpers ────────────────────────────────────────────────────────
+
+_CAMEL_RE = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
+def _split_identifier(name: str) -> str:
+    """Split camelCase/snake_case identifier into space-separated tokens.
+
+    ``parseDate`` → ``parse date``, ``get_user_name`` → ``get user name``.
+    """
+    # snake_case → spaces
+    s = name.replace("_", " ").replace("-", " ")
+    # CamelCase → spaces
+    s = _CAMEL_RE.sub(" ", s)
+    return s.lower().strip()
+
+
+def _tfidf_semantic_edges(
+    corpus: List[str],
+    threshold: float,
+) -> List[Tuple[int, int, float]]:
+    """Compute TF-IDF cosine similarity and return pairs above threshold.
+
+    Uses scipy sparse matrix multiplication for speed — handles 12K+ documents
+    in under a second.
+
+    Returns list of ``(i, j, score)`` tuples where ``score >= threshold``.
+    """
+    from scipy.sparse import csr_matrix
+
+    n = len(corpus)
+    tokenized = [doc.lower().split() for doc in corpus]
+
+    # Build vocabulary + document frequency
+    df: Dict[str, int] = defaultdict(int)
+    for tokens in tokenized:
+        for term in set(tokens):
+            df[term] += 1
+
+    # IDF: skip terms in >80% of docs
+    max_df = n * 0.8
+    vocab: Dict[str, int] = {}
+    idf_values: List[float] = []
+    for term, freq in df.items():
+        if freq <= max_df:
+            vocab[term] = len(vocab)
+            idf_values.append(math.log(n / freq) if freq > 0 else 0.0)
+
+    # Build sparse TF-IDF matrix (n_docs × n_terms)
+    rows: List[int] = []
+    cols: List[int] = []
+    data: List[float] = []
+    for doc_idx, tokens in enumerate(tokenized):
+        tf: Dict[str, int] = defaultdict(int)
+        for t in tokens:
+            tf[t] += 1
+        for t, count in tf.items():
+            if t in vocab:
+                col = vocab[t]
+                rows.append(doc_idx)
+                cols.append(col)
+                data.append((1 + math.log(count)) * idf_values[col])
+
+    if not data:
+        return []
+
+    tfidf = csr_matrix((data, (rows, cols)), shape=(n, len(vocab)))
+
+    # L2-normalize rows for cosine similarity
+    from scipy.sparse import diags
+
+    norms = tfidf.multiply(tfidf).sum(axis=1).A1  # dense array of squared norms
+    norms = [math.sqrt(x) if x > 0 else 1.0 for x in norms]
+    inv_norms = diags([1.0 / x for x in norms])
+    tfidf_normed = inv_norms @ tfidf
+
+    # Sparse cosine similarity: only non-zero entries are computed
+    sim = tfidf_normed @ tfidf_normed.T
+
+    # Threshold filter + upper triangle extraction
+    # Eliminate entries below threshold in-place on sparse data to avoid
+    # materializing the full 1亿-element COO array.
+    from scipy.sparse import triu
+
+    sim_upper = triu(sim, k=1, format="csr")  # upper triangle only
+    sim_upper.data[sim_upper.data < threshold] = 0  # zero out below threshold
+    sim_upper.eliminate_zeros()  # drop from sparse structure
+
+    coo = sim_upper.tocoo()
+    results: List[Tuple[int, int, float]] = [
+        (int(i), int(j), float(v)) for i, j, v in zip(coo.row, coo.col, coo.data)
+    ]
+    return results
+
+
+# ──────────────────────────────────────────────────────────────────────────
 
 
 def _fuzzy_match_component(name: str, components: Dict) -> Optional[str]:
@@ -248,11 +346,13 @@ def graph_pre_cluster(
     leaf_nodes: List[str],
     components: Dict[str, Node],
 ) -> Tuple[Dict[str, List[str]], Dict[str, List[str]]]:
-    """Use Louvain community detection to pre-cluster components by dependency structure.
+    """Use Leiden community detection to pre-cluster components.
 
-    Builds an undirected graph with two kinds of edges:
+    Builds an undirected graph with three kinds of edges:
     - **dependency edges** (weight 1.0): from ``Node.depends_on``
     - **co-location edges** (weight 0.3): components sharing the same source file
+    - **semantic similarity edges** (weight 0.5 × score): TF-IDF cosine similarity
+      on component names, docstrings, and parameters (threshold 0.4)
 
     Returns:
         clusters: ``{cluster_name: [component_id, ...]}``
@@ -285,6 +385,46 @@ def graph_pre_cluster(
             for b in file_nodes[i + 1 :]:
                 if not G.has_edge(a, b):
                     G.add_edge(a, b, weight=0.3)
+
+    # ── TF-IDF semantic similarity edges ──────────────────────────────────
+    # Components with similar names/docstrings/parameters but no direct
+    # dependency are likely functionally related (e.g. parse_date / format_date).
+    _SEMANTIC_WEIGHT = 0.5
+    _SEMANTIC_THRESHOLD = 0.4
+
+    node_list_ordered = sorted(node_set)
+    corpus: List[str] = []
+    for cid in node_list_ordered:
+        node = components[cid]
+        parts = [
+            _split_identifier(node.name),
+            node.component_type,
+            node.docstring or "",
+        ]
+        if node.parameters:
+            parts.extend(_split_identifier(p) for p in node.parameters)
+        if node.base_classes:
+            parts.extend(_split_identifier(b) for b in node.base_classes)
+        corpus.append(" ".join(parts))
+
+    if corpus:
+        # Inverted-index approach: only compares pairs sharing terms, scales to 10K+ nodes
+        sem_pairs = _tfidf_semantic_edges(corpus, _SEMANTIC_THRESHOLD)
+        sem_edges_added = 0
+        for i, j, score in sem_pairs:
+            a, b = node_list_ordered[i], node_list_ordered[j]
+            if G.has_edge(a, b):
+                G[a][b]["weight"] = G[a][b]["weight"] + _SEMANTIC_WEIGHT * score
+            else:
+                G.add_edge(a, b, weight=_SEMANTIC_WEIGHT * score)
+            sem_edges_added += 1
+        if sem_edges_added:
+            logger.info(
+                "🔗 TF-IDF semantic edges: %d pairs (threshold=%.1f, %d nodes)",
+                sem_edges_added,
+                _SEMANTIC_THRESHOLD,
+                len(node_set),
+            )
 
     # ── Leiden community detection ─────────────────────────────────────────
     # Convert networkx graph to igraph for leidenalg (much faster on large graphs).
@@ -482,6 +622,7 @@ def cluster_modules(
     _token_threshold: Optional[int] = None,
     index_products=None,  # NEW: when provided, use v2 pipeline
     usage_stats: LLMUsageStats | None = None,
+    middleware: LLMMiddleware | None = None,
 ) -> Dict[str, Any]:
     """
     Cluster the potential core components into modules.
@@ -521,6 +662,7 @@ def cluster_modules(
                 current_module_path,
                 _token_threshold,
                 usage_stats=usage_stats,
+                middleware=middleware,
             )
             if result:  # v2 produced valid output
                 return result
@@ -582,7 +724,13 @@ def cluster_modules(
         current_module_name,
         graph_clusters_hint=graph_hint,
     )
-    response = with_retry_sync(call_llm, prompt, config, model=config.cluster_model, max_retries=1)
+    llm = middleware or LLMMiddleware(config, usage_stats=usage_stats)
+    response = with_retry_sync(
+        llm.call,
+        prompt,
+        model=config.cluster_model,
+        max_retries=1,
+    )
     if usage_stats and response.usage:
         usage_stats.record(
             response.model,
@@ -701,6 +849,7 @@ def cluster_modules(
             parent_path,
             _token_threshold=config.max_token_per_leaf_module,
             usage_stats=usage_stats,
+            middleware=middleware,
         )
 
     max_workers = max(1, config.max_concurrent)
