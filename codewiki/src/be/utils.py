@@ -203,11 +203,14 @@ async def validate_single_diagram(diagram_content: str, diagram_num: int, line_s
         # logger.debug("Using mermaid-parser-py to validate mermaid diagrams")
 
         try:
-            # Suppress mermaid parser JavaScript errors scoped to this call only
-            import contextlib
-
-            with open(os.devnull, "w") as _devnull, contextlib.redirect_stderr(_devnull):
-                json_output = await parse_mermaid_py(diagram_content)
+            # NOTE: do NOT use contextlib.redirect_stderr here. redirect_stderr
+            # mutates global sys.stderr for the whole thread. In an async
+            # environment with concurrent coroutines, other coroutines' tqdm
+            # progress bars may cache the temporary _devnull as their stderr,
+            # and then crash with "I/O operation on closed file" once the
+            # `with` block exits and _devnull is closed. The parser's JS noise
+            # is annoying but safe to let through.
+            json_output = await parse_mermaid_py(diagram_content)
         except Exception as e:
             error_str = str(e)
 
