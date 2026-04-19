@@ -1,4 +1,6 @@
 import time
+import re
+import unicodedata
 from typing import Any, Dict, List, cast
 
 from pydantic_ai import Agent
@@ -67,11 +69,11 @@ logger = logging.getLogger(__name__)
 from codewiki.src.be.agent_tools.deps import CodeWikiDeps
 from codewiki.src.be.agent_tools.read_code_components import read_code_components_tool
 from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_tool
-from codewiki.src.be.agent_tools.generate_sub_module_documentations import (
-    generate_sub_module_documentation_tool,
-)
 from codewiki.src.be.cache_manager import module_artifact_id, overview_artifact_id
-from codewiki.src.be.documentation_tree_utils import compute_module_input_hash
+from codewiki.src.be.documentation_tree_utils import (
+    compute_module_input_hash,
+    select_effective_component_ids,
+)
 from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.prompt_template import (
     format_user_prompt,
@@ -97,6 +99,61 @@ from codewiki.src.be.dependency_analyzer.models.core import Node
 
 class AgentOrchestrator:
     """Orchestrates the AI agents for documentation generation."""
+
+    _SUMMARY_SECTION_TITLES = {
+        "abstract",
+        "apercu",
+        "aperçu",
+        "description generale",
+        "description générale",
+        "einfuhrung",
+        "einführung",
+        "introduction",
+        "objective",
+        "objectifs",
+        "overview",
+        "presentation",
+        "présentation",
+        "purpose",
+        "resume",
+        "resumen",
+        "résumé",
+        "summary",
+        "synopsis",
+        "uberblick",
+        "überblick",
+        "vision general",
+        "vision générale",
+        "visao geral",
+        "visão geral",
+        "介绍",
+        "摘要",
+        "概况",
+        "概括",
+        "概览",
+        "概觀",
+        "概述",
+        "概要",
+        "简介",
+        "簡介",
+        "總覽",
+        "總結",
+        "总览",
+        "总结",
+        "說明",
+        "说明",
+        "要約",
+        "概要説明",
+        "紹介",
+        "概観",
+        "개요",
+        "요약",
+        "소개",
+        "설명",
+        "обзор",
+        "резюме",
+        "введение",
+    }
 
     def __init__(
         self,
@@ -137,6 +194,166 @@ class AgentOrchestrator:
         except (KeyError, TypeError):
             return module_doc_filename(module_path)
 
+    @classmethod
+    def _heading_title(cls, line: str) -> str | None:
+        match = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*$", line)
+        if not match:
+            return None
+        return match.group(1).strip().strip(":：").lower()
+
+    @classmethod
+    def _normalize_heading_key(cls, title: str) -> str:
+        normalized = unicodedata.normalize("NFKD", title.casefold())
+        ascii_like = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        ascii_like = re.sub(r"\s+", " ", ascii_like)
+        return ascii_like.strip()
+
+    @classmethod
+    def _extract_prose_blocks(cls, lines: list[str]) -> list[str]:
+        blocks: list[str] = []
+        current: list[str] = []
+        in_code = False
+
+        def _flush() -> None:
+            if current:
+                blocks.append("\n".join(current).strip())
+                current.clear()
+
+        for raw in lines:
+            stripped = raw.strip()
+            if stripped.startswith("```"):
+                _flush()
+                in_code = not in_code
+                continue
+            if in_code:
+                continue
+            if not stripped:
+                _flush()
+                continue
+            if cls._heading_title(raw) is not None:
+                _flush()
+                continue
+            if stripped.startswith(("- ", "* ", "+ ", "> ", "|")) or re.match(
+                r"^\d+\.\s", stripped
+            ):
+                _flush()
+                continue
+            current.append(stripped)
+
+        _flush()
+        return blocks
+
+    @classmethod
+    def _extract_first_paragraph(cls, lines: list[str]) -> str:
+        body = list(lines)
+        while body and (not body[0].strip() or cls._heading_title(body[0]) is not None):
+            body.pop(0)
+        blocks = cls._extract_prose_blocks(body)
+        return blocks[0] if blocks else ""
+
+    @classmethod
+    def _extract_summary_sections(cls, lines: list[str]) -> list[str]:
+        sections: list[tuple[int, int, str]] = []
+        i = 0
+        heading_index = -1
+        while i < len(lines):
+            title = cls._heading_title(lines[i])
+            if title is None:
+                i += 1
+                continue
+
+            heading_index += 1
+            level = len(lines[i].lstrip()) - len(lines[i].lstrip("#"))
+            i += 1
+            section_lines: list[str] = []
+            while i < len(lines) and cls._heading_title(lines[i]) is None:
+                section_lines.append(lines[i].rstrip())
+                i += 1
+
+            section_text = "\n".join(section_lines).strip()
+            prose_blocks = cls._extract_prose_blocks(section_lines)
+            if not section_text or not prose_blocks:
+                continue
+
+            paragraph_count = len(prose_blocks)
+            normalized_title = cls._normalize_heading_key(title)
+            if normalized_title in cls._SUMMARY_SECTION_TITLES:
+                sections.append((heading_index, level, section_text))
+                continue
+            # Structure-first heuristic:
+            # - prefer sections near the top
+            # - prefer H1/H2
+            # - prefer prose-dominant, compact explanatory sections
+            if level > 2:
+                continue
+            if heading_index > 3:
+                continue
+            if paragraph_count > 4:
+                continue
+
+            sections.append((heading_index, level, section_text))
+
+        sections.sort(key=lambda item: (item[0], item[1]))
+        return [section for _, _, section in sections]
+
+    @classmethod
+    def _summarize_child_doc(cls, content: str) -> str:
+        lines = [line.rstrip() for line in content.splitlines()]
+        parts: list[str] = []
+        seen: set[str] = set()
+
+        first_paragraph = cls._extract_first_paragraph(lines)
+        if first_paragraph:
+            normalized = first_paragraph.strip()
+            if normalized not in seen:
+                parts.append(normalized)
+                seen.add(normalized)
+
+        for section in cls._extract_summary_sections(lines):
+            normalized = section.strip()
+            if normalized not in seen:
+                parts.append(normalized)
+                seen.add(normalized)
+
+        return "\n\n".join(parts)
+
+    def _build_child_doc_summaries(
+        self,
+        module_path: list[str],
+        current_node: dict[str, Any] | None,
+        working_dir: str,
+    ) -> str:
+        children = (current_node or {}).get("children") or {}
+        if not isinstance(children, dict) or not children:
+            return ""
+
+        sections: list[str] = []
+        for child_name in sorted(children):
+            child_info = children.get(child_name) or {}
+            child_filename = child_info.get(
+                "_doc_filename",
+                module_doc_filename(module_path + [child_name]),
+            )
+            child_path = os.path.join(working_dir, child_filename)
+            if not os.path.exists(child_path):
+                continue
+            try:
+                child_content = file_manager.load_text(child_path)
+            except OSError:
+                continue
+            summary = self._summarize_child_doc(child_content)
+            if not summary:
+                continue
+            sections.append(f"### {child_name}\nFile: {child_filename}\n{summary}")
+
+        if not sections:
+            return ""
+        return (
+            "<CHILD_MODULE_DOC_SUMMARIES>\n"
+            + "\n\n".join(sections)
+            + "\n</CHILD_MODULE_DOC_SUMMARIES>"
+        )
+
     def create_agent(
         self,
         module_name: str,
@@ -156,7 +373,6 @@ class AgentOrchestrator:
                 tools=[
                     read_code_components_tool,
                     str_replace_editor_tool,
-                    generate_sub_module_documentation_tool,
                 ],
                 system_prompt=format_system_prompt(
                     module_name, custom_instructions, self.output_language
@@ -255,6 +471,11 @@ class AgentOrchestrator:
             current_node = None
 
         assigned_filename = self._assigned_doc_filename(module_tree, module_path)
+        effective_component_ids = (
+            select_effective_component_ids(current_node, components)
+            if current_node is not None
+            else list(core_component_ids)
+        )
         if cache_manager and current_node is not None:
             current_doc_id = doc_id_for_path(module_tree, doc_path_parts)
             artifact_id = (
@@ -293,7 +514,7 @@ class AgentOrchestrator:
         glossary = self.global_assets.get("glossary") if self.global_assets else None
         link_map = self.global_assets.get("link_map") if self.global_assets else None
         context_pack = build_context_pack(
-            module_components=core_component_ids,
+            module_components=effective_component_ids,
             components=components,
             index_products=self.index_products,
             glossary=glossary,
@@ -309,7 +530,7 @@ class AgentOrchestrator:
         )
         user_prompt = format_user_prompt(
             module_name=module_name,
-            core_component_ids=core_component_ids,
+            core_component_ids=effective_component_ids,
             components=components,
             module_tree=module_tree,
             max_input_tokens=_prompt_budget,
@@ -317,6 +538,9 @@ class AgentOrchestrator:
 
         if context_section:
             user_prompt += "\n\n" + context_section
+        child_docs_section = self._build_child_doc_summaries(module_path, current_node, working_dir)
+        if child_docs_section:
+            user_prompt += "\n\n" + child_docs_section
 
         user_prompt += f"\n\nWrite your documentation to the file: {assigned_filename}"
 
@@ -349,7 +573,7 @@ class AgentOrchestrator:
         file_count = len(
             set(
                 getattr(components[c], "relative_path", "")
-                for c in core_component_ids
+                for c in effective_component_ids
                 if c in components
             )
         )
@@ -359,12 +583,14 @@ class AgentOrchestrator:
             estimated_tokens // 1000,
             prompt_tokens // 1000,
             _SYSTEM_PROMPT_OVERHEAD // 1000,
-            len(core_component_ids),
+            len(effective_component_ids),
             file_count,
         )
 
         # Create agent
-        agent = self.create_agent(module_name, components, core_component_ids, estimated_tokens)
+        agent = self.create_agent(
+            module_name, components, effective_component_ids, estimated_tokens
+        )
 
         # Create per-agent dependencies (each agent gets its own mutable copies)
         deps = CodeWikiDeps(
@@ -379,7 +605,6 @@ class AgentOrchestrator:
             current_depth=1,
             config=self.config,
             custom_instructions=self.custom_instructions,
-            module_tree_manager=tree_manager,
             middleware=self._middleware,
             index_products=self.index_products,
             global_assets=self.global_assets,

@@ -1,12 +1,9 @@
-from dataclasses import dataclass, field
-from typing import Any, Optional, Set, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import Any, Optional
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.llm_middleware import LLMMiddleware
 from codewiki.src.be.llm_usage import LLMUsageStats
 from codewiki.src.codewiki_config import CodeWikiConfig
-
-if TYPE_CHECKING:
-    from codewiki.src.be.module_tree_manager import ModuleTreeManager
 
 
 @dataclass
@@ -22,13 +19,9 @@ class CodeWikiDeps:
     current_depth: int
     config: CodeWikiConfig  # LLM configuration
     custom_instructions: Optional[str] = None
-    module_tree_manager: Optional["ModuleTreeManager"] = None
     middleware: LLMMiddleware | None = None
     # v2: Index products and global assets for evidence-driven generation
     index_products: Any = None  # IndexProducts or None
     global_assets: Optional[dict] = None  # {"glossary": dict, "link_map": dict}
     assigned_doc_filename: str = ""
     usage_stats: Optional[LLMUsageStats] = None
-    # Tracks sub-module names already dispatched in this agent run to prevent
-    # the LLM from processing the same sub-module twice via repeated tool calls.
-    _dispatched_sub_modules: Set[str] = field(default_factory=set)
