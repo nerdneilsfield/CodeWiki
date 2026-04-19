@@ -5,6 +5,7 @@ TDD: tests written BEFORE implementation.
 
 import pytest
 import networkx as nx
+from unittest.mock import patch
 
 from codewiki.src.be.index.models import SymbolEdge, EdgeType, Confidence
 from codewiki.src.be.clustering.partitioner import (
@@ -601,6 +602,47 @@ class TestPartitionComponentsEndToEnd:
         result = partition_components(self.component_ids, self.file_map, self.edges, seed=42)
         sizes = [len(c) for c in result]
         assert sizes == sorted(sizes, reverse=True)
+
+
+class TestPartitionComponentsOversizedSplit:
+    def test_oversized_single_community_is_split_recursively(self):
+        import codewiki.src.be.clustering.partitioner as partitioner_mod
+
+        component_ids = [f"src/huge/mod_{i}.py::Comp{i}" for i in range(1005)]
+        file_map = {cid: cid.split("::")[0] for cid in component_ids}
+        giant = set(component_ids)
+        left = set(component_ids[:500])
+        right = set(component_ids[500:])
+
+        with patch.object(
+            partitioner_mod,
+            "detect_communities",
+            side_effect=[[giant], [left, right]],
+        ) as mock_detect:
+            result = partition_components(component_ids, file_map, [], seed=42)
+
+        assert mock_detect.call_count == 2
+        assert len(result) == 2
+        assert sorted(len(cluster) for cluster in result) == [500, 505]
+        assert sorted([member for cluster in result for member in cluster]) == sorted(component_ids)
+
+    def test_oversized_recursive_split_falls_back_when_subsplit_still_single(self):
+        import codewiki.src.be.clustering.partitioner as partitioner_mod
+
+        component_ids = [f"src/huge/mod_{i}.py::Comp{i}" for i in range(1005)]
+        file_map = {cid: cid.split("::")[0] for cid in component_ids}
+        giant = set(component_ids)
+
+        with patch.object(
+            partitioner_mod,
+            "detect_communities",
+            side_effect=[[giant], [giant]],
+        ) as mock_detect:
+            result = partition_components(component_ids, file_map, [], seed=42)
+
+        assert mock_detect.call_count == 2
+        assert len(result) == 1
+        assert result[0] == sorted(component_ids)
 
 
 # ---------------------------------------------------------------------------

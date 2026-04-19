@@ -193,6 +193,89 @@ class TestNameClusters:
         assert "storage" in title
 
 
+def test_apply_naming_freeze_reuses_old_identity_on_dominant_overlap():
+    from codewiki.src.be.clustering.pipeline import _apply_naming_freeze
+
+    clusters = [["f0.py::C0", "f1.py::C1", "f2.py::C2", "f_new.py::C_new"]]
+    names = [{"cluster_idx": 0, "title": "Inferred Title", "description": "x"}]
+    previous_tree = {
+        "Backend": {
+            "title": "Backend",
+            "path": "backend",
+            "components": ["f0.py::C0", "f1.py::C1", "f2.py::C2", "f3.py::C3"],
+            "children": {},
+        },
+        "Frontend": {
+            "title": "Frontend",
+            "path": "frontend",
+            "components": ["f10.py::C10"],
+            "children": {},
+        },
+    }
+    frozen = _apply_naming_freeze(clusters, names, previous_tree)
+    assert frozen[0]["title"] == "Backend"
+    assert frozen[0]["frozen_path"] == "backend"
+
+
+def test_apply_naming_freeze_no_dominant_match_keeps_llm_name():
+    from codewiki.src.be.clustering.pipeline import _apply_naming_freeze
+
+    clusters = [["f0.py::C0", "f1.py::C1", "f2.py::C2", "f3.py::C3"]]
+    names = [{"cluster_idx": 0, "title": "Fresh Name", "description": "x"}]
+    previous_tree = {
+        "OldA": {
+            "title": "OldA",
+            "path": "old_a",
+            "components": ["f0.py::C0", "f_other.py::C_other"],
+            "children": {},
+        },
+    }
+    frozen = _apply_naming_freeze(clusters, names, previous_tree)
+    assert frozen[0]["title"] == "Fresh Name"
+
+
+def test_apply_naming_freeze_exact_match_still_wins():
+    from codewiki.src.be.clustering.pipeline import _apply_naming_freeze
+
+    members = ["f0.py::C0", "f1.py::C1"]
+    clusters = [members]
+    names = [{"cluster_idx": 0, "title": "LLM Name", "description": "x"}]
+    previous_tree = {
+        "Backend": {
+            "title": "Backend",
+            "path": "backend",
+            "components": members,
+            "children": {},
+        },
+    }
+    frozen = _apply_naming_freeze(clusters, names, previous_tree)
+    assert frozen[0]["title"] == "Backend"
+    assert frozen[0]["frozen_path"] == "backend"
+
+
+def test_apply_naming_freeze_two_close_candidates_rejected():
+    from codewiki.src.be.clustering.pipeline import _apply_naming_freeze
+
+    clusters = [["a", "b", "c", "d"]]
+    names = [{"cluster_idx": 0, "title": "LLM Name", "description": "x"}]
+    previous_tree = {
+        "OldA": {
+            "title": "OldA",
+            "path": "old_a",
+            "components": ["a", "b", "c"],
+            "children": {},
+        },
+        "OldB": {
+            "title": "OldB",
+            "path": "old_b",
+            "components": ["a", "b", "d"],
+            "children": {},
+        },
+    }
+    frozen = _apply_naming_freeze(clusters, names, previous_tree)
+    assert frozen[0]["title"] == "LLM Name"
+
+
 # ---------------------------------------------------------------------------
 # Part 2: pipeline.py — cluster_modules_v2
 # ---------------------------------------------------------------------------
@@ -250,6 +333,35 @@ class TestClusterModulesV2PipelineLegacyFormat:
         assert isinstance(first_val["path"], str)
         assert isinstance(first_val["components"], list)
         assert isinstance(first_val["children"], dict)
+
+    def test_pipeline_consumes_oversized_split_clusters(self):
+        from codewiki.src.be.clustering.pipeline import cluster_modules_v2
+
+        spec = [(f"huge/mod_{i}.py::Comp{i}", f"huge/mod_{i}.py") for i in range(1005)]
+        components, leaf_nodes = _make_components_and_leaf_nodes(spec)
+        index_products = _make_index_products()
+        config = MagicMock()
+
+        split_clusters = [leaf_nodes[:500], leaf_nodes[500:]]
+        split_names = [
+            {"cluster_idx": 0, "title": "Huge A", "description": "part a"},
+            {"cluster_idx": 1, "title": "Huge B", "description": "part b"},
+        ]
+
+        with (
+            patch(
+                "codewiki.src.be.clustering.partitioner.partition_components",
+                return_value=split_clusters,
+            ),
+            patch(
+                "codewiki.src.be.clustering.pipeline.name_clusters",
+                return_value=split_names,
+            ),
+        ):
+            result = cluster_modules_v2(leaf_nodes, components, config, index_products)
+
+        assert sorted(result.keys()) == ["Huge A", "Huge B"]
+        assert sorted(len(info["components"]) for info in result.values()) == [500, 505]
 
 
 class TestClusterModulesV2TooFew:

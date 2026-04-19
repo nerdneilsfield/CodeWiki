@@ -12,6 +12,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse as MessageModelResp
 from pydantic_ai.models import Model, ModelRequestParameters, ModelResponse, ModelSettings
 
 from codewiki.src.be.errors import CancellationError, ErrorCategory, LLMError
+from codewiki.src.be.errors import classify_llm_exception, is_non_retryable_quota_exhaustion
 from codewiki.src.be.llm_services import (
     create_fallback_models,
     create_long_context_model,
@@ -286,6 +287,8 @@ class MiddlewareModel(Model):
             except Exception as exc:
                 if isinstance(exc, CancellationError):
                     raise
+                if is_non_retryable_quota_exhaustion(exc):
+                    raise classify_llm_exception(exc) from exc
                 if not self._middleware._is_context_overflow(exc):
                     raise
                 lc_model = self._middleware._config.long_context_model
@@ -334,6 +337,8 @@ class MiddlewareModel(Model):
             except Exception as exc:
                 if isinstance(exc, CancellationError):
                     raise
+                if is_non_retryable_quota_exhaustion(exc):
+                    raise classify_llm_exception(exc) from exc
                 if not self._middleware._is_context_overflow(exc):
                     raise
                 lc_model = self._middleware._config.long_context_model

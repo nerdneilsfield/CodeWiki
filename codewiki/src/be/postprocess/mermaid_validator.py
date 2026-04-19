@@ -443,7 +443,7 @@ def fix_mermaid_in_text(
         return text
 
     repaired: dict[str, str] = {}
-    cache_dir = getattr(cache_manager, "_cache_dir", "") if cache_manager else ""
+    cache_dir = cache_manager.cache_dir if cache_manager else ""
     uncached_issues: list[MermaidIssue] = []
     for issue in issues:
         block_index = int(issue.issue_id.rsplit(":", 1)[-1])

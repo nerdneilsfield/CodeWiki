@@ -66,6 +66,11 @@ def test_cache_manager_get_output_file(cache_dir):
     assert cache_manager.get_output_file("module:auth") == "auth.md"
 
 
+def test_cache_manager_exposes_public_cache_dir(cache_dir):
+    cache_manager = CacheManager(cache_dir)
+    assert cache_manager.cache_dir == cache_dir
+
+
 def test_cache_manager_plan_task_sets_missing(cache_dir):
     cache_manager = CacheManager(cache_dir)
     cache_manager.plan_task("module:auth", output_file="auth.md")

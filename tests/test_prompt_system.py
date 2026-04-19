@@ -92,11 +92,21 @@ class TestSharedBlocksPreserved:
 
     def test_system_prompt_has_workflow(self):
         prompt = format_system_prompt("TestModule")
-        assert "generate_sub_module_documentation" in prompt
+        assert "Do NOT create or mutate sub-modules at runtime" in prompt
 
     def test_leaf_prompt_no_sub_module_delegation(self):
         prompt = format_leaf_system_prompt("TestModule")
         assert "generate_sub_module_documentation" not in prompt
+
+    def test_system_prompt_requires_summary_opening_and_overview_subsection(self):
+        prompt = format_system_prompt("TestModule")
+        assert "The first paragraph MUST be a concise summary paragraph" in prompt
+        assert "Then add a dedicated `## Overview` subsection" in prompt
+
+    def test_leaf_prompt_requires_summary_opening_and_overview_subsection(self):
+        prompt = format_leaf_system_prompt("TestModule")
+        assert "The first paragraph MUST be a concise summary paragraph" in prompt
+        assert "Then add a dedicated `## Overview` subsection" in prompt
 
 
 class TestBannedWordList:

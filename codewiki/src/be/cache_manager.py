@@ -10,12 +10,12 @@ import threading
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
 CACHE_REGISTRY_FILENAME = "cache_registry.json"
-_SCHEMA_VERSION = "cache.v1"
+_SCHEMA_VERSION = "cache.v2"
 
 
 def _now() -> str:
@@ -65,6 +65,11 @@ class CacheManager:
         self._wake_event = threading.Event()
         self._flush_thread: threading.Thread | None = None
         self._load()
+
+    @property
+    def cache_dir(self) -> str:
+        """Public cache root path for collaborators that need artifact subdirs."""
+        return self._cache_dir
 
     def is_valid(self, artifact_id: str, current_input_hash: str) -> bool:
         """Check if artifact is cached and still valid."""
@@ -297,7 +302,15 @@ class CacheManager:
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
-            if data.get("schema_version") != _SCHEMA_VERSION:
+            schema_version = data.get("schema_version")
+            if schema_version == "cache.v1":
+                logger.info("Cache registry migration: cache.v1 → cache.v2")
+                data["entries"] = {
+                    key: value
+                    for key, value in cast(dict[str, Any], data.get("entries", {})).items()
+                    if not str(key).startswith("refinement:")
+                }
+            elif schema_version != _SCHEMA_VERSION:
                 logger.warning("Cache registry schema mismatch — starting fresh")
                 return
             self._metadata = {

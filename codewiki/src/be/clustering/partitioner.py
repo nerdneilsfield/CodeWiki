@@ -20,6 +20,10 @@ _DIR_PRIOR_WEIGHT: float = 2.0
 # Minimum cluster size; smaller clusters are merged into nearest neighbour.
 _MIN_CLUSTER_SIZE: int = 3
 
+# Oversized clusters should be recursively re-partitioned before they reach
+# downstream naming / documentation stages.
+_MAX_CLUSTER_COMPONENTS: int = 1000
+
 
 # ---------------------------------------------------------------------------
 # Step 1: directory prior grouping (v3.md L333)
@@ -125,6 +129,7 @@ def detect_communities(
     dir_partitions: dict[str, set[str]],
     seed: int = 42,
     min_cluster_size: int = _MIN_CLUSTER_SIZE,
+    resolution: float = 1.0,
 ) -> list[set[str]]:
     """Run Louvain community detection with directory-prior bias.
 
@@ -154,7 +159,9 @@ def detect_communities(
 
     # Run Louvain
     try:
-        communities = list(louvain_communities(aug, weight="weight", seed=seed))
+        communities = list(
+            louvain_communities(aug, weight="weight", seed=seed, resolution=resolution)
+        )
     except Exception as exc:
         logger.warning("Louvain failed (%s); returning single community", exc)
         return [set(graph.nodes)]
@@ -169,6 +176,60 @@ def detect_communities(
     communities.sort(key=lambda c: (-len(c), min(c) if c else ""))
 
     return communities
+
+
+def _split_oversized_communities(
+    communities: list[set[str]],
+    graph: nx.Graph,
+    component_file_map: dict[str, str],
+    seed: int,
+    min_cluster_size: int = _MIN_CLUSTER_SIZE,
+    max_cluster_size: int = _MAX_CLUSTER_COMPONENTS,
+) -> list[set[str]]:
+    """Recursively split communities that exceed max_cluster_size.
+
+    Mirrors the old v1 oversized-group safeguard: keep the normal community
+    detection for most cases, but if a single group is still too large, rerun
+    Louvain on that subgraph with a higher resolution so the result is usable
+    by downstream prompt construction.
+    """
+    result: list[set[str]] = []
+    for community in communities:
+        if len(community) <= max_cluster_size:
+            result.append(community)
+            continue
+
+        logger.info("Splitting oversized v2 cluster (%d components)", len(community))
+        subgraph = graph.subgraph(community).copy()
+        sub_file_map = {
+            cid: component_file_map[cid] for cid in community if cid in component_file_map
+        }
+        sub_partitions = partition_by_directory(sorted(community), sub_file_map)
+        sub_communities = detect_communities(
+            subgraph,
+            sub_partitions,
+            seed=seed,
+            min_cluster_size=min_cluster_size,
+            resolution=2.0,
+        )
+
+        # If the higher-resolution pass still can't split, keep the original
+        # community to avoid infinite recursion.
+        if len(sub_communities) <= 1:
+            result.append(community)
+            continue
+
+        result.extend(
+            _split_oversized_communities(
+                sub_communities,
+                subgraph,
+                sub_file_map,
+                seed=seed,
+                min_cluster_size=min_cluster_size,
+                max_cluster_size=max_cluster_size,
+            )
+        )
+    return result
 
 
 def _merge_small_communities(
@@ -253,6 +314,12 @@ def partition_components(
 
     # Step 3: community detection
     communities = detect_communities(super_graph, mapped_partitions, seed=seed)
+    communities = _split_oversized_communities(
+        communities,
+        super_graph,
+        {node_map.get(cid, cid): path for cid, path in component_file_map.items()},
+        seed=seed,
+    )
 
     if not communities:
         return [sorted(component_ids)]

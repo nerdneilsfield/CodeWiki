@@ -3,6 +3,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "prompt-v9"
+REFINEMENT_PROMPT_VERSION = "refinement-v1"
 
 # ── Shared Mermaid safety rules ───────────────────────────────────────────────
 # Embedded verbatim in every <MERMAID_REQUIREMENTS> block and in the base system
@@ -169,7 +170,8 @@ You are a senior software architect writing a technical book chapter about the `
 
 <DOCUMENTATION_STRUCTURE>
 1. **Main Documentation File** (write to the filename assigned by the system in the user prompt):
-   - Opening paragraph: a vivid, jargon-light explanation of what this module does and why it matters — a reader should "get it" in 30 seconds
+   - Opening paragraph: The first paragraph MUST be a concise summary paragraph explaining what this module does, why it exists, and why it matters — a reader should "get it" in 30 seconds
+   - Then add a dedicated `## Overview` subsection immediately after the opening paragraph; use it for the broader architectural explanation rather than collapsing everything into the first paragraph
    - Architecture overview: a Mermaid diagram followed by a narrative walkthrough explaining each component's role and the data/control flow between them
    - Key design decisions: what patterns were adopted (and what alternatives exist), with tradeoff analysis
    - Sub-module summaries: for each sub-module, a multi-sentence description of its responsibility and a link to its dedicated page
@@ -196,27 +198,117 @@ You are a senior software architect writing a technical book chapter about the `
 <WORKFLOW>
 1. Analyze the provided code components, dependency graph, and module structure; explore additional dependencies if needed
 2. Create the module doc file using the exact assigned filename from the user prompt, with overview, architecture narrative, design decisions, and sub-module summaries
-3. Use `generate_sub_module_documentation` to delegate sub-module docs for COMPLEX modules (more than 1 code file, clearly separable into sub-topics)
-4. After sub-modules are documented, make ONE final edit to the module doc file to ensure all sub-module pages are properly cross-referenced
+3. If the frozen module tree already contains sub-modules, summarize them and cross-reference their dedicated pages. Do NOT create or mutate sub-modules at runtime.
+4. Make ONE final edit to the module doc file to ensure all child-module pages are properly cross-referenced
 </WORKFLOW>
 
 <AVAILABLE_TOOLS>
 - `str_replace_editor`: File system operations for creating and editing documentation files
 - `read_code_components`: Explore additional code dependencies not included in the provided components
-- `generate_sub_module_documentation`: Delegate sub-module documentation to sub-agents.
-  The ONLY parameter is `sub_module_specs` — a flat dict mapping sub-module names to
-  lists of component IDs.  Example:
-  ```json
-  {{"auth_layer": ["src/auth.py::AuthManager", "src/auth.py::Token"],
-    "data_store": ["src/db.py::Database", "src/db.py::Migration"]}}
-  ```
-  Do NOT wrap it in metadata like `{{"module_name": ..., "sub_modules": ...}}`.
-  Keys must be descriptive snake_case names; values must be component IDs from your
-  core_components list.
 </AVAILABLE_TOOLS>
 {custom_instructions}
 """.strip()
 )
+
+
+_REFINEMENT_PROMPT_TEMPLATES = {
+    "en": """You are refining a software module into focused sub-modules.
+
+Parent module: {parent_title}
+Parent path: {parent_path}
+Current depth: {current_depth} of max_depth {max_depth}
+Output language: {output_language}
+
+Constraints:
+- Only propose a split if the parent has at least {min_components_for_split} components
+  AND spans at least {min_distinct_files_for_split} distinct files.
+- Do NOT exceed max_depth {max_depth}; if current_depth equals max_depth, return an empty
+  children object.
+- Each child must have a non-empty `module_id` (snake_case), a human `title`, a `path`
+  (lowercase, snake_case, no slashes), a one-sentence `description`, and a non-empty
+  `components` list whose entries are exact ids from the listing below.
+- Do not invent component ids. Do not reuse a component in two children.
+
+Components in this parent:
+{components_block}
+
+Return STRICT JSON in this exact shape:
+{{
+  "should_split": <true|false>,
+  "children": {{
+    "<title>": {{
+      "module_id": "<snake_case>",
+      "title": "<title>",
+      "path": "<snake_case_path>",
+      "description": "<one sentence>",
+      "components": ["<exact id>", ...]
+    }}
+  }}
+}}
+
+If should_split is false, return an empty children object.
+""",
+    "zh": """你正在把一个软件模块细化为更聚焦的子模块。
+
+父模块标题：{parent_title}
+父模块路径：{parent_path}
+当前深度：{current_depth} / 最大深度 {max_depth}
+输出语言：{output_language}
+
+约束：
+- 只有当父模块至少包含 {min_components_for_split} 个组件，且跨越至少 {min_distinct_files_for_split} 个不同文件时，才允许拆分。
+- 不得超过最大深度 {max_depth}；如果 current_depth 已经等于 max_depth，就返回空的 children。
+- 每个子模块都必须包含非空 `module_id`（snake_case）、可读的 `title`、`path`（小写 snake_case、不能带斜杠）、一句话 `description`，以及非空 `components` 列表；组件 id 必须原样来自下面的清单。
+- 不要发明组件 id，也不要把同一个组件放进两个子模块。
+
+当前父模块中的组件：
+{components_block}
+
+只返回严格 JSON，结构必须是：
+{{
+  "should_split": <true|false>,
+  "children": {{
+    "<title>": {{
+      "module_id": "<snake_case>",
+      "title": "<title>",
+      "path": "<snake_case_path>",
+      "description": "<一句话>",
+      "components": ["<exact id>", ...]
+    }}
+  }}
+}}
+
+如果 should_split 为 false，children 必须为空对象。
+""",
+}
+
+
+def format_refinement_prompt(
+    *,
+    parent_title: str,
+    parent_path: str,
+    components_block: str,
+    current_depth: int,
+    max_depth: int,
+    min_components_for_split: int,
+    min_distinct_files_for_split: int,
+    output_language: str,
+) -> str:
+    template = _REFINEMENT_PROMPT_TEMPLATES.get(
+        output_language.lower(),
+        _REFINEMENT_PROMPT_TEMPLATES["en"],
+    )
+    return template.format(
+        parent_title=parent_title,
+        parent_path=parent_path,
+        components_block=components_block,
+        current_depth=current_depth,
+        max_depth=max_depth,
+        min_components_for_split=min_components_for_split,
+        min_distinct_files_for_split=min_distinct_files_for_split,
+        output_language=output_language,
+    )
+
 
 LEAF_SYSTEM_PROMPT = (
     """
@@ -233,16 +325,17 @@ You are a senior software architect writing a focused technical deep-dive on the
     + """
 
 <DOCUMENTATION_REQUIREMENTS>
-1. **Opening**: A clear paragraph explaining what this module does and why — a reader should grasp the purpose in 30 seconds
-2. **Architecture**: A Mermaid diagram (only if it genuinely clarifies, max ~10 nodes) followed by a narrative walkthrough of the component roles and data flow.  Node and edge labels must be plain ASCII — Unicode math operators break the Mermaid parser; use "exists", "in", "subset", etc. instead.  Math belongs in LaTeX, not in diagram labels.
-3. **Component deep-dives**: For each important class/function — purpose, internal mechanics, parameters, return values, side effects, with enough context that a newcomer understands the design reasoning
-4. **Dependency analysis**: What this module calls (and why), what calls it (and what they expect), and the data contracts in between
-5. **Design decisions & tradeoffs**: Key patterns chosen, alternatives that exist, and the tensions in the current approach
-6. **Usage & examples**: Code snippets drawn from real files in the repo. If a complete example would require inventing surrounding glue code, prefer a minimal real call-site plus prose, or label the block `// pseudocode` on the first line
-7. **Edge cases & gotchas**: Error conditions, behavioral constraints, known limitations
-8. **References**: Link to other module docs rather than duplicating their content
-9. **Prose over bullets**: Write conceptual explanations in full paragraphs; reserve bullet points for enumerations, not for narratives
-10. **Mathematical notation**: Use LaTeX syntax (`$inline$` / `$$block$$`) ONLY when a formula genuinely aids understanding. Default to prose.
+1. **Opening**: The first paragraph MUST be a concise summary paragraph explaining what this module does, why it exists, and why — a reader should grasp the purpose in 30 seconds
+2. **Overview subsection**: Then add a dedicated `## Overview` subsection immediately after the opening paragraph; use it for the broader architectural explanation, scope, and mental model rather than stuffing all of that into the first paragraph
+3. **Architecture**: A Mermaid diagram (only if it genuinely clarifies, max ~10 nodes) followed by a narrative walkthrough of the component roles and data flow.  Node and edge labels must be plain ASCII — Unicode math operators break the Mermaid parser; use "exists", "in", "subset", etc. instead.  Math belongs in LaTeX, not in diagram labels.
+4. **Component deep-dives**: For each important class/function — purpose, internal mechanics, parameters, return values, side effects, with enough context that a newcomer understands the design reasoning
+5. **Dependency analysis**: What this module calls (and why), what calls it (and what they expect), and the data contracts in between
+6. **Design decisions & tradeoffs**: Key patterns chosen, alternatives that exist, and the tensions in the current approach
+7. **Usage & examples**: Code snippets drawn from real files in the repo. If a complete example would require inventing surrounding glue code, prefer a minimal real call-site plus prose, or label the block `// pseudocode` on the first line
+8. **Edge cases & gotchas**: Error conditions, behavioral constraints, known limitations
+9. **References**: Link to other module docs rather than duplicating their content
+10. **Prose over bullets**: Write conceptual explanations in full paragraphs; reserve bullet points for enumerations, not for narratives
+11. **Mathematical notation**: Use LaTeX syntax (`$inline$` / `$$block$$`) ONLY when a formula genuinely aids understanding. Default to prose.
 </DOCUMENTATION_REQUIREMENTS>
 
 """
@@ -1758,5 +1851,83 @@ Write a concise summary that explains:
 1. What this sub-module does
 2. How it fits into the parent module
 
-Output language: {output_language}
+    Output language: {output_language}
 Write in markdown format. Include a ### heading with the sub-module name."""
+
+
+def format_parent_opening_prompt(
+    *,
+    title: str,
+    path: str,
+    description: str,
+    output_language: str,
+) -> str:
+    return f"""Write a 2-3 sentence opening paragraph for a parent module documentation page.
+
+Parent module: {title}
+Path: {path}
+Description: {description}
+Output language: {output_language}
+
+The opening should:
+- Introduce the parent module's role in the system
+- Avoid listing children directly
+- Be plain markdown, no headings, no code blocks
+"""
+
+
+def format_parent_overview_prompt(
+    *,
+    title: str,
+    path: str,
+    description: str,
+    children: list[dict],
+    output_language: str,
+) -> str:
+    children_block = "\n".join(
+        f"- **{child['title']}** (`{child['path']}`): {child.get('description', '')}"
+        for child in children
+    )
+    return f"""Write an architecture overview for a parent module that summarizes how its children fit together.
+
+Parent module: {title}
+Path: {path}
+Description: {description}
+Output language: {output_language}
+
+Direct children:
+{children_block}
+
+The overview should:
+- Explain how the children relate to each other
+- Identify any obvious dependency direction
+- Be plain markdown, may include a small mermaid diagram
+- Stay concise
+"""
+
+
+def format_parent_child_summary_prompt(
+    *,
+    parent_title: str,
+    child_title: str,
+    child_path: str,
+    child_description: str,
+    child_doc_excerpt: str,
+    output_language: str,
+) -> str:
+    truncated = child_doc_excerpt[:2000] + ("..." if len(child_doc_excerpt) > 2000 else "")
+    return f"""Write a one-paragraph summary of a single child module within a parent doc.
+
+Parent module: {parent_title}
+Child module: {child_title}
+Child path: {child_path}
+Child description: {child_description}
+Output language: {output_language}
+
+Excerpt from the child's own documentation:
+<CHILD_DOC>
+{truncated}
+</CHILD_DOC>
+
+Write 2-4 sentences. Mention what the child does and how it fits into the parent. Plain markdown only.
+"""

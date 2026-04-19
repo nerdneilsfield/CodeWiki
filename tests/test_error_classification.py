@@ -67,6 +67,19 @@ class TestClassifyLlmException:
         result = classify_llm_exception(FakeAPIError(429))
         assert result.category == ErrorCategory.RETRYABLE_TRANSIENT
 
+    def test_quota_exhausted_429_is_non_retryable(self):
+        from codewiki.src.be.errors import ErrorCategory, classify_llm_exception
+
+        class FakeAPIError(Exception):
+            def __init__(self):
+                self.status_code = 429
+                self.message = "monthly quota exhausted"
+                self.body = {"error": {"message": "monthly quota exhausted", "type": "limitation"}}
+                super().__init__("monthly quota exhausted")
+
+        result = classify_llm_exception(FakeAPIError())
+        assert result.category == ErrorCategory.NON_RETRYABLE_CONFIG
+
     def test_400_is_client_error(self):
         from codewiki.src.be.errors import ErrorCategory, classify_llm_exception
 

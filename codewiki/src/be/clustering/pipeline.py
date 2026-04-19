@@ -88,7 +88,14 @@ def cluster_modules_v2(
     )
 
     # Naming freeze: if module_id matches previous tree, reuse old title/path/description
-    frozen_names = _apply_naming_freeze(clusters, names, current_module_tree)
+    frozen_names = _apply_naming_freeze(
+        clusters,
+        names,
+        current_module_tree,
+        identity_reuse_threshold=getattr(
+            getattr(config, "refinement", None), "identity_reuse_threshold", 0.70
+        ),
+    )
 
     # Build ModuleNode tree
     children: list[ModuleNode] = []
@@ -212,40 +219,53 @@ def _apply_naming_freeze(
     clusters: list[list[str]],
     names: list[dict],
     previous_tree: dict | None,
+    identity_reuse_threshold: float = 0.70,
+    identity_reuse_margin: float = 0.15,
 ) -> list[dict]:
-    """Apply naming freeze: reuse old title/path/description when module_id matches.
-
-    If a cluster's module_id (computed from sorted members) appears in the
-    previous tree, its naming is replaced with the previous values. This
-    prevents unnecessary title/path churn when members haven't changed.
-
-    Args:
-        clusters: current cluster member lists
-        names: current naming results (from LLM or heuristic)
-        previous_tree: v1 legacy format from last run, or None/empty
-
-    Returns:
-        New names list with frozen entries where applicable.
-    """
+    """Reuse old title/path when a new cluster has dominant overlap with an old node."""
     if not previous_tree:
         return names
 
-    # Build module_id → {title, path, description} from previous tree
-    prev_by_id: dict[str, dict] = {}
-    _index_previous_tree(previous_tree, prev_by_id)
+    from codewiki.src.be.identity_reuse import find_dominant_match
+
+    old_siblings: dict[str, dict[str, Any]] = {}
+
+    def _collect(subtree: dict[str, Any]) -> None:
+        for key, info in subtree.items():
+            if not isinstance(info, dict):
+                continue
+            if info.get("components"):
+                old_siblings[key] = {
+                    "module_id": info.get("module_id") or key,
+                    "title": info.get("title", key),
+                    "path": info.get("path", ""),
+                    "components": info.get("components", []),
+                    "description": info.get("description", ""),
+                }
+            children = info.get("children") or {}
+            if children:
+                _collect(children)
+
+    _collect(previous_tree)
+    available = dict(old_siblings)
 
     result = []
     frozen_count = 0
     for cluster, naming in zip(clusters, names):
-        mid = module_id_from_members(cluster)
-        if mid in prev_by_id:
-            prev = prev_by_id[mid]
+        match = find_dominant_match(
+            set(cluster),
+            available,
+            threshold=identity_reuse_threshold,
+            margin=identity_reuse_margin,
+        )
+        if match is not None:
+            prev = available.pop(match.old_key)
             result.append(
                 {
                     "cluster_idx": naming.get("cluster_idx", 0),
-                    "title": prev["title"],
+                    "title": match.old_title,
                     "description": prev.get("description", naming.get("description", "")),
-                    "frozen_path": prev.get("path", ""),
+                    "frozen_path": match.old_path,
                 }
             )
             frozen_count += 1
@@ -254,28 +274,12 @@ def _apply_naming_freeze(
 
     if frozen_count:
         logger.info(
-            f"Naming freeze: reused {frozen_count}/{len(clusters)} module names from previous tree"
+            "Naming freeze: reused %s/%s module names from previous tree",
+            frozen_count,
+            len(clusters),
         )
 
     return result
-
-
-def _index_previous_tree(tree: dict, index: dict) -> None:
-    """Walk previous v1 tree, compute module_id for each module, store naming."""
-    for title, info in tree.items():
-        if not isinstance(info, dict):
-            continue
-        components = info.get("components", [])
-        if components:
-            mid = module_id_from_members(components)
-            index[mid] = {
-                "title": title,
-                "path": info.get("path", ""),
-                "description": "",  # v1 format doesn't store description
-            }
-        children = info.get("children", {})
-        if children and isinstance(children, dict):
-            _index_previous_tree(children, index)
 
 
 def _compute_module_path(

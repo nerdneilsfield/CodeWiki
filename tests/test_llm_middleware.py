@@ -365,3 +365,54 @@ def test_is_context_overflow_detects_openai_bad_request(tmp_path):
         body={"error": {"message": "context_length_exceeded"}},
     )
     assert middleware._is_context_overflow(exc) is True
+
+
+@pytest.mark.asyncio
+async def test_request_stream_reclassifies_quota_exhausted_429(tmp_path):
+    from codewiki.src.be.errors import ErrorCategory, LLMError
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    mw_mod = _load_middleware_module()
+    middleware = mw_mod.LLMMiddleware(_make_config(tmp_path))
+    model = middleware.create_agent_model()
+
+    class FakeModel:
+        def request_stream(
+            self, messages, model_settings, model_request_parameters, run_context=None
+        ):
+            raise ModelHTTPError(
+                429,
+                "test/main",
+                {"message": "monthly quota exhausted", "type": "limitation", "code": "429"},
+            )
+
+    with patch("codewiki.src.be.llm_middleware.create_fallback_models", return_value=FakeModel()):
+        with pytest.raises(LLMError) as exc_info:
+            async with model.request_stream([SimpleNamespace(parts=[])], None, None):
+                pass
+
+    assert exc_info.value.category == ErrorCategory.NON_RETRYABLE_CONFIG
+
+
+@pytest.mark.asyncio
+async def test_request_reclassifies_quota_exhausted_429(tmp_path):
+    from codewiki.src.be.errors import ErrorCategory, LLMError
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    mw_mod = _load_middleware_module()
+    middleware = mw_mod.LLMMiddleware(_make_config(tmp_path))
+    model = middleware.create_agent_model()
+
+    class FakeModel:
+        async def request(self, messages, model_settings, model_request_parameters):
+            raise ModelHTTPError(
+                429,
+                "test/main",
+                {"message": "monthly quota exhausted", "type": "limitation", "code": "429"},
+            )
+
+    with patch("codewiki.src.be.llm_middleware.create_fallback_models", return_value=FakeModel()):
+        with pytest.raises(LLMError) as exc_info:
+            await model.request([SimpleNamespace(parts=[])], None, None)
+
+    assert exc_info.value.category == ErrorCategory.NON_RETRYABLE_CONFIG

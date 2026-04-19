@@ -421,7 +421,7 @@ def fix_math_in_text(
             issues.append(issue)
 
     repaired: dict[str, str] = {}
-    cache_dir = getattr(cache_manager, "_cache_dir", "") if cache_manager else ""
+    cache_dir = cache_manager.cache_dir if cache_manager else ""
     if issues:
         batch_size = max(1, config.postprocess.repair_batch_size)
         uncached_issues: list[FormulaIssue] = []

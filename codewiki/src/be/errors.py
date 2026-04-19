@@ -64,6 +64,36 @@ _CONFIG_INDICATORS = (
     "unsupported provider",
     "not configured",
 )
+_NON_RETRYABLE_QUOTA_INDICATORS = (
+    "monthly quota exhausted",
+    "quota exhausted",
+    "insufficient_quota",
+    "credit balance",
+    "billing",
+    "hard limit",
+)
+
+
+def _error_message_parts(exc: Exception) -> list[str]:
+    parts = [str(getattr(exc, "message", exc))]
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error_obj = body.get("error")
+        if isinstance(error_obj, dict):
+            parts.extend(str(v) for v in error_obj.values() if v is not None)
+        parts.extend(str(v) for v in body.values() if v is not None and not isinstance(v, dict))
+    return [part.lower() for part in parts if part]
+
+
+def is_non_retryable_quota_exhaustion(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    if status != 429:
+        return False
+    return any(
+        indicator in part
+        for part in _error_message_parts(exc)
+        for indicator in _NON_RETRYABLE_QUOTA_INDICATORS
+    )
 
 
 def classify_llm_exception(exc: Exception) -> LLMError:
@@ -106,6 +136,8 @@ def classify_llm_exception(exc: Exception) -> LLMError:
             return LLMError(str(exc), ErrorCategory.NON_RETRYABLE_CLIENT, status)
 
         if status in _RETRYABLE_STATUS:
+            if status == 429 and is_non_retryable_quota_exhaustion(exc):
+                return LLMError(str(exc), ErrorCategory.NON_RETRYABLE_CONFIG, status)
             return LLMError(str(exc), ErrorCategory.RETRYABLE_TRANSIENT, status)
         if status in _AUTH_STATUS:
             return LLMError(str(exc), ErrorCategory.RETRYABLE_AUTH, status)
