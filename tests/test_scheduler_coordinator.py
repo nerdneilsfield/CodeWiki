@@ -2,6 +2,8 @@ import logging
 
 import pytest
 
+from codewiki.src.be.cache_manager import CacheManager
+
 
 class _NoopProgress:
     def update(self, n=1):
@@ -15,7 +17,7 @@ class _NoopProgress:
 
 
 @pytest.mark.asyncio
-async def test_coordinator_processes_leaves_before_parents():
+async def test_coordinator_processes_leaves_before_parents(tmp_path):
     """Children must complete before their parent is dispatched."""
     from codewiki.src.be.documentation_scheduler import run_module_queue
 
@@ -27,6 +29,18 @@ async def test_coordinator_processes_leaves_before_parents():
 
     async def mock_root_overview():
         execution_order.append("__root__")
+
+    async def mock_parent(**kwargs):
+        execution_order.append("/".join(["Parent"]))
+        return type(
+            "ParentAssembly",
+            (),
+            {
+                "output_path": "/tmp/fake/parent.md",
+                "input_hash": "parent-hash",
+                "model": "cluster-model",
+            },
+        )()
 
     tree = {
         "Parent": {
@@ -41,18 +55,33 @@ async def test_coordinator_processes_leaves_before_parents():
     class FakeConfig:
         max_concurrent = 2
         main_model = "test/main"
+        cluster_model = "test/cluster"
+        output_language = "en"
 
-    await run_module_queue(
-        config=FakeConfig(),
-        graph_tree=tree,
-        components={"a": None, "b": None, "c": None},
-        working_dir="/tmp/fake",
-        tree_manager=None,
-        process_module=mock_process,
-        generate_root_overview=mock_root_overview,
-        include_root=True,
-        progress_factory=lambda **kw: _NoopProgress(),
-    )
+    import codewiki.src.be.documentation_scheduler as scheduler
+
+    cache_dir = tmp_path / ".codewiki"
+    cache_dir.mkdir()
+    cache = CacheManager(str(cache_dir), flush_interval=60)
+
+    original_parent = scheduler.generate_or_assemble_parent_doc
+    scheduler.generate_or_assemble_parent_doc = mock_parent
+    try:
+        await run_module_queue(
+            config=FakeConfig(),
+            graph_tree=tree,
+            components={"a": None, "b": None, "c": None},
+            working_dir=str(tmp_path),
+            tree_manager=None,
+            process_module=mock_process,
+            generate_root_overview=mock_root_overview,
+            include_root=True,
+            progress_factory=lambda **kw: _NoopProgress(),
+            cache_manager=cache,
+            middleware=object(),
+        )
+    finally:
+        scheduler.generate_or_assemble_parent_doc = original_parent
 
     parent_idx = execution_order.index("Parent")
     child1_idx = execution_order.index("Parent/Child1")
@@ -64,7 +93,7 @@ async def test_coordinator_processes_leaves_before_parents():
 
 
 @pytest.mark.asyncio
-async def test_coordinator_handles_failed_task(monkeypatch, caplog):
+async def test_coordinator_handles_failed_task(monkeypatch, caplog, tmp_path):
     """A failed task must not block other leaf tasks from completing."""
     from codewiki.src.be import documentation_scheduler as scheduler
 
@@ -98,18 +127,25 @@ async def test_coordinator_handles_failed_task(monkeypatch, caplog):
         max_concurrent = 2
         max_retries = 2
         main_model = "test/main"
+        cluster_model = "test/cluster"
+        output_language = "en"
 
     caplog.set_level(logging.WARNING)
+    cache_dir = tmp_path / ".codewiki"
+    cache_dir.mkdir()
+    cache = CacheManager(str(cache_dir), flush_interval=60)
 
     await scheduler.run_module_queue(
         config=FakeConfig(),
         graph_tree=tree,
         components={"a": None, "b": None},
-        working_dir="/tmp/fake",
+        working_dir=str(tmp_path),
         tree_manager=None,
         process_module=mock_process,
         include_root=False,
         progress_factory=lambda **kw: _NoopProgress(),
+        cache_manager=cache,
+        middleware=object(),
     )
 
     assert call_count >= 2

@@ -87,3 +87,52 @@ def test_cleanup_legacy_internal_files_removes_root_cache_files(tmp_path):
     removed = cleanup_legacy_internal_files(str(tmp_path))
 
     assert set(removed) == {"_parent_doc_hashes.json", "_tree_cache_meta.json", "_guide_cache.json"}
+
+
+def test_select_effective_component_ids_samples_children_and_boundary_nodes():
+    from types import SimpleNamespace
+
+    from codewiki.src.be.documentation_tree_utils import select_effective_component_ids
+
+    module_info = {
+        "components": [
+            "a1",
+            "a2",
+            "a3",
+            "a4",
+            "a5",
+            "a6",
+            "b1",
+            "b2",
+            "b3",
+            "b4",
+            "b5",
+            "b6",
+        ],
+        "children": {
+            "ChildA": {"components": ["a1", "a2", "a3", "a4", "a5", "a6"], "children": {}},
+            "ChildB": {"components": ["b1", "b2", "b3", "b4", "b5", "b6"], "children": {}},
+        },
+    }
+    components = {
+        "a1": SimpleNamespace(depends_on={"b1"}, source_code="a1"),
+        "a2": SimpleNamespace(depends_on=set(), source_code="a2"),
+        "a3": SimpleNamespace(depends_on=set(), source_code="a3"),
+        "a4": SimpleNamespace(depends_on=set(), source_code="a4"),
+        "a5": SimpleNamespace(depends_on=set(), source_code="a5"),
+        "a6": SimpleNamespace(depends_on=set(), source_code="a6"),
+        "b1": SimpleNamespace(depends_on={"a1"}, source_code="b1"),
+        "b2": SimpleNamespace(depends_on=set(), source_code="b2"),
+        "b3": SimpleNamespace(depends_on=set(), source_code="b3"),
+        "b4": SimpleNamespace(depends_on=set(), source_code="b4"),
+        "b5": SimpleNamespace(depends_on=set(), source_code="b5"),
+        "b6": SimpleNamespace(depends_on=set(), source_code="b6"),
+    }
+
+    selected = select_effective_component_ids(module_info, components)
+
+    assert "a1" in selected
+    assert "b1" in selected
+    assert len(selected) < len(module_info["components"])
+    assert any(cid.startswith("a") for cid in selected)
+    assert any(cid.startswith("b") for cid in selected)

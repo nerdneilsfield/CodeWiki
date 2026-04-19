@@ -79,10 +79,6 @@ class DocumentationGenerator:
             usage_stats=self.usage_stats,
         )
 
-    @staticmethod
-    def _freeze_doc_filenames(tree: Dict[str, Any]) -> None:
-        freeze_doc_filenames(tree)
-
     def _module_doc_exists(
         self,
         working_dir: str,
@@ -90,6 +86,10 @@ class DocumentationGenerator:
         module_tree: Optional[Dict[str, Any]] = None,
     ) -> bool:
         return module_doc_exists(working_dir, module_path, module_tree)
+
+    @staticmethod
+    def _freeze_doc_filenames(tree: Dict[str, Any]) -> None:
+        freeze_doc_filenames(tree)
 
     @staticmethod
     def _detect_repo_url(repo_path: str) -> Optional[str]:
@@ -227,9 +227,6 @@ class DocumentationGenerator:
 
         dedup_docs_directory(working_dir)
 
-        freeze_doc_filenames(module_tree)
-        freeze_doc_filenames(first_module_tree)
-        file_manager.save_json(module_tree, module_tree_path)
         file_manager.save_json(first_module_tree, first_module_tree_path)
 
         await self._initialize_cache_from_tree(module_tree, working_dir)
@@ -291,6 +288,7 @@ class DocumentationGenerator:
             cache_manager=cache_manager,
             progress_factory=tqdm,
             cancel_token=getattr(self, "cancel_token", None),
+            middleware=getattr(self, "middleware", None),
         )
 
     async def _fill_missing_module_docs(
@@ -422,10 +420,7 @@ class DocumentationGenerator:
                 module_tree = heal_module_tree_components(cached_tree, ctx.components)
             else:
                 module_tree = cached_tree
-            freeze_doc_filenames(module_tree)
             file_manager.save_json(module_tree, first_module_tree_path)
-            if not os.path.exists(module_tree_path):
-                file_manager.save_json(module_tree, module_tree_path)
         else:
             logger.debug("Clustering modules (no valid cache at %s)", first_module_tree_path)
             module_tree = cluster_modules(
@@ -437,9 +432,7 @@ class DocumentationGenerator:
                 middleware=self.middleware,
             )
             if module_tree:
-                freeze_doc_filenames(module_tree)
                 file_manager.save_json(module_tree, first_module_tree_path)
-                file_manager.save_json(module_tree, module_tree_path)
 
         if self.cache_manager:
             self.cache_manager.update_metadata(
@@ -475,52 +468,27 @@ class DocumentationGenerator:
     ) -> None:
         cleanup_legacy_internal_files(working_dir)
 
-        module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-        first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
         dedup_docs_directory(working_dir)
-        freeze_doc_filenames(module_tree)
-        file_manager.save_json(module_tree, module_tree_path)
-        file_manager.save_json(module_tree, first_module_tree_path)
         if not self.cache_manager:
             return
 
-        # First pass: compute artifact_id for each new task
-        planned: list[tuple[str, str]] = []  # [(artifact_id, requested_output_file)]
         for task in build_generation_tasks(module_tree, self.config):
-            if task.doc_id == "overview:root":
-                artifact_id = "overview:root"
-            elif task.kind == "overview":
-                artifact_id = overview_artifact_id(task.doc_id)
-            else:
-                artifact_id = module_artifact_id(task.doc_id)
-            planned.append((artifact_id, task.output_file))
-
-        # Build collision map: existing entries + planned, but exclude entries
-        # whose artifact_id is being re-planned (they're about to be reassigned).
-        replanned_ids = {aid for aid, _ in planned}
-        used_files: dict[str, str] = {
-            ofile: aid
-            for ofile, aid in self.cache_manager.output_file_assignments().items()
-            if aid not in replanned_ids
-        }
-
-        # Second pass: assign collision-free filenames and call plan_task
-        for artifact_id, requested_file in planned:
-            output_file = requested_file
-            if output_file in used_files and used_files[output_file] != artifact_id:
-                stem, ext = os.path.splitext(output_file)
-                suffix = 2
-                while f"{stem}_{suffix}{ext}" in used_files:
-                    suffix += 1
-                output_file = f"{stem}_{suffix}{ext}"
-                logger.warning(
-                    "Filename collision: '%s' renamed to '%s' (conflict with %s)",
-                    requested_file,
-                    output_file,
-                    used_files[requested_file],
-                )
-            used_files[output_file] = artifact_id
-            self.cache_manager.plan_task(artifact_id, output_file=output_file)
+            artifact_id = (
+                "overview:root"
+                if task.doc_id == "overview:root"
+                else overview_artifact_id(task.doc_id)
+                if task.kind == "overview"
+                else module_artifact_id(task.doc_id)
+            )
+            output_file = task.output_file
+            existing = self.cache_manager.get_entry(artifact_id)
+            if existing and existing.output_file and existing.output_file != output_file:
+                self.cache_manager.invalidate(artifact_id)
+            self.cache_manager.plan_task(
+                artifact_id,
+                output_file=output_file,
+                depends_on=task.depends_on,
+            )
 
         self.cache_manager.update_metadata(
             repo_commit=self.commit_id or "",

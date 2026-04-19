@@ -91,6 +91,7 @@ class PipelineContext:
     generator: Any = None
     cancel_token: Any = None
     commit_id: str = ""
+    rename_map: dict[str, str] = field(default_factory=dict)
     result: GenerationResult = field(default_factory=GenerationResult)
 
 

@@ -17,7 +17,18 @@ from tqdm import tqdm
 
 from codewiki.src.be.cache_manager import module_artifact_id, overview_artifact_id
 from codewiki.src.be.errors import CancellationError, ErrorCategory, LLMError
-from codewiki.src.be.documentation_tree_utils import compute_module_input_hash, stable_hash
+from codewiki.src.be.documentation_tree_utils import (
+    compute_module_input_hash,
+    select_effective_component_ids,
+    stable_hash,
+)
+from codewiki.src.be.parent_segments import (
+    compute_assembled_parent_input_hash,
+    compute_child_segment_input_hash,
+    compute_opening_input_hash,
+    compute_overview_input_hash,
+    generate_or_assemble_parent_doc,
+)
 from codewiki.src.be.pipeline import ModuleFailure, ModuleSkip, ModuleSummary
 from codewiki.src.be.prompt_template import PROMPT_VERSION
 from codewiki.src.utils import doc_id_for_path
@@ -131,10 +142,25 @@ async def run_module_queue(
     cache_manager=None,
     progress_factory: Callable[..., Any] = tqdm,
     cancel_token=None,
+    middleware=None,
 ) -> ModuleSummary:
     ROOT_KEY = "__root__"
     max_concurrent = config.max_concurrent
     summary = ModuleSummary()
+
+    def _structural_snapshot(tree: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, info in tree.items():
+            children = info.get("children") or {}
+            out[key] = {
+                "module_id": info.get("module_id"),
+                "path": info.get("path"),
+                "_doc_filename": info.get("_doc_filename"),
+                "children": _structural_snapshot(children) if isinstance(children, dict) else {},
+            }
+        return out
+
+    initial_skeleton = _structural_snapshot(graph_tree)
 
     all_tasks: Dict[str, tuple] = {}
     pending_count: Dict[str, int] = {}
@@ -281,53 +307,73 @@ async def run_module_queue(
                     if pending_count[parent_key] == 0:
                         del pending_count[parent_key]
                         if cache_manager:
-                            parent_doc_id = (
-                                "root"
-                                if parent_key == ROOT_KEY
-                                else doc_id_for_path(graph_tree, all_tasks[parent_key][0])
-                            )
-                            parent_artifact = overview_artifact_id(parent_doc_id)
-                            child_keys_for_parent = [
-                                child_key
-                                for child_key, value in child_to_parent.items()
-                                if value == parent_key
-                            ]
-                            stale_count = 0
-                            child_doc_ids: list[str] = []
-                            child_seg_hashes: list[str] = []
-                            for child_key in child_keys_for_parent:
-                                child_path, child_name, child_info, _ = all_tasks[child_key]
-                                child_doc_id = doc_id_for_path(graph_tree, child_path)
-                                child_doc_ids.append(child_doc_id)
-                                child_module_hash = compute_module_input_hash(
-                                    child_name,
-                                    child_path,
-                                    child_info,
-                                    components,
-                                    config,
-                                    assigned_file=child_info.get("_doc_filename", ""),
-                                )
-                                seg_current_hash = stable_hash([child_module_hash, PROMPT_VERSION])
-                                child_seg_hashes.append(seg_current_hash)
-                                seg_artifact = f"{parent_artifact}:child:{child_doc_id}"
-                                if not cache_manager.is_valid(seg_artifact, seg_current_hash):
-                                    stale_count += 1
-
-                            arch_current_hash = stable_hash(
-                                [
-                                    *child_doc_ids,
-                                    *child_seg_hashes,
-                                    config.output_language,
-                                    PROMPT_VERSION,
+                            if parent_key != ROOT_KEY:
+                                parent_path, parent_name, parent_info, _ = all_tasks[parent_key]
+                                parent_doc_id = doc_id_for_path(graph_tree, parent_path)
+                                parent_artifact = module_artifact_id(parent_doc_id)
+                                child_keys_for_parent = [
+                                    child_key
+                                    for child_key, value in child_to_parent.items()
+                                    if value == parent_key
                                 ]
-                            )
-                            arch_artifact = f"{parent_artifact}:arch_intro"
-                            if not cache_manager.is_valid(arch_artifact, arch_current_hash):
-                                stale_count += 1
-                            if stale_count == 0:
-                                await done_queue.put((parent_key, True, False, None))
-                                active_tasks += 1
-                                continue
+                                direct_child_pairs: list[tuple[str, str]] = []
+                                child_seg_hashes: list[str] = []
+                                for child_key in child_keys_for_parent:
+                                    child_path, child_name, child_info, _ = all_tasks[child_key]
+                                    child_doc_id = doc_id_for_path(graph_tree, child_path)
+                                    child_input_hash = cache_manager.get_input_hash(
+                                        module_artifact_id(child_doc_id)
+                                    ) or compute_module_input_hash(
+                                        child_name,
+                                        child_path,
+                                        child_info,
+                                        components,
+                                        config,
+                                        assigned_file=child_info.get("_doc_filename", ""),
+                                    )
+                                    direct_child_pairs.append((child_doc_id, child_input_hash))
+                                    child_seg_hashes.append(
+                                        compute_child_segment_input_hash(
+                                            child_module_id=child_doc_id,
+                                            child_title=child_info.get("title", child_name),
+                                            child_path=child_info.get("path", ""),
+                                            child_description=child_info.get("description", ""),
+                                            child_input_hash=child_input_hash,
+                                            output_language=config.output_language,
+                                        )
+                                    )
+
+                                parent_hash = compute_assembled_parent_input_hash(
+                                    opening_hash=compute_opening_input_hash(
+                                        title=parent_info.get("title", parent_name),
+                                        path=parent_info.get("path", parent_name),
+                                        description=parent_info.get("description", ""),
+                                        output_language=config.output_language,
+                                    ),
+                                    overview_hash=compute_overview_input_hash(
+                                        title=parent_info.get("title", parent_name),
+                                        path=parent_info.get("path", parent_name),
+                                        description=parent_info.get("description", ""),
+                                        direct_child_pairs=direct_child_pairs,
+                                        output_language=config.output_language,
+                                    ),
+                                    child_segment_hashes=child_seg_hashes,
+                                    output_language=config.output_language,
+                                )
+                                parent_output = parent_info.get("_doc_filename", "")
+                                parent_path_on_disk = (
+                                    os.path.join(working_dir, parent_output)
+                                    if parent_output
+                                    else ""
+                                )
+                                if (
+                                    cache_manager.is_valid(parent_artifact, parent_hash)
+                                    and parent_path_on_disk
+                                    and os.path.exists(parent_path_on_disk)
+                                ):
+                                    await done_queue.put((parent_key, True, False, None))
+                                    active_tasks += 1
+                                    continue
                         if parent_key == ROOT_KEY:
                             logger.info("🔓 All top-level modules done — enqueueing root overview")
                         else:
@@ -430,40 +476,57 @@ async def run_module_queue(
                         else:
                             path, name, info, _ = all_tasks[key]
                             task_doc_id = doc_id_for_path(graph_tree, path)
-                            task_artifact_id = (
-                                overview_artifact_id(task_doc_id)
-                                if info.get("children")
-                                else module_artifact_id(task_doc_id)
-                            )
-                            task_input_hash = compute_module_input_hash(
-                                name,
-                                path,
-                                info,
-                                components,
-                                config,
-                                assigned_file=info.get("_doc_filename", ""),
-                            )
+                            task_artifact_id = module_artifact_id(task_doc_id)
+                            task_component_ids = select_effective_component_ids(info, components)
                             if cache_manager:
                                 cache_manager.mark_running(task_artifact_id)
-                            process_args = (
-                                name,
-                                components,
-                                info.get("components", []),
-                                path,
-                                working_dir,
-                                tree_manager,
-                            )
-                            process_kwargs = {}
-                            if accepts_cache_manager and cache_manager is not None:
-                                process_kwargs["cache_manager"] = cache_manager
-                            _, task_models_used = await process_module(
-                                *process_args, **process_kwargs
-                            )
-                            if cache_manager:
+                            if info.get("children"):
+                                if middleware is None:
+                                    raise RuntimeError(
+                                        "run_module_queue requires middleware= when the tree contains parent nodes"
+                                    )
+                                assembly = await generate_or_assemble_parent_doc(
+                                    parent_doc_id=info.get("module_id") or task_doc_id,
+                                    parent_node=info,
+                                    working_dir=working_dir,
+                                    cache_dir=cache_manager.cache_dir,
+                                    cache_manager=cache_manager,
+                                    middleware=middleware,
+                                    cluster_model=config.cluster_model,
+                                    output_language=config.output_language,
+                                )
+                                task_input_hash = assembly.input_hash
+                                task_models_used = assembly.model
+                                output_path = assembly.output_path
+                            else:
+                                task_input_hash = compute_module_input_hash(
+                                    name,
+                                    path,
+                                    info,
+                                    components,
+                                    config,
+                                    assigned_file=info.get("_doc_filename", ""),
+                                )
+                                process_args = (
+                                    name,
+                                    components,
+                                    task_component_ids,
+                                    path,
+                                    working_dir,
+                                    tree_manager,
+                                )
+                                process_kwargs = {}
+                                if accepts_cache_manager and cache_manager is not None:
+                                    process_kwargs["cache_manager"] = cache_manager
+                                _, task_models_used = await process_module(
+                                    *process_args, **process_kwargs
+                                )
                                 output_file = info.get("_doc_filename", "")
                                 output_path = (
                                     os.path.join(working_dir, output_file) if output_file else ""
                                 )
+                            if cache_manager:
+                                output_file = info.get("_doc_filename", "")
                                 cache_manager.mark_done(
                                     task_artifact_id,
                                     input_hash=task_input_hash,
@@ -506,11 +569,7 @@ async def run_module_queue(
                     cancelled_artifact_id = (
                         "overview:root"
                         if key == ROOT_KEY
-                        else (
-                            overview_artifact_id(doc_id_for_path(graph_tree, all_tasks[key][0]))
-                            if all_tasks[key][2].get("children")
-                            else module_artifact_id(doc_id_for_path(graph_tree, all_tasks[key][0]))
-                        )
+                        else module_artifact_id(doc_id_for_path(graph_tree, all_tasks[key][0]))
                     )
                     entry = cache_manager.get_entry(cancelled_artifact_id)
                     if entry and entry.status == "running":
@@ -522,11 +581,7 @@ async def run_module_queue(
                     failed_artifact_id = (
                         "overview:root"
                         if key == ROOT_KEY
-                        else (
-                            overview_artifact_id(doc_id_for_path(graph_tree, all_tasks[key][0]))
-                            if all_tasks[key][2].get("children")
-                            else module_artifact_id(doc_id_for_path(graph_tree, all_tasks[key][0]))
-                        )
+                        else module_artifact_id(doc_id_for_path(graph_tree, all_tasks[key][0]))
                     )
                     cache_manager.mark_failed(failed_artifact_id, str(e))
                 error_message = str(e)
@@ -553,6 +608,9 @@ async def run_module_queue(
             progress.close()
         except (ValueError, OSError):
             pass  # stderr may already be closed (e.g. during shutdown)
+    assert _structural_snapshot(graph_tree) == initial_skeleton, (
+        "module_tree was mutated during scheduling — Plan 2 forbids this"
+    )
     return summary
 
 
@@ -569,26 +627,26 @@ async def fill_missing_module_docs(
 ) -> ModuleSummary:
     """Retry missing module docs using the same dependency-aware queue."""
 
-    def _count_missing(tree: Dict[str, Any], path: List[str]) -> int:
-        count = 0
-        for name, info in tree.items():
-            module_path = path + [name]
-            if not module_doc_exists(working_dir, module_path, tree):
-                count += 1
-            children = info.get("children") or {}
-            if children:
-                count += _count_missing(children, module_path)
-        return count
-
-    def _missing_names(tree: Dict[str, Any], path: List[str]) -> List[str]:
+    def _retry_names(tree: Dict[str, Any], path: List[str]) -> List[str]:
         names: List[str] = []
         for name, info in tree.items():
             module_path = path + [name]
-            if not module_doc_exists(working_dir, module_path, tree):
-                names.append("-".join(module_path))
+            if cache_manager is None:
+                if not module_doc_exists(working_dir, module_path, tree):
+                    names.append("-".join(module_path))
+            else:
+                doc_id = doc_id_for_path(tree, module_path)
+                entry = cache_manager.get_entry(module_artifact_id(doc_id))
+                if entry is None:
+                    logger.warning(
+                        "fill_pass: encountered tree node %r with no cache entry — this should not happen with a frozen tree",
+                        doc_id,
+                    )
+                elif entry.status in ("failed", "stale", "missing", "running"):
+                    names.append("-".join(module_path))
             children = info.get("children") or {}
             if children:
-                names.extend(_missing_names(children, module_path))
+                names.extend(_retry_names(children, module_path))
         return names
 
     summary = ModuleSummary()
@@ -597,17 +655,17 @@ async def fill_missing_module_docs(
             logger.info("⏹ Fill pass skipped (cancelled)")
             return summary
         module_tree = await tree_manager.get_snapshot()
-        missing_count = _count_missing(module_tree, [])
+        retry_names = _retry_names(module_tree, [])
+        missing_count = len(retry_names)
         if missing_count == 0:
             return summary
-        missing_names = _missing_names(module_tree, [])
         logger.warning(
             "↩ Fill pass %s/%s: %s module(s) without docs — %s%s",
             attempt + 1,
             config.max_retries,
             missing_count,
-            ", ".join(missing_names[:5]),
-            "..." if len(missing_names) > 5 else "",
+            ", ".join(retry_names[:5]),
+            "..." if len(retry_names) > 5 else "",
         )
         batch_summary = await run_module_queue(
             graph_tree=module_tree,

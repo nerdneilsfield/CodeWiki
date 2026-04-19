@@ -177,7 +177,9 @@ def test_cluster_modules_uses_cached_tree_when_commit_matches(tmp_path):
             return_value=cached_tree,
         ) as heal,
         patch("codewiki.src.be.documentation_generator.cluster_modules") as cluster,
-        patch("codewiki.src.be.documentation_generator.freeze_doc_filenames"),
+        patch(
+            "codewiki.src.be.documentation_generator.freeze_doc_filenames"
+        ) as freeze_in_clustering,
         patch("codewiki.src.be.documentation_generator.file_manager.save_json") as save_json,
         patch("codewiki.src.be.generation.glossary.build_glossary", return_value={"term": "def"}),
         patch("codewiki.src.be.generation.glossary.build_link_map", return_value={"doc": "link"}),
@@ -187,11 +189,11 @@ def test_cluster_modules_uses_cached_tree_when_commit_matches(tmp_path):
     # Same config → cluster not called; heal called with available components
     heal.assert_called_once_with(cached_tree, ctx.components)
     cluster.assert_not_called()
+    freeze_in_clustering.assert_not_called()
     assert ctx.module_tree == cached_tree
-    assert any(
-        call.args[1].endswith(FIRST_MODULE_TREE_FILENAME) for call in save_json.call_args_list
-    )
-    assert any(call.args[1].endswith(MODULE_TREE_FILENAME) for call in save_json.call_args_list)
+    saved_basenames = [os.path.basename(call.args[1]) for call in save_json.call_args_list]
+    assert FIRST_MODULE_TREE_FILENAME in saved_basenames
+    assert MODULE_TREE_FILENAME not in saved_basenames
 
 
 def test_cluster_modules_reclusters_and_warns_when_context_setup_fails(tmp_path):
@@ -217,7 +219,9 @@ def test_cluster_modules_reclusters_and_warns_when_context_setup_fails(tmp_path)
         patch(
             "codewiki.src.be.documentation_generator.cluster_modules", return_value=reclustered
         ) as cluster,
-        patch("codewiki.src.be.documentation_generator.freeze_doc_filenames"),
+        patch(
+            "codewiki.src.be.documentation_generator.freeze_doc_filenames"
+        ) as freeze_in_clustering,
         patch("codewiki.src.be.documentation_generator.file_manager.save_json"),
         patch("codewiki.src.be.generation.glossary.build_glossary", return_value={"term": "def"}),
         patch("codewiki.src.be.generation.glossary.build_link_map", return_value={"doc": "link"}),
@@ -230,35 +234,41 @@ def test_cluster_modules_reclusters_and_warns_when_context_setup_fails(tmp_path)
         asyncio.run(gen._cluster_modules(ctx))
 
     cluster.assert_called_once()
+    freeze_in_clustering.assert_not_called()
     assert ctx.module_tree == reclustered
     assert any("Generation context setup failed" in warning for warning in ctx.result.warnings)
 
 
-def test_initialize_generation_state_falls_back_to_add_task_on_initial_collision(tmp_path):
+def test_initialize_cache_from_tree_uses_frozen_doc_filename(tmp_path):
     gen = _make_generator(tmp_path)
     gen._build_initial_context()
-    module_tree = {"Root": {"children": {}}}
+    module_tree = {"Root": {"_doc_filename": "root.md", "children": {}}}
 
     with (
         patch("codewiki.src.be.documentation_generator.cleanup_legacy_internal_files"),
         patch("codewiki.src.be.documentation_generator.dedup_docs_directory"),
-        patch("codewiki.src.be.documentation_generator.freeze_doc_filenames"),
-        patch("codewiki.src.be.documentation_generator.file_manager.save_json"),
     ):
         asyncio.run(gen._initialize_cache_from_tree(module_tree, str(tmp_path / "docs")))
 
     assert gen.cache_manager.get_entry("module:root") is not None
     assert gen.cache_manager.get_entry("overview:root") is not None
+    assert gen.cache_manager.get_output_file("module:root") == "root.md"
 
 
-def test_initialize_generation_state_handles_missing_task_collisions(tmp_path):
+def test_initialize_cache_handles_internal_parents_as_module_artifacts(tmp_path):
     gen = _make_generator(tmp_path)
     gen._build_initial_context()
     module_tree = {
         "Root": {
             "path": "root",
+            "_doc_filename": "root.md",
             "children": {
-                "Child": {"path": "", "children": {}, "components": []},
+                "Child": {
+                    "path": "",
+                    "_doc_filename": "root-child.md",
+                    "children": {},
+                    "components": [],
+                },
             },
             "components": [],
         }
@@ -267,25 +277,28 @@ def test_initialize_generation_state_handles_missing_task_collisions(tmp_path):
     with (
         patch("codewiki.src.be.documentation_generator.cleanup_legacy_internal_files"),
         patch("codewiki.src.be.documentation_generator.dedup_docs_directory"),
-        patch("codewiki.src.be.documentation_generator.freeze_doc_filenames"),
-        patch("codewiki.src.be.documentation_generator.file_manager.save_json"),
     ):
         asyncio.run(gen._initialize_cache_from_tree(module_tree, str(tmp_path / "docs")))
 
-    assert gen.cache_manager.get_output_file("overview:module:root") == "root.md"
+    assert gen.cache_manager.get_output_file("module:root") == "root.md"
     assert gen.cache_manager.get_output_file("module:root-child") == "root-child.md"
 
 
-def test_initialize_cache_renames_against_existing_entries(tmp_path):
-    """Existing cache entry holds 'modules.md'; new plan must rename, not throw."""
+def test_initialize_cache_invalidates_same_artifact_when_output_file_changes(tmp_path):
     gen = _make_generator(tmp_path)
     gen._build_initial_context()
-
-    # Pre-seed cache with an unrelated artifact owning 'modules.md'
-    gen.cache_manager.plan_task("module:legacy_orphan", output_file="modules.md")
+    gen.cache_manager.plan_task("module:modules", output_file="old_modules.md")
+    gen.cache_manager.mark_done(
+        "module:modules",
+        input_hash="abc",
+        output_path=str(tmp_path / "docs" / "old_modules.md"),
+        output_file="old_modules.md",
+        model="test/main",
+    )
 
     module_tree = {
         "Modules": {
+            "_doc_filename": "modules.md",
             "path": "modules",
             "children": {},
             "components": [],
@@ -295,13 +308,18 @@ def test_initialize_cache_renames_against_existing_entries(tmp_path):
     with (
         patch("codewiki.src.be.documentation_generator.cleanup_legacy_internal_files"),
         patch("codewiki.src.be.documentation_generator.dedup_docs_directory"),
-        patch("codewiki.src.be.documentation_generator.freeze_doc_filenames"),
-        patch("codewiki.src.be.documentation_generator.file_manager.save_json"),
     ):
         asyncio.run(gen._initialize_cache_from_tree(module_tree, str(tmp_path / "docs")))
 
-    # Existing entry untouched, new artifact got a renamed file
-    assert gen.cache_manager.get_output_file("module:legacy_orphan") == "modules.md"
-    new_file = gen.cache_manager.get_output_file("module:modules")
-    assert new_file is not None and new_file != "modules.md"
-    assert new_file.startswith("modules_") and new_file.endswith(".md")
+    entry = gen.cache_manager.get_entry("module:modules")
+    assert entry is not None
+    assert entry.status == "missing"
+    assert entry.output_file == "modules.md"
+
+
+def test_initial_context_exposes_middleware_for_stages(tmp_path):
+    gen = _make_generator(tmp_path)
+    ctx = gen._build_initial_context()
+
+    assert ctx.generator is gen
+    assert getattr(ctx.generator, "middleware", None) is not None

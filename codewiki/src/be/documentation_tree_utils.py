@@ -162,6 +162,83 @@ def freeze_doc_filenames(tree: Dict[str, Any]) -> None:
     _walk(tree)
 
 
+_PARENT_SAMPLE_PER_CHILD = 2
+_PARENT_BOUNDARY_BUDGET = 4
+
+
+def select_effective_component_ids(
+    module_info: dict[str, Any],
+    components: dict[str, Any],
+    *,
+    per_child_budget: int = _PARENT_SAMPLE_PER_CHILD,
+    boundary_budget: int = _PARENT_BOUNDARY_BUDGET,
+) -> list[str]:
+    """Return the component IDs that should be sent to the doc-generation prompt.
+
+    Leaf modules use their full component list. Parent modules use a smaller,
+    deterministic set: a few representative components from each child plus a
+    small boundary/high-connectivity supplement.
+    """
+    comp_ids = sorted(dict.fromkeys(module_info.get("components", [])))
+    children = module_info.get("children") or {}
+    if not isinstance(children, dict) or not children:
+        return comp_ids
+    if not comp_ids:
+        return []
+
+    parent_set = set(comp_ids)
+    child_of: dict[str, str] = {}
+    for child_name in sorted(children):
+        child_info = children.get(child_name) or {}
+        for cid in child_info.get("components", []):
+            if cid in parent_set and cid not in child_of:
+                child_of[cid] = child_name
+
+    inbound: dict[str, int] = defaultdict(int)
+    outbound: dict[str, int] = defaultdict(int)
+    external: dict[str, int] = defaultdict(int)
+    cross_child: set[str] = set()
+
+    for cid in comp_ids:
+        deps = set(getattr(components.get(cid), "depends_on", set()) or set())
+        for dep in deps:
+            if dep in parent_set:
+                outbound[cid] += 1
+                inbound[dep] += 1
+                if child_of.get(cid) and child_of.get(dep) and child_of[cid] != child_of[dep]:
+                    cross_child.add(cid)
+                    cross_child.add(dep)
+            else:
+                external[cid] += 1
+
+    def _sort_key(cid: str) -> tuple[int, int, int, str]:
+        return (
+            -(1 if cid in cross_child else 0),
+            -(inbound[cid] + outbound[cid] + external[cid] * 2),
+            -external[cid],
+            cid,
+        )
+
+    selected: list[str] = []
+    seen: set[str] = set()
+
+    for child_name in sorted(children):
+        child_info = children.get(child_name) or {}
+        child_ids = [cid for cid in child_info.get("components", []) if cid in parent_set]
+        for cid in sorted(child_ids, key=_sort_key)[:per_child_budget]:
+            if cid not in seen:
+                selected.append(cid)
+                seen.add(cid)
+
+    for cid in sorted((cid for cid in comp_ids if cid not in seen), key=_sort_key)[
+        :boundary_budget
+    ]:
+        selected.append(cid)
+        seen.add(cid)
+
+    return selected or comp_ids
+
+
 def compute_module_input_hash(
     module_name: str,
     module_path: list[str],
@@ -171,7 +248,7 @@ def compute_module_input_hash(
     assigned_file: str = "",
 ) -> str:
     """Compute the cache input hash for a module artifact."""
-    comp_ids = sorted(module_info.get("components", []))
+    comp_ids = select_effective_component_ids(module_info, components)
     source_hashes: list[str] = []
     for component_id in comp_ids:
         node = components.get(component_id)
@@ -179,6 +256,8 @@ def compute_module_input_hash(
         if source_code:
             source_hashes.append(hashlib.sha256(source_code.encode("utf-8")).hexdigest())
     custom_text = config.get_prompt_addition() if hasattr(config, "get_prompt_addition") else ""
+    if not isinstance(custom_text, str):
+        custom_text = ""
     custom_hash = hashlib.sha256(custom_text.encode("utf-8")).hexdigest()
     output_language = getattr(config, "output_language", "en")
     return stable_hash(
@@ -228,7 +307,7 @@ def build_generation_tasks(
             tasks.append(
                 TaskSpec(
                     doc_id=doc_id,
-                    kind="module" if not nested_child_ids else "overview",
+                    kind="module",
                     module_path=current_path,
                     output_file=info.get("_doc_filename", module_doc_filename(current_path)),
                     depends_on=nested_child_ids,
