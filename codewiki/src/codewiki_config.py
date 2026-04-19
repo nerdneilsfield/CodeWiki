@@ -63,6 +63,23 @@ class PostprocessConfig(BaseModel):
     repair_max_retries: int = 2
 
 
+class RefinementConfig(BaseModel):
+    """Tree refinement stage configuration."""
+
+    max_depth: int = 3
+    min_components_for_split: int = 6
+    min_distinct_files_for_split: int = 4
+    max_cluster_components: int = 1000
+    identity_reuse_threshold: float = 0.70
+
+
+class IncrementalConfig(BaseModel):
+    """Incremental rerun thresholds for change propagation."""
+
+    leaf_rerun_threshold: float = 0.30
+    parent_rerun_threshold: float = 0.30
+
+
 class CodeWikiConfig(BaseModel):
     """Canonical config shared by CLI, backend, and web entry points."""
 
@@ -93,6 +110,8 @@ class CodeWikiConfig(BaseModel):
 
     output_language: str = "en"
     postprocess: PostprocessConfig = Field(default_factory=PostprocessConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
+    incremental: IncrementalConfig = Field(default_factory=IncrementalConfig)
 
     agent_instructions: dict[str, Any] | None = None
     providers: list[ProviderConfig] = Field(default_factory=list)

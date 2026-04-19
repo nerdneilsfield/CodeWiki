@@ -6,7 +6,13 @@ from typing import Any, Iterable, Optional, cast
 import os
 import tomllib
 
-from codewiki.src.codewiki_config import CodeWikiConfig, PostprocessConfig, ProviderConfig
+from codewiki.src.codewiki_config import (
+    CodeWikiConfig,
+    IncrementalConfig,
+    PostprocessConfig,
+    ProviderConfig,
+    RefinementConfig,
+)
 
 DEFAULT_MAX_TOKENS = 32_768
 DEFAULT_MAX_TOKEN_PER_MODULE = 36_369
@@ -202,6 +208,20 @@ def _resolve_agent_instructions(
     return merged or None
 
 
+def _resolve_refinement_section(
+    data: dict[str, Any],
+) -> RefinementConfig:
+    refinement = cast(dict[str, Any], data.get("refinement", {}))
+    return RefinementConfig.model_validate(refinement)
+
+
+def _resolve_incremental_section(
+    data: dict[str, Any],
+) -> IncrementalConfig:
+    incremental = cast(dict[str, Any], data.get("incremental", {}))
+    return IncrementalConfig.model_validate(incremental)
+
+
 def _validate_generation_models(
     *,
     main_model: str,
@@ -230,6 +250,8 @@ def _build_codewiki_config(
     tokens = cast(dict[str, Any], data.get("tokens", {}))
     generation = cast(dict[str, Any], data.get("generation", {}))
     postprocess = cast(dict[str, Any], data.get("postprocess", {}))
+    refinement_config = _resolve_refinement_section(data)
+    incremental_config = _resolve_incremental_section(data)
     docs_dir = str(overrides.output_dir or runtime.get("output_dir", "docs"))
     output_dir = os.path.join(docs_dir, "temp")
     dependency_graph_dir = os.path.join(output_dir, DEPENDENCY_GRAPHS_DIR)
@@ -305,6 +327,8 @@ def _build_codewiki_config(
             else str(runtime.get("output_language", "en"))
         ),
         postprocess=postprocess_config,
+        refinement=refinement_config,
+        incremental=incremental_config,
         agent_instructions=agent_instructions,
         providers=providers,
     )
