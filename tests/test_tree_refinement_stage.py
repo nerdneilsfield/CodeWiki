@@ -6,6 +6,7 @@ import pytest
 
 from codewiki.src.be.cache_manager import CacheManager
 from codewiki.src.be.dependency_analyzer.models.core import Node
+from codewiki.src.be.llm_usage import LLMCallResult
 from codewiki.src.be.refinement_cache import refinement_artifact_id
 from codewiki.src.be.pipeline import PipelineContext
 from codewiki.src.be.stages.tree_refinement import TreeRefinementStage
@@ -54,8 +55,9 @@ def _make_context(tmp_path):
     }
     middleware = MagicMock()
     middleware.call = AsyncMock(
-        return_value=MagicMock(
-            text=json.dumps({"should_split": False, "children": {}}),
+        return_value=LLMCallResult(
+            content=json.dumps({"should_split": False, "children": {}}),
+            usage=None,
             model="fake",
         )
     )

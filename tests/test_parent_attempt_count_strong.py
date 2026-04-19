@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from codewiki.src.be.documentation_generator import DocumentationGenerator
+from codewiki.src.be.llm_usage import LLMCallResult
 from codewiki.src.codewiki_config import CodeWikiConfig, RefinementConfig
 
 
@@ -55,12 +55,15 @@ def test_parent_attempt_count_is_exactly_one(tmp_path):
         }
     }
 
-    refinement_response = SimpleNamespace(
-        text='{"should_split": true, "children": {"Left": {"module_id": "left", "title": "Left", "path": "left", "description": ".", "components": ["a.py::A", "b.py::B"]}, "Right": {"module_id": "right", "title": "Right", "path": "right", "description": ".", "components": ["c.py::C", "d.py::D"]}}}',
+    refinement_response = LLMCallResult(
+        content='{"should_split": true, "children": {"Left": {"module_id": "left", "title": "Left", "path": "left", "description": ".", "components": ["a.py::A", "b.py::B"]}, "Right": {"module_id": "right", "title": "Right", "path": "right", "description": ".", "components": ["c.py::C", "d.py::D"]}}}',
+        usage=None,
         model="fake",
     )
-    no_split_response = SimpleNamespace(
-        text='{"should_split": false, "children": {}}', model="fake"
+    no_split_response = LLMCallResult(
+        content='{"should_split": false, "children": {}}',
+        usage=None,
+        model="fake",
     )
 
     def fake_call(prompt, model=None, temperature=0.0, **_kwargs):
@@ -68,7 +71,7 @@ def test_parent_attempt_count_is_exactly_one(tmp_path):
             if "Parent module: Top" in prompt:
                 return refinement_response
             return no_split_response
-        return SimpleNamespace(text="GENERATED", model=model or "fake")
+        return LLMCallResult(content="GENERATED", usage=None, model=model or "fake")
 
     async def fake_process_module(
         module_name,

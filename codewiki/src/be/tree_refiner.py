@@ -171,7 +171,7 @@ async def refine_one_node(
         result = middleware.call(prompt, model=cluster_model, temperature=0.0)
         if isawaitable(result):
             result = await result
-        parsed = _parse_refinement_response(result.text)
+        parsed = _parse_refinement_response(result.content)
     except Exception as exc:
         cache_manager.mark_failed(artifact_id, error=str(exc))
         raise

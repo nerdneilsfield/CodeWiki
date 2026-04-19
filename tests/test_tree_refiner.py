@@ -5,6 +5,7 @@ import pytest
 
 from codewiki.src.be.cache_manager import CacheManager
 from codewiki.src.be.dependency_analyzer.models.core import Node
+from codewiki.src.be.llm_usage import LLMCallResult
 from codewiki.src.be.refinement_cache import save_refinement_payload
 from codewiki.src.be.tree_refiner import (
     assign_doc_filename,
@@ -38,9 +39,7 @@ def cache_dir(tmp_path):
 
 
 def _llm_returning(payload: dict):
-    fake_result = MagicMock()
-    fake_result.text = json.dumps(payload)
-    fake_result.model = "fake-model"
+    fake_result = LLMCallResult(content=json.dumps(payload), usage=None, model="fake-model")
     middleware = MagicMock()
     middleware.call = AsyncMock(return_value=fake_result)
     return middleware
@@ -273,8 +272,8 @@ async def test_refine_tree_recurses_until_max_depth(cache_dir):
 
     async def fake_call(prompt, model=None, temperature=0.0, **_):
         if "Parent module: Top" in prompt or "父模块标题：Top" in prompt:
-            return MagicMock(
-                text=json.dumps(
+            return LLMCallResult(
+                content=json.dumps(
                     {
                         "should_split": True,
                         "children": {
@@ -295,9 +294,14 @@ async def test_refine_tree_recurses_until_max_depth(cache_dir):
                         },
                     }
                 ),
+                usage=None,
                 model="fake",
             )
-        return MagicMock(text=json.dumps({"should_split": False, "children": {}}), model="fake")
+        return LLMCallResult(
+            content=json.dumps({"should_split": False, "children": {}}),
+            usage=None,
+            model="fake",
+        )
 
     middleware = MagicMock()
     middleware.call = fake_call
@@ -335,8 +339,10 @@ async def test_refine_tree_collision_against_existing_cache(cache_dir):
     cfg = RefinementConfig(max_depth=1, min_components_for_split=2, min_distinct_files_for_split=2)
     middleware = MagicMock()
     middleware.call = AsyncMock(
-        return_value=MagicMock(
-            text=json.dumps({"should_split": False, "children": {}}), model="fake"
+        return_value=LLMCallResult(
+            content=json.dumps({"should_split": False, "children": {}}),
+            usage=None,
+            model="fake",
         )
     )
     refined = await refine_tree(
@@ -388,8 +394,8 @@ async def test_refine_one_node_reuses_identity_from_previous_run(cache_dir):
     )
     middleware = MagicMock()
     middleware.call = AsyncMock(
-        return_value=MagicMock(
-            text=json.dumps(
+        return_value=LLMCallResult(
+            content=json.dumps(
                 {
                     "should_split": True,
                     "children": {
@@ -410,6 +416,7 @@ async def test_refine_one_node_reuses_identity_from_previous_run(cache_dir):
                     },
                 }
             ),
+            usage=None,
             model="fake",
         )
     )
@@ -462,8 +469,8 @@ async def test_refine_one_node_split_successor_kicks_in_when_normal_match_fails(
     components = {cid: _node(cid, f"{cid}.py") for cid in list("abcdefghij")}
     middleware = MagicMock()
     middleware.call = AsyncMock(
-        return_value=MagicMock(
-            text=json.dumps(
+        return_value=LLMCallResult(
+            content=json.dumps(
                 {
                     "should_split": True,
                     "children": {
@@ -477,6 +484,7 @@ async def test_refine_one_node_split_successor_kicks_in_when_normal_match_fails(
                     },
                 }
             ),
+            usage=None,
             model="fake",
         )
     )

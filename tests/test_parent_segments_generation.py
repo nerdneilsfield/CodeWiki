@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from codewiki.src.be.cache_manager import CacheManager
+from codewiki.src.be.llm_usage import LLMCallResult
 from codewiki.src.be.parent_segments import (
     force_invalidate_parent_segments,
     generate_or_assemble_parent_doc,
@@ -36,7 +37,7 @@ async def test_generate_segment_writes_file_and_marks_cache_done(cache_dir):
     cache = CacheManager(cache_dir, flush_interval=60)
     middleware = MagicMock()
     middleware.call = AsyncMock(
-        return_value=MagicMock(text="Generated opening text.", model="fake")
+        return_value=LLMCallResult(content="Generated opening text.", usage=None, model="fake")
     )
     output_path = parent_segment_path(cache_dir, "auth", "opening")
     await generate_segment(
@@ -102,14 +103,14 @@ async def test_generate_or_assemble_parent_doc_writes_assembled(tmp_path, cache_
 
     async def fake_call(prompt, model=None, temperature=0.0, **_):
         if "opening paragraph" in prompt:
-            return MagicMock(text="OPENING TEXT", model="fake")
+            return LLMCallResult(content="OPENING TEXT", usage=None, model="fake")
         if "architecture overview" in prompt:
-            return MagicMock(text="OVERVIEW TEXT", model="fake")
+            return LLMCallResult(content="OVERVIEW TEXT", usage=None, model="fake")
         if "Login" in prompt:
-            return MagicMock(text="LOGIN SUMMARY", model="fake")
+            return LLMCallResult(content="LOGIN SUMMARY", usage=None, model="fake")
         if "Logout" in prompt:
-            return MagicMock(text="LOGOUT SUMMARY", model="fake")
-        return MagicMock(text="UNKNOWN", model="fake")
+            return LLMCallResult(content="LOGOUT SUMMARY", usage=None, model="fake")
+        return LLMCallResult(content="UNKNOWN", usage=None, model="fake")
 
     middleware = MagicMock()
     middleware.call = fake_call
@@ -151,7 +152,7 @@ async def test_generate_or_assemble_parent_doc_reuses_cached_segments(tmp_path, 
     cache.plan_task("module:login", output_file="auth_layer-login.md")
     cache.mark_done("module:login", input_hash="h_login", output_path="x", model="m")
     middleware = MagicMock()
-    middleware.call = AsyncMock(return_value=MagicMock(text="X", model="fake"))
+    middleware.call = AsyncMock(return_value=LLMCallResult(content="X", usage=None, model="fake"))
     await generate_or_assemble_parent_doc(
         parent_doc_id="auth_layer",
         parent_node=parent,

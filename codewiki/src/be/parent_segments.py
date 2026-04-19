@@ -146,7 +146,7 @@ async def generate_segment(
     except Exception as exc:
         cache_manager.mark_failed(artifact_id, error=str(exc))
         raise
-    text = getattr(result, "text", getattr(result, "content", ""))
+    text = result.content
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     tmp = output_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
